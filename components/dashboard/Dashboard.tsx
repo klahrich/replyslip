@@ -6,6 +6,7 @@ import { Agents } from './Agents';
 import { api, errorText, formatTime, SIGNED_OUT_EVENT } from './api';
 import { JoinCodes, type DocPaths } from './JoinCodes';
 import { Tasks } from './Tasks';
+import { WatcherKeys } from './WatcherKeys';
 import { WorkspaceName } from './WorkspaceName';
 import type { Agent, AgentKey, JoinCode } from './types';
 
@@ -106,6 +107,7 @@ export function Dashboard({
       ) : null}
       <JoinCodes codes={codes} agents={agents} origin={origin} paths={paths} onChange={refresh} />
       {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} /> : null}
+      <WatcherKeys origin={origin} />
       <Tasks refreshKey={tick} />
     </>
   );

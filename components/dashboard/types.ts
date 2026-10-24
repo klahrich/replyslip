@@ -83,3 +83,33 @@ export type Message = {
   task_id: string | null;
   created_at: string;
 };
+
+/** POST /api/v1/agents/:id/test-wake. Webhook answers inline; local leaves the wake pending for the watcher. */
+export type TestWakeResult =
+  | { ok: boolean; wake_id: string; status_code?: number; error?: string; pending?: undefined }
+  | { ok: true; pending: true; wake_id: string };
+
+export type WakeStatus = 'pending' | 'delivered' | 'failed' | 'cancelled';
+
+export type Wake = {
+  id: string;
+  agent_id: string;
+  status: WakeStatus;
+  reason: string;
+  task_id: string | null;
+  attempts: number;
+  last_error: string | null;
+  delivered_at: string | null;
+  created_at: string;
+};
+
+export type WatcherKey = {
+  id: string;
+  name: string;
+  prefix: string;
+  created_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+};
+
+export type NewWatcherKey = { id: string; name: string; prefix: string; created_at: string; secret: string };

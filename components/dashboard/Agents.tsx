@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { api, errorText, formatTime } from './api';
 import { OnceSecret } from './CopyButton';
+import { DeliveryPanel } from './DeliveryPanel';
 import type { Agent, AgentKey, NewAgentKey } from './types';
 
 function deliveryLabel(a: Agent): string {
@@ -23,6 +24,33 @@ function deliveryLabel(a: Agent): string {
   return 'Checks the relay itself';
 }
 
+/** Last wake outcome per agent, from GET /api/v1/agents. Shows nothing until a wake has been attempted. */
+function DeliveryHealth({ a }: { a: Agent }) {
+  if (!a.last_delivered_at && !a.last_failed_at) {
+    return a.delivery.mode === 'none' ? null : <p className="dash-muted dash-health">No wakes sent yet.</p>;
+  }
+  const failedLast =
+    !!a.last_failed_at && (!a.last_delivered_at || new Date(a.last_failed_at).getTime() > new Date(a.last_delivered_at).getTime());
+  return (
+    <p className="dash-muted dash-health">
+      <span>Last delivered {formatTime(a.last_delivered_at ?? null)}</span>
+      {a.last_failed_at ? (
+        <>
+          {' · '}
+          <span className={failedLast ? 'dash-health-bad' : undefined}>
+            Last failed {formatTime(a.last_failed_at)}
+            {a.last_error ? (
+              <>
+                : <span translate="no">{a.last_error}</span>
+              </>
+            ) : null}
+          </span>
+        </>
+      ) : null}
+    </p>
+  );
+}
+
 export function Agents({
   agents,
   keys,
@@ -36,6 +64,7 @@ export function Agents({
   const [error, setError] = useState<{ id: string; text: string } | null>(null);
   const [newKey, setNewKey] = useState<{ agentId: string; key: NewAgentKey } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
 
   async function run(id: string, fn: () => Promise<void>) {
     setBusy(id);
@@ -83,9 +112,19 @@ export function Agents({
                     <p className="dash-muted">
                       Joined {formatTime(a.created_at)} · {deliveryLabel(a)}
                     </p>
+                    <DeliveryHealth a={a} />
                   </div>
                   {!revoked ? (
                     <div className="dash-actions">
+                      <button
+                        type="button"
+                        className="dash-textbtn"
+                        aria-expanded={editing === a.id}
+                        aria-controls={`delivery-${a.id}`}
+                        onClick={() => setEditing(editing === a.id ? null : a.id)}
+                      >
+                        Edit delivery
+                      </button>
                       <button
                         type="button"
                         className="dash-textbtn"
@@ -132,6 +171,10 @@ export function Agents({
                     </div>
                   ) : null}
                 </div>
+
+                {editing === a.id && !revoked ? (
+                  <DeliveryPanel agent={a} onSaved={onChange} onClose={() => setEditing(null)} />
+                ) : null}
 
                 {error?.id.startsWith(a.id) ? (
                   <p className="dash-err" role="alert">

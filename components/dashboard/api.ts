@@ -10,12 +10,16 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    /** `error.details` from the response, e.g. `{ issues: [{ path, message }] }` for validation_error. */
+    public details?: unknown,
+    /** Seconds to wait, from `error.retry_after_seconds` or the Retry-After header (429 only). */
+    public retryAfterSeconds?: number,
   ) {
     super(message);
   }
 }
 
-export async function api<T>(path: string, init?: { method?: 'GET' | 'POST' | 'PATCH'; body?: unknown }): Promise<T> {
+export async function api<T>(path: string, init?: { method?: 'GET' | 'POST' | 'PATCH' | 'PUT'; body?: unknown }): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
@@ -35,11 +39,22 @@ export async function api<T>(path: string, init?: { method?: 'GET' | 'POST' | 'P
     data = null;
   }
   if (!res.ok) {
-    const err = (data as { error?: { code?: string; message?: string } } | null)?.error;
+    const err = (
+      data as { error?: { code?: string; message?: string; details?: unknown; retry_after_seconds?: number } } | null
+    )?.error;
     if (res.status === 401 && typeof window !== 'undefined') {
       window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
     }
-    throw new ApiError(res.status, err?.code ?? 'error', err?.message ?? 'Something went wrong. Try again.');
+    const header = Number(res.headers.get('retry-after'));
+    const retryAfter =
+      typeof err?.retry_after_seconds === 'number' ? err.retry_after_seconds : Number.isFinite(header) && header > 0 ? header : undefined;
+    throw new ApiError(
+      res.status,
+      err?.code ?? 'error',
+      err?.message ?? 'Something went wrong. Try again.',
+      err?.details,
+      retryAfter,
+    );
   }
   return data as T;
 }
