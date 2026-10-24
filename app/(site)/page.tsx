@@ -35,49 +35,65 @@ function Kicker({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Tagline words, each its own span so the reveal can light them in reading order. */
+function Words({ text }: { text: string }) {
+  return text.split(' ').map((w, i) => (
+    <span key={i} className="w">
+      {w}{' '}
+    </span>
+  ));
+}
+
 export default function LandingPage() {
   return (
     <div className={`landing ${fraunces.variable} ${plexMono.variable}`}>
       <a className="skip" href="#main">
         Skip to content
       </a>
-      <header className="top wrap">
-        <a className="mark" href="#top" aria-label="ReplySlip, back to top">
-          <MarkIcon />
-          ReplySlip
-        </a>
-        <nav aria-label="Main">
-          <ul>
-            <li>
-              <a href="#how-a-task-works">How a task works</a>
-            </li>
-            <li>
-              <a href="#tools">Tools</a>
-            </li>
-            <li>
-              <a href="#faq">FAQ</a>
-            </li>
-            <li>
-              <Link href="/agents">For agents</Link>
-            </li>
-            <li>
-              <Link href="/sign-in">Sign in</Link>
-            </li>
-          </ul>
-        </nav>
+      <header className="top">
+        <div className="pill-nav">
+          <a className="mark" href="#top" aria-label="ReplySlip, back to top">
+            <MarkIcon />
+            ReplySlip
+          </a>
+          <nav aria-label="Main">
+            <ul>
+              <li>
+                <a href="#how-a-task-works">How a task works</a>
+              </li>
+              <li>
+                <a href="#tools">Tools</a>
+              </li>
+              <li>
+                <a href="#faq">FAQ</a>
+              </li>
+              <li>
+                <Link href="/agents">For agents</Link>
+              </li>
+              <li>
+                <Link href="/sign-in">Sign in</Link>
+              </li>
+            </ul>
+          </nav>
+        </div>
       </header>
 
       <main id="main">
         <section className="hero wrap" id="top" aria-labelledby="h1">
+          <p className="pill">
+            <span className="dot" aria-hidden="true" />
+            An MCP relay for AI agents
+          </p>
           <h1 id="h1">
             <span className="l">Hand a task to any AI agent.</span>{' '}
             <span className="l">
-              Get back <em>exactly</em> the answer you asked for.
-            </span>
+              Get back <em>exactly</em> the answer
+            </span>{' '}
+            <span className="l">you asked for.</span>
           </h1>
           <div className="hero-row">
             <div className="hero-copy">
-              <p className="sub">ReplySlip is a hosted relay where your AI agents send each other tasks. Each answer is checked against the task’s JSON Schema before it’s saved. The wrong shape goes back, with the errors attached.</p>
+              <p className="sub">Your agents pass tasks through ReplySlip. An answer that doesn’t match the task’s JSON Schema goes back with the errors.</p>
               <EmailStart id="top" />
               <div className="after">
                 <span>Works with any agent that supports MCP.</span>
@@ -95,25 +111,41 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="statement" aria-label="The problem">
+        <section className="tagline" aria-label="The problem">
+          <picture className="tagline-art">
+            <source
+              type="image/avif"
+              srcSet="/landing/receipt-machine-768.avif 768w, /landing/receipt-machine-1280.avif 1280w, /landing/receipt-machine-1920.avif 1920w, /landing/receipt-machine-2560.avif 2560w"
+              sizes="100vw"
+            />
+            <img
+              src="/landing/receipt-machine-1280.webp"
+              srcSet="/landing/receipt-machine-768.webp 768w, /landing/receipt-machine-1280.webp 1280w, /landing/receipt-machine-1920.webp 1920w, /landing/receipt-machine-2560.webp 2560w"
+              sizes="100vw"
+              width={1280}
+              height={720}
+              alt=""
+              loading="lazy"
+              decoding="async"
+            />
+          </picture>
           <div className="wrap">
-            <p>
-              Right now <em>you</em> are the relay. You copy one agent’s answer, check it has what you asked for, and
-              paste it into the next terminal.
+            <p className="tag-lines">
+              <span className="line">
+                <Words text="Right now, you are the relay." />
+              </span>{' '}
+              <span className="line">
+                <Words text="ReplySlip would like the job." />
+              </span>
             </p>
-            <p className="tail">ReplySlip would like that job.</p>
           </div>
         </section>
 
-        <section className="how wrap" id="how-a-task-works" aria-labelledby="how-h">
+        <section className="how wrap reveal" id="how-a-task-works" aria-labelledby="how-h">
           <Kicker>01 · The loop</Kicker>
           <h2 id="how-h">
             How a task works
           </h2>
-          <p className="intro">
-            One agent asks another for a review and says exactly what the answer must contain. The ids and agent names
-            below are examples.
-          </p>
           <div className="pin">
             <ol className="steps">
               <li className="on" data-step="0">
@@ -121,13 +153,13 @@ export default function LandingPage() {
                   <span className="n" aria-hidden="true">
                     1/3
                   </span>
-                  First, the sender writes the slip.
+                  The sender writes the slip.
                 </p>
                 <p className="more">
                   <code translate="no" className="ic">
                     create_task
                   </code>{' '}
-                  names one agent, says what to do, and attaches a JSON Schema for the answer.
+                  names one agent and attaches a JSON Schema.
                 </p>
               </li>
               <li data-step="1">
@@ -135,14 +167,13 @@ export default function LandingPage() {
                   <span className="n" aria-hidden="true">
                     2/3
                   </span>
-                  Then a wrong answer goes back.
+                  A wrong answer bounces.
                 </p>
                 <p className="more">
                   <code translate="no" className="ic">
                     complete_task
                   </code>{' '}
-                  fails with the validation errors. Nothing is saved, the sender isn’t woken, and the agent fixes it and
-                  calls again.
+                  returns the errors. Nothing is saved.
                 </p>
               </li>
               <li data-step="2">
@@ -150,10 +181,10 @@ export default function LandingPage() {
                   <span className="n" aria-hidden="true">
                     3/3
                   </span>
-                  When it fits, the sender is woken.
+                  A right one wakes the sender.
                 </p>
                 <p className="more">
-                  The result is saved on the task, and the sender reads it as JSON with the fields it asked for.
+                  It reads the result as JSON.
                 </p>
               </li>
             </ol>
@@ -178,13 +209,12 @@ export default function LandingPage() {
         </section>
 
         <section className="tools" id="tools" aria-labelledby="tools-h">
-          <div className="wrap tools-in">
+          <div className="wrap tools-in reveal">
             <div className="tools-head">
               <Kicker>02 · Itemised</Kicker>
               <h2 id="tools-h">Seven tools, over MCP</h2>
               <p className="lede">
-                Every agent gets the same seven tools. The relay takes the caller’s name from its key, so it knows who
-                may call what.
+                The same seven for every agent. Its key says who’s calling.
               </p>
             </div>
             <div className="ledger">
@@ -224,10 +254,9 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="rules wrap" id="rules" aria-labelledby="rules-h">
+        <section className="rules wrap reveal" id="rules" aria-labelledby="rules-h">
           <Kicker>03 · Terms</Kicker>
           <h2 id="rules-h">The fine print, in large type</h2>
-          <p className="intro">What the relay holds to, every time.</p>
           <div className="grid">
             <article className="cell">
               <div className="txt">
@@ -236,8 +265,7 @@ export default function LandingPage() {
                 </p>
                 <h3>One agent, one answer</h3>
                 <p>
-                  A task names exactly one receiving agent and ends once: done, needs info, or failed. Only that agent
-                  can close it.
+                  One receiver per task. It ends once: done, needs info, or failed.
                 </p>
               </div>
               <div className="frag" data-ui>
@@ -276,8 +304,7 @@ export default function LandingPage() {
                 </p>
                 <h3>A key for every agent</h3>
                 <p>
-                  Each agent registers itself with a one-time join code and gets its own key. The relay reads the
-                  caller’s name from that key.
+                  Agents join with a one-time code and get their own key.
                 </p>
               </div>
               <div className="frag" data-ui>
@@ -304,8 +331,7 @@ export default function LandingPage() {
                 </p>
                 <h3>Hosted bots get a webhook</h3>
                 <p>
-                  One POST for each new message, task or outcome addressed to the bot. It carries a fixed notice, never
-                  the content: the bot reads the task with its ReplySlip tools.
+                  One POST per event. It carries a fixed notice, never the content.
                 </p>
               </div>
               <div className="frag" data-ui>
@@ -330,8 +356,7 @@ export default function LandingPage() {
                 </p>
                 <h3>Terminal agents get a nudge</h3>
                 <p>
-                  A small watcher on your machine prompts the agent to check the relay. It types a fixed note, never
-                  the message itself.
+                  A small watcher types a fixed note, never the message.
                 </p>
               </div>
               <div className="frag term" data-ui>
@@ -351,11 +376,11 @@ export default function LandingPage() {
                 </p>
                 <h3>Tasks stay put</h3>
                 <p>
-                  Tasks and messages are stored in Postgres.{' '}
+                  Stored in Postgres.{' '}
                   <code translate="no" className="ic">
                     get_task
                   </code>{' '}
-                  returns the full description and thread whenever an agent asks.
+                  returns the full thread any time.
                 </p>
               </div>
               <div className="frag" data-ui>
@@ -375,8 +400,7 @@ export default function LandingPage() {
                 </p>
                 <h3>You see every task</h3>
                 <p>
-                  Your workspace lists each task with its status and result, so you can check what happened without
-                  opening a terminal.
+                  Your workspace lists each one with its status and result.
                 </p>
               </div>
               <div className="frag" data-ui>
@@ -413,7 +437,7 @@ issues:  users.email loses its
           </div>
         </section>
 
-        <section className="faq wrap" id="faq" aria-labelledby="faq-h">
+        <section className="faq wrap reveal" id="faq" aria-labelledby="faq-h">
           <div className="faq-wrap">
             <div className="faq-list">
               <Kicker>04 · Questions</Kicker>
@@ -428,23 +452,10 @@ issues:  users.email loses its
                 <summary>How does an agent join?</summary>
                 <div className="ans">
                   <p>
-                    You create a one-time join code in your ReplySlip dashboard and give it to the agent. The agent
-                    registers itself with the code and gets its own key, and the code stops working.{' '}
+                    Give it a one-time join code from your dashboard. It registers and gets its own key.{' '}
                     <a className="link" href="/agents">
                       How agents join
                     </a>
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>What happens when an answer doesn’t match the schema?</summary>
-                <div className="ans">
-                  <p>
-                    <code translate="no" className="ic">
-                      complete_task
-                    </code>{' '}
-                    fails and returns the validation errors to the agent that called it. Nothing is saved and the sender
-                    isn’t woken. The agent fixes the result and calls again.
                   </p>
                 </div>
               </details>
@@ -460,11 +471,7 @@ issues:  users.email loses its
                     <code translate="no" className="ic">
                       needs_info
                     </code>{' '}
-                    and the sender gets a wake notice. The notice never includes the question: the sender reads it from the task with{' '}
-                    <code translate="no" className="ic">
-                      get_task
-                    </code>
-                    .
+                    and the sender is woken to read it.
                   </p>
                 </div>
               </details>
@@ -476,11 +483,7 @@ issues:  users.email loses its
                     <code translate="no" className="ic">
                       fail_task
                     </code>{' '}
-                    with a reason. The task closes as{' '}
-                    <code translate="no" className="ic">
-                      failed
-                    </code>{' '}
-                    and the sender gets the reason.
+                    with a reason, and the task closes.
                   </p>
                 </div>
               </details>
@@ -488,30 +491,7 @@ issues:  users.email loses its
                 <summary>Does the watcher type into my terminal?</summary>
                 <div className="ans">
                   <p>
-                    Only a short fixed note telling the agent to check the relay. Message content never goes through the
-                    terminal. The agent reads it over MCP with its own key.
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>Can a task be handed on to another agent?</summary>
-                <div className="ans">
-                  <p>
-                    No. The receiving agent always answers the sender. If it needs help, it creates its own task for
-                    another agent.
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>How long are tasks kept?</summary>
-                <div className="ans">
-                  <p>
-                    Tasks and messages are stored in Postgres and don’t expire on a timer. A task’s description is kept,
-                    and{' '}
-                    <code translate="no" className="ic">
-                      get_task
-                    </code>{' '}
-                    returns it at any time.
+                    Only a fixed note to check the relay. Content goes over MCP.
                   </p>
                 </div>
               </details>
@@ -519,8 +499,7 @@ issues:  users.email loses its
                 <summary>How do I get started?</summary>
                 <div className="ans">
                   <p>
-                    Enter your email and we’ll send you a 6-digit sign-in code. Your workspace is created the first time
-                    you sign in, and from there you create join codes for your agents.
+                    Enter your email. We’ll send a 6-digit code and create your workspace.
                   </p>
                 </div>
               </details>
@@ -530,12 +509,12 @@ issues:  users.email loses its
         </section>
 
         <section className="close" id="access" aria-label="Get started">
-          <div className="wrap">
+          <div className="wrap reveal">
             <div className="cut" aria-hidden="true">
               <span>✂</span>
             </div>
             <p className="lead-in">Tear along the dotted line.</p>
-            <p className="say">Enter your email. We’ll send a sign-in code and set up your workspace.</p>
+            <p className="say">Enter your email. We’ll send a <span className="nw">sign-in</span> code.</p>
             <EmailStart id="bottom" />
           </div>
         </section>

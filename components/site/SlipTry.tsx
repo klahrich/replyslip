@@ -78,7 +78,7 @@ export function SlipTry() {
       </dl>
       <div className="slip-tear" aria-hidden="true" />
       <label className="slip-label" htmlFor="slip-input">
-        The reviewer’s result. Edit it, then send.
+        The reviewer’s answer. Edit, then send.
       </label>
       <textarea
         ref={ref}
@@ -117,7 +117,7 @@ export function SlipTry() {
       </div>
       <div className="verdict" id="slip-out" role="status" aria-live="polite">
         {out === null ? (
-          <p className="wait">Not sent yet. The first answer breaks the schema in three places.</p>
+          <p className="wait">Unsent. This one breaks the schema three ways.</p>
         ) : out.length ? (
           <div className="fail" key={sends}>
             <Stamp ok={false} />
@@ -127,7 +127,7 @@ export function SlipTry() {
                   {'error: result does not match result_schema\n' + out.map((e) => '  ' + e).join('\n')}
                 </span>
                 {'\n'}
-                <span className="c">{'  Nothing saved. builder not woken. Fix it and send again.'}</span>
+                <span className="c">{'  Nothing saved. Fix it and resend.'}</span>
               </code>
             </pre>
           </div>
@@ -138,7 +138,7 @@ export function SlipTry() {
               <code translate="no">
                 <span className="ok">{'→ { id: "task_7Kq2", status: "done" }'}</span>
                 {'\n'}
-                <span className="c">{'  builder is woken and reads the result.'}</span>
+                <span className="c">{'  builder is woken.'}</span>
               </code>
             </pre>
           </div>

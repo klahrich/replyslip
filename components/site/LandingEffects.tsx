@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 
 /**
  * Progressive enhancements only; every element is visible and readable before this runs.
- * The task-list status flip, the pinned "how a task works" stage and the FAQ pane.
+ * Scroll reveals, the tagline words, the task-list status flip, the pinned "how a task works" stage and the FAQ pane.
  */
 export function LandingEffects() {
   useEffect(() => {
@@ -41,6 +41,51 @@ export function LandingEffects() {
         fo.disconnect();
         document.removeEventListener('visibilitychange', onVis);
         flip.classList.remove('flip');
+      });
+    }
+
+    // scroll reveals: sections fade up as they enter; anything already on screen is shown at once.
+    // The page is only marked (.rv) here, so without script nothing is ever hidden.
+    const root = document.querySelector<HTMLElement>('.landing');
+    if (root && !reduce) {
+      const vh = innerHeight;
+      const shown = (el: Element) => el.getBoundingClientRect().top < vh * 0.92;
+      const rvs = [...document.querySelectorAll<HTMLElement>('.reveal')];
+      const words = [...document.querySelectorAll<HTMLElement>('.tag-lines .w')];
+      rvs.filter(shown).forEach((el) => el.classList.add('in'));
+      words.filter((w) => w.getBoundingClientRect().top < vh * 0.6).forEach((w) => w.classList.add('on'));
+      root.classList.add('rv');
+      const ro = new IntersectionObserver(
+        (es) => {
+          for (const e of es)
+            if (e.isIntersecting || e.boundingClientRect.bottom < 0) {
+              e.target.classList.add('in');
+              ro.unobserve(e.target);
+            }
+        },
+        { rootMargin: '0px 0px -8% 0px' },
+      );
+      rvs.filter((el) => !el.classList.contains('in')).forEach((el) => ro.observe(el));
+      // tagline: each word lights as it crosses a line 40% up the screen; words crossing together are staggered in reading order
+      const wo = new IntersectionObserver(
+        (es) => {
+          const hits = es
+            .filter((e) => e.isIntersecting || e.boundingClientRect.bottom < 0)
+            .map((e) => e.target as HTMLElement);
+          hits.sort((x, y) => words.indexOf(x) - words.indexOf(y));
+          hits.forEach((w, i) => {
+            w.style.transitionDelay = `${i * 90}ms`;
+            w.classList.add('on');
+            wo.unobserve(w);
+          });
+        },
+        { rootMargin: '0px 0px -40% 0px' },
+      );
+      words.filter((w) => !w.classList.contains('on')).forEach((w) => wo.observe(w));
+      cleanups.push(() => {
+        ro.disconnect();
+        wo.disconnect();
+        root.classList.remove('rv');
       });
     }
 
