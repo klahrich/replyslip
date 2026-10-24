@@ -168,9 +168,11 @@ One of:
 { "mode": "webhook", "url": "https://example.com/hook", "auth": { "type": "headers", "headers": { "X-Api-Key": "secret" } } }
 ```
 
-`200` `{ "agent" }`. Tokens, HMAC secrets, and header values are encrypted at rest with `ENCRYPTION_KEY` and are not readable again. Webhook URLs must be public http(s) unless `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1`.
+`200` `{ "agent" }`. Session cookie only. An agent key cannot call this route, so a stolen key cannot redirect wakes. This is the only way to change delivery after registration. `herdr` cannot be set on register.
 
-Pane names are 1–64 characters: letters, numbers, `.`, `_`, `-`.
+Tokens, HMAC secrets, and header values are encrypted at rest with `ENCRYPTION_KEY` and are not readable again. Webhook URLs must be public http(s) unless `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1`.
+
+Pane names are 1–64 characters: letters, numbers, `.`, `_`, `-`. `herdr` delivery needs a current `herdr` binary on `PATH` on the watcher machine. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. Webhook and `none` do not need it.
 
 ## Join codes
 
@@ -226,13 +228,13 @@ No session. `Authorization: Bearer <join-code>`.
 }
 ```
 
-`webhook` is optional. `auth.type` is `none`, `bearer`, `hmac`, or `headers`, same fields as delivery.
+`webhook` is optional. Omit it and `delivery.mode` is `none`: no wake row is created, and the agent calls `list_tasks` itself. Include it and the mode is `webhook`. This route does not accept `herdr`. `auth.type` is `none`, `bearer`, `hmac`, or `headers`, same fields as delivery. After registration only a signed-in human can change delivery, with `PUT /api/v1/agents/:id/delivery`.
 
 `201`:
 
 ```json
 {
-  "agent": { "id": "uuid", "name": "LandingBot", "description": null, "created_at": "...", "revoked_at": null, "delivery": { "mode": "none", "url": null, "auth_type": null, "secret_set": false, "pane": null } },
+  "agent": { "id": "uuid", "name": "LandingBot", "description": null, "created_at": "...", "revoked_at": null, "delivery": { "mode": "webhook", "url": "https://example.com/hook", "auth_type": "none", "secret_set": false, "pane": null } },
   "api_key": "rsk_...",
   "mcp": { "url": "https://<host>/api/mcp", "transport": "http", "header": "Bearer <api_key>" },
   "docs": {
@@ -319,7 +321,7 @@ Session cookie.
 { "wakes": [ { "id": "uuid", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ] }
 ```
 
-There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, or `failure`. Due wakes are leased for 60 seconds so a crashed watcher retries. The CLI must not print anything except the fixed note.
+There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, or `failure`. Due wakes are leased for 60 seconds. The CLI (`replyslip watch`, default poll 3000 ms, minimum 500) runs `herdr agent prompt <pane> <notice>` and acks only when that command exits 0. Any other exit leaves the wake pending until the lease ends. The lease that reaches 8 attempts marks the wake `failed` and does not run herdr. `herdr` must be on `PATH`; ReplySlip does not bundle it. The CLI passes the stored pane name through and does not choose another pane.
 
 ### POST `/api/v1/watcher/ack`
 
@@ -343,7 +345,7 @@ See https://<host>/docs/getting-started.md for arguments and the task rules.
 
 ### GET or POST `/api/cron/wakes`
 
-`Authorization: Bearer <CRON_SECRET>`. The first webhook POST runs in the request that saved the message, task, result, question, or failure. This route only retries webhook wakes that are still pending, with exponential backoff, up to 8 attempts. `vercel.json` schedules GET once a day (`0 8 * * *`) for Vercel Hobby. On Pro, the same route can be scheduled every minute. Herdr wakes are left for the watcher.
+`Authorization: Bearer <CRON_SECRET>`. The first webhook POST runs in the request that saved the message, task, result, question, or failure. This route only retries webhook wakes that are still pending. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts. A new wake does not retry older pending wakes. `vercel.json` schedules GET once a day (`0 8 * * *`) for Vercel Hobby, which may start the run any time in that hour. On Pro, the same route can be scheduled every minute. Herdr wakes are left for the watcher.
 
 `200` `{ "ok": true, "attempted": 0, "delivered": 0 }`. `401` when the secret is missing or wrong.
 
@@ -360,4 +362,6 @@ These are markdown or plain text, not JSON. Absolute links use the request host.
 
 ## Not in v1
 
-Claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, `parent_id`, multi-user workspaces, and a custom domain.
+Decided on 24 October 2026: no WebSocket delivery mode. Vercel functions cannot hold long-lived connections.
+
+Planned, not built: a long-poll wait-for-wakes endpoint; a `whoami` MCP tool that reports the caller's delivery mode; a distinction between `none` that polls on a schedule and `none` that never checks; a dashboard delivery form and a test-wake route; packaging the watcher as `npx replyslip watch`; a startup `herdr --version` check with a clear error and an install link; an adapter around the pane-prompt step so other terminal multiplexers (for example tmux) can be added later; a clearer warning for an unknown pane. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, `parent_id`, multi-user workspaces, and a custom domain.

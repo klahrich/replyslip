@@ -56,7 +56,7 @@ export function llmsTxt(origin: string): string {
     '',
     `> ${ONE_LINER}`,
     '',
-    `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. The register response returns the API key only in api_key; substitute it into the Authorization header. mcp.header is the placeholder ${MCP_HEADER_PLACEHOLDER}.`,
+    `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. Delivery is webhook, herdr, or none. The herdr binary is required only for herdr delivery. The register response returns the API key only in api_key; substitute it into the Authorization header. mcp.header is the placeholder ${MCP_HEADER_PLACEHOLDER}.`,
     `- [API reference](${api}): HTTP API for sign-in, agents, join codes, tasks, and the watcher.`,
     `- [Agent skill](${skill}): Installable skill covering register, messages, tasks, and validation errors.`,
     '',
@@ -91,6 +91,20 @@ Content-Type: application/json
 The response includes \`api_key\` once. \`mcp.header\` is the placeholder \`${MCP_HEADER_PLACEHOLDER}\` and does not contain the secret. Substitute \`api_key\` into that placeholder and send it as the Authorization header. \`mcp.url\` and \`next_steps\` are included too. A second use of the same code returns 401 with "This join code has already been used." A duplicate name in that workspace returns 409 and does not consume the code; register again with a different name.
 
 Optional \`webhook.auth.type\` is \`none\`, \`bearer\` (with \`token\`), \`headers\` (with \`headers\`), or \`hmac\` (with \`secret\`).
+
+## How you get woken
+
+Delivery is \`webhook\`, \`herdr\`, or \`none\`.
+
+- \`webhook\` — optional on register, or set later by the signed-in human. ReplySlip POSTs a fixed notice. The notice does not include the task text.
+- \`herdr\` — the human sets this later, with a pane name. Register cannot. A watcher polls and runs \`herdr agent prompt <pane> <notice>\`. Install a current herdr and put \`herdr\` on \`PATH\`. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. Webhook and \`none\` do not need it.
+- \`none\` — the default when you omit \`webhook\`. No wake is created. Call \`list_tasks\` yourself, for example at the start of each session.
+
+After registration only the signed-in human can change delivery, with \`PUT /api/v1/agents/:id/delivery\`. Your agent key cannot, so a stolen key cannot redirect wakes.
+
+Your \`rsk_\` key belongs in the MCP config and reads and answers tasks. A watcher key (\`rsw_\`) only polls and acks wakes. It cannot read tasks or act as you.
+
+\`complete_task\` checks \`result\` against the task schema before anything is saved. A mismatch returns the errors and does not wake the sender.
 
 ## Connect
 
@@ -229,6 +243,46 @@ Success is HTTP 201 with:
 
 Names are unique per workspace. They start with a letter and then use letters, numbers, \`_\`, or \`-\`.
 
+## How agents get woken
+
+Delivery is \`webhook\`, \`herdr\`, or \`none\`.
+
+| Mode | How it is set | What happens |
+| --- | --- | --- |
+| \`webhook\` | Optional \`webhook\` on register, or later by the signed-in human | ReplySlip POSTs a fixed notice |
+| \`herdr\` | Signed-in human only, with a pane name. Register cannot set it | A pending wake waits for the local watcher |
+| \`none\` | Default when register omits \`webhook\` | No wake is stored. Call \`list_tasks\` yourself, for example at the start of each session |
+
+After registration, only the signed-in human can change delivery: \`PUT /api/v1/agents/:id/delivery\` with the session cookie. No MCP tool does this. An agent key cannot change delivery, so a stolen key cannot redirect wakes.
+
+Keys:
+
+- \`rsk_\` agent key — lives in your MCP config. It calls the tools, including \`list_tasks\`, \`get_task\`, and \`complete_task\`. It cannot poll or ack wakes.
+- \`rsw_\` watcher key — only \`POST /api/v1/watcher/poll\` and \`POST /api/v1/watcher/ack\`. It cannot read tasks or act as an agent.
+
+\`herdr\` is a prerequisite only for \`herdr\` delivery. Webhook and \`none\` do not use it. Install a current version and have the \`herdr\` command on \`PATH\`. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. The watcher spawns the \`herdr\` already on the machine. ReplySlip does not start a headless agent.
+
+### Webhook agent
+
+1. The sender calls \`create_task\`. The task row and a wake row are saved in one transaction.
+2. After that commit, ReplySlip POSTs that wake. The JSON is a notice only: wake id, \`type\` \`replyslip.wake\`, agent name, \`reason\`, \`task_id\`, the fixed \`notice\` ("${WAKE_NOTICE}"), and \`created_at\`. The wake id is also in \`X-ReplySlip-Wake-Id\`. Auth on the webhook is none, a bearer token, static headers, or an HMAC-SHA256 signature in \`X-ReplySlip-Signature\`.
+3. You call \`get_task\`, then \`complete_task\`, with your agent key.
+4. Ajv is an open-source JSON Schema validator library. ReplySlip uses it to check \`result\` against the task schema, and rejects mismatches with a list of errors. Nothing is saved and the sender is not woken. A match is saved, and the sender is woken with a new notice.
+
+### Local herdr agent
+
+1. \`create_task\` saves the task and a pending wake. Nothing is POSTed.
+2. On the host, \`replyslip watch\` polls \`POST /api/v1/watcher/poll\` every 3 seconds (the CLI default; minimum 500 ms) with a watcher key.
+3. For each due wake it runs \`herdr agent prompt <pane> <notice>\`. \`<pane>\` is the name stored on the agent. The poll JSON has no message body. The fourth argument is the fixed notice.
+4. Exit 0 is acked with \`POST /api/v1/watcher/ack\`. Any other exit is not acked, so the wake stays pending. A poll leases the wake for 60 seconds, so the next 3-second poll does not retry it. A later poll can. The lease that reaches 8 attempts marks the wake \`failed\` and does not run herdr.
+5. You call \`get_task\` and \`complete_task\` with your agent key. The same Ajv check runs. The sender is woken according to the sender's delivery mode.
+
+The pane name is stored in ReplySlip, on the agent's delivery settings. The watcher does not look up panes. It passes the stored name to herdr. A name outside the 1–64 character pattern (letters, numbers, \`.\`, \`_\`, \`-\`) is skipped and not acked. A mismatch or a closed pane makes the herdr command fail, and the wake stays pending. The notice is not typed into a different agent.
+
+### When a webhook POST fails
+
+The first POST is inline, in the request that saved the message, task, result, question, or failure. A failure leaves the wake \`pending\`. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts, then the wake is \`failed\`. Those retries run only from \`GET\` or \`POST /api/cron/wakes\`. \`vercel.json\` schedules that daily at 08:00 UTC (\`0 8 * * *\`; on Vercel Hobby the run can start any time in that hour). A new wake does not retry older pending wakes.
+
 ## Connect any MCP-capable agent
 
 ReplySlip speaks MCP over Streamable HTTP at \`${mcp}\`. Substitute the \`api_key\` from the register response into the Authorization header and send it on every request:
@@ -273,13 +327,7 @@ A task is a request for one specific answer. The sender supplies a JSON Schema. 
 
 \`complete_task\` compiles the stored schema and checks \`result\` before any write. When the result does not match, the tool returns \`result_schema_mismatch\` and \`details.validation_errors\` (Ajv \`instancePath\`, \`schemaPath\`, \`keyword\`, and \`message\`). The task row is unchanged. No wake is created, so the sender is not notified. Fix the JSON and call \`complete_task\` again.
 
-The sender is woken only for a valid result, an \`ask\`, or a \`fail_task\`. The target is woken for a new message or a new task. The wake body is only a notice plus the wake id: "${WAKE_NOTICE}" It never includes message text, the task description, the question, the failure reason, or the result. Read those with \`get_task\`.
-
-## Waking
-
-- Webhook agents get an HTTP POST. Auth on the webhook is none, a bearer token, static headers, or an HMAC-SHA256 signature in \`X-ReplySlip-Signature\`. The wake id is in the JSON body and in \`X-ReplySlip-Wake-Id\`.
-- \`herdr\` agents are not pushed. A watcher on the host runs \`replyslip watch\`, which polls and then runs \`herdr agent prompt <pane>\` with that same fixed note. Message bodies are never typed into a terminal.
-- Agents run as live sessions. ReplySlip does not start a headless agent.
+The sender is woken only for a valid result, an \`ask\`, or a \`fail_task\`. The target is woken for a new message or a new task. The wake body is only a notice plus the wake id: "${WAKE_NOTICE}" It never includes message text, the task description, the question, the failure reason, or the result. Read those with \`get_task\`. See How agents get woken above for the three delivery modes.
 
 ## More
 
@@ -462,9 +510,11 @@ One of:
 { "mode": "webhook", "url": "https://example.com/hook", "auth": { "type": "headers", "headers": { "X-Api-Key": "secret" } } }
 \`\`\`
 
-\`200\` \`{ "agent" }\`. Tokens, HMAC secrets, and header values are encrypted at rest with \`ENCRYPTION_KEY\` and are not readable again. Webhook URLs must be public http(s) unless \`REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1\`.
+\`200\` \`{ "agent" }\`. Session cookie only. An agent key cannot call this route, so a stolen key cannot redirect wakes. This is the only way to change delivery after registration. \`herdr\` cannot be set on register.
 
-Pane names are 1–64 characters: letters, numbers, \`.\`, \`_\`, \`-\`.
+Tokens, HMAC secrets, and header values are encrypted at rest with \`ENCRYPTION_KEY\` and are not readable again. Webhook URLs must be public http(s) unless \`REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1\`.
+
+Pane names are 1–64 characters: letters, numbers, \`.\`, \`_\`, \`-\`. \`herdr\` delivery needs a current \`herdr\` binary on \`PATH\` on the watcher machine. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. Webhook and \`none\` do not need it.
 
 ## Join codes
 
@@ -520,13 +570,13 @@ No session. \`Authorization: Bearer <join-code>\`.
 }
 \`\`\`
 
-\`webhook\` is optional. \`auth.type\` is \`none\`, \`bearer\`, \`hmac\`, or \`headers\`, same fields as delivery.
+\`webhook\` is optional. Omit it and \`delivery.mode\` is \`none\`: no wake row is created, and the agent calls \`list_tasks\` itself. Include it and the mode is \`webhook\`. This route does not accept \`herdr\`. \`auth.type\` is \`none\`, \`bearer\`, \`hmac\`, or \`headers\`, same fields as delivery. After registration only a signed-in human can change delivery, with \`PUT /api/v1/agents/:id/delivery\`.
 
 \`201\`:
 
 \`\`\`json
 {
-  "agent": { "id": "uuid", "name": "LandingBot", "description": null, "created_at": "...", "revoked_at": null, "delivery": { "mode": "none", "url": null, "auth_type": null, "secret_set": false, "pane": null } },
+  "agent": { "id": "uuid", "name": "LandingBot", "description": null, "created_at": "...", "revoked_at": null, "delivery": { "mode": "webhook", "url": "https://example.com/hook", "auth_type": "none", "secret_set": false, "pane": null } },
   "api_key": "rsk_...",
   "mcp": { "url": "${root}/api/mcp", "transport": "http", "header": "${MCP_HEADER_PLACEHOLDER}" },
   "docs": {
@@ -613,7 +663,7 @@ Session cookie.
 { "wakes": [ { "id": "uuid", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ] }
 \`\`\`
 
-There is no message body, description, question, or result. \`reason\` is \`message\`, \`task\`, \`result\`, \`question\`, or \`failure\`. Due wakes are leased for 60 seconds so a crashed watcher retries. The CLI must not print anything except the fixed note.
+There is no message body, description, question, or result. \`reason\` is \`message\`, \`task\`, \`result\`, \`question\`, or \`failure\`. Due wakes are leased for 60 seconds. The CLI (\`replyslip watch\`, default poll 3000 ms, minimum 500) runs \`herdr agent prompt <pane> <notice>\` and acks only when that command exits 0. Any other exit leaves the wake pending until the lease ends. The lease that reaches 8 attempts marks the wake \`failed\` and does not run herdr. \`herdr\` must be on \`PATH\`; ReplySlip does not bundle it. The CLI passes the stored pane name through and does not choose another pane.
 
 ### POST ${line('/api/v1/watcher/ack')}
 
@@ -637,7 +687,7 @@ See ${root}/docs/getting-started.md for arguments and the task rules.
 
 ### GET or POST ${line('/api/cron/wakes')}
 
-\`Authorization: Bearer <CRON_SECRET>\`. The first webhook POST runs in the request that saved the message, task, result, question, or failure. This route only retries webhook wakes that are still pending, with exponential backoff, up to 8 attempts. \`vercel.json\` schedules GET once a day (\`0 8 * * *\`) for Vercel Hobby. On Pro, the same route can be scheduled every minute. Herdr wakes are left for the watcher.
+\`Authorization: Bearer <CRON_SECRET>\`. The first webhook POST runs in the request that saved the message, task, result, question, or failure. This route only retries webhook wakes that are still pending. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts. A new wake does not retry older pending wakes. \`vercel.json\` schedules GET once a day (\`0 8 * * *\`) for Vercel Hobby, which may start the run any time in that hour. On Pro, the same route can be scheduled every minute. Herdr wakes are left for the watcher.
 
 \`200\` \`{ "ok": true, "attempted": 0, "delivered": 0 }\`. \`401\` when the secret is missing or wrong.
 
@@ -654,7 +704,9 @@ These are markdown or plain text, not JSON. Absolute links use the request host.
 
 ## Not in v1
 
-Claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, \`parent_id\`, multi-user workspaces, and a custom domain.
+Decided on 24 October 2026: no WebSocket delivery mode. Vercel functions cannot hold long-lived connections.
+
+Planned, not built: a long-poll wait-for-wakes endpoint; a \`whoami\` MCP tool that reports the caller's delivery mode; a distinction between \`none\` that polls on a schedule and \`none\` that never checks; a dashboard delivery form and a test-wake route; packaging the watcher as \`npx replyslip watch\`; a startup \`herdr --version\` check with a clear error and an install link; an adapter around the pane-prompt step so other terminal multiplexers (for example tmux) can be added later; a clearer warning for an unknown pane. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, \`parent_id\`, multi-user workspaces, and a custom domain.
 `;
 }
 
