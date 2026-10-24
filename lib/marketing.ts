@@ -5,8 +5,21 @@ import { users } from '@/db/schema';
 import { safeEqualString } from './crypto';
 import { HttpError } from './errors';
 
+/**
+ * Exact checkbox wordings the server will store. This list is the backend
+ * copy of the frontend's MARKETING_CONSENT_TEXT.
+ */
+export const MARKETING_CONSENT_TEXTS = [
+  'Email me about new plans and features. Unsubscribe anytime.',
+] as const;
+
 /** Checkbox wording is stored as proof. Longer copy is rejected. */
 export const CONSENT_TEXT_MAX = 1000;
+
+/** Flat 400 body when an opt-in sends wording that is not on the allowlist. */
+export class InvalidConsentTextError extends Error {
+  readonly body = { error: 'invalid_consent_text' as const };
+}
 
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PUBLIC_ORIGIN = 'https://replyslip.com';
@@ -46,7 +59,7 @@ export function unsubscribeUrl(userId: string): string {
   return `${origin}/api/v1/unsubscribe?token=${encodeURIComponent(unsubscribeToken(userId))}`;
 }
 
-/** The exact wording to store. Empty and oversized copy is not consent. */
+/** The exact wording to store. Empty copy is not consent. Unknown copy is refused. */
 export function consentTextForOptIn(value: string | undefined): string {
   const text = value?.trim() ?? '';
   if (text.length < 1 || text.length > CONSENT_TEXT_MAX) {
@@ -55,6 +68,9 @@ export function consentTextForOptIn(value: string | undefined): string {
       'validation_error',
       'Consent text is required when opting in to marketing email.',
     );
+  }
+  if (!(MARKETING_CONSENT_TEXTS as readonly string[]).includes(text)) {
+    throw new InvalidConsentTextError();
   }
   return text;
 }
