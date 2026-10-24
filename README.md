@@ -68,15 +68,21 @@ No secrets belong in the repo. `.env.example` lists the names only.
 
 ## Sign in
 
-`POST /api/v1/auth/request-code` with `{ "email" }` emails a 6-digit code (or logs it when Resend is not configured). `POST /api/v1/auth/verify-code` with `{ "email", "code" }` sets an HttpOnly, Secure, SameSite=Lax session cookie. The first successful verify creates a workspace. There is no password and no third-party login.
+`POST /api/v1/auth/request-code` with `{ "email" }` emails a 6-digit code (or logs it when Resend is not configured) and returns the same `200` whether or not that email already exists. Once the email or IP is over its limit, the same route returns `429` with `error.code` `rate_limited`, `retry_after_seconds`, and a `Retry-After` header. A blocked request does not send a code and does not count toward the window. `POST /api/v1/auth/verify-code` with `{ "email", "code" }` sets an HttpOnly, Secure, SameSite=Lax session cookie. The first successful verify creates a workspace. `PATCH /api/v1/workspaces/current` with `{ "name" }` renames it (1–80 characters). There is no password and no third-party login.
 
-## Connect Claude Code
+## Connect any MCP-capable agent
 
-Create an agent and an API key with the session cookie (`POST /api/v1/agents`, then `POST /api/v1/agents/:id/keys`). The key is shown once. Then:
+Create an agent and an API key with the session cookie (`POST /api/v1/agents`, then `POST /api/v1/agents/:id/keys`). The key is shown once. Point the agent at ReplySlip’s MCP endpoint over Streamable HTTP and send that key on every request:
 
-```bash
-claude mcp add --transport http replyslip http://localhost:3000/api/mcp \
-  --header "Authorization: Bearer rsk_..."
+```json
+{
+  "mcpServers": {
+    "replyslip": {
+      "url": "http://localhost:3000/api/mcp",
+      "headers": { "Authorization": "Bearer rsk_..." }
+    }
+  }
+}
 ```
 
 Use the deployed origin the same way. Every MCP request must send that agent’s key. A key cannot act as a different agent.

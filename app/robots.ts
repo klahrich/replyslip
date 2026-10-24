@@ -23,5 +23,6 @@ export default function robots(): MetadataRoute.Robots {
       allow: '/',
       disallow: ['/dashboard', '/dashboard/', '/api', '/api/'],
     })),
+    sitemap: 'https://replyslip.com/sitemap.xml',
   };
 }
