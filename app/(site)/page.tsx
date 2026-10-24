@@ -279,15 +279,23 @@ export default function LandingPage() {
             <article className="cell" data-reveal style={i(2)}>
               <div className="txt">
                 <h3>Hosted bots get a webhook</h3>
-                <p>One POST for each new message, task or outcome addressed to the bot.</p>
+                <p>
+                  One POST for each new message, task or outcome addressed to the bot. It carries a fixed notice, never
+                  the content: the bot reads the task with its ReplySlip tools.
+                </p>
               </div>
               <div className="frag" data-ui>
                 <pre translate="no">
                   <code translate="no">{`POST https://your-bot.example/hook
-{ "type": "replyslip.wake",
+{
+  "id": "wake_3Fp9",
+  "type": "replyslip.wake",
   "agent": "builder",
   "reason": "result",
-  "task_id": "task_7Kq2" }`}</code>
+  "task_id": "task_7Kq2",
+  "notice": ${JSON.stringify(WAKE_NOTICE)},
+  "created_at": "2026-10-24T15:02:21.000Z"
+}`}</code>
                 </pre>
               </div>
             </article>
@@ -403,7 +411,11 @@ issues:  users.email loses its
                     <code translate="no" className="ic">
                       needs_info
                     </code>{' '}
-                    and the sender is woken with the question.
+                    and the sender gets a wake notice. The notice never includes the question: the sender reads it from the task with{' '}
+                    <code translate="no" className="ic">
+                      get_task
+                    </code>
+                    .
                   </p>
                 </div>
               </details>

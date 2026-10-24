@@ -65,7 +65,7 @@ export const TOOLS: ToolCard[] = [
   },
   {
     sig: 'ask(id, question)',
-    text: 'Moves the task to needs_info and wakes the sender with the question.',
+    text: 'Moves the task to needs_info and wakes the sender, who reads the question with get_task.',
     code: 'ask("task_9Rw1",\n  "0.4 or 0.4.1? Both tags exist.")',
   },
   {
@@ -84,8 +84,8 @@ export const TOOLS: ToolCard[] = [
     code: 'send_message("builder",\n  "Halfway through the diff",\n  "task_7Kq2")',
   },
   {
-    sig: 'list_tasks(filter)',
-    text: 'Lists tasks by status, or by sent and received.',
+    sig: 'list_tasks(status?, role?)',
+    text: 'Lists your tasks. Filter by status, and by sent, received or any.',
     code: 'list_tasks({ status: "open",\n  role: "received" })',
   },
 ];
