@@ -1,5 +1,7 @@
 /** Browser helpers for the sign-in routes in app/api/v1/auth. */
 
+import { MARKETING_CONSENT_TEXT } from './marketing-consent';
+
 type ApiError = { error?: { code?: string; message?: string; retry_after_seconds?: number } };
 
 export type AuthResult =
@@ -62,9 +64,16 @@ export async function requestSignInCode(email: string): Promise<AuthResult> {
   }
 }
 
-export async function verifySignInCode(email: string, code: string): Promise<AuthResult> {
+/**
+ * `marketingOptIn` is the sign-in checkbox. Only a checked box sends the
+ * fields; leaving it unchecked sends nothing, which keeps any earlier choice.
+ */
+export async function verifySignInCode(email: string, code: string, marketingOptIn = false): Promise<AuthResult> {
   try {
-    const { status, data } = await post('/api/v1/auth/verify-code', { email, code });
+    const body = marketingOptIn
+      ? { email, code, marketing_opt_in: true, consent_text: MARKETING_CONSENT_TEXT }
+      : { email, code };
+    const { status, data } = await post('/api/v1/auth/verify-code', body);
     if (status === 200) return { ok: true };
     return failure(status, data, {
       invalid_code: 'That code isn’t right. Check the latest email and try again.',

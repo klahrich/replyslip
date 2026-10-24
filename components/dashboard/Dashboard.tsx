@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Agents } from './Agents';
 import { api, errorText, formatTime, SIGNED_OUT_EVENT } from './api';
+import { EmailPrefs } from './EmailPrefs';
 import { JoinCodes, type DocPaths } from './JoinCodes';
 import { Tasks } from './Tasks';
 import { WatcherKeys } from './WatcherKeys';
@@ -28,11 +29,14 @@ async function fetchAll(): Promise<Loaded> {
 export function Dashboard({
   workspace,
   email,
+  marketingOptIn,
   origin,
   paths,
 }: {
   workspace: Workspace;
   email: string;
+  /** user.marketing_opt_in, the same value GET /api/v1/auth/me returns. */
+  marketingOptIn: boolean;
   origin: string;
   paths: DocPaths;
 }) {
@@ -109,6 +113,7 @@ export function Dashboard({
       {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} /> : null}
       <WatcherKeys origin={origin} />
       <Tasks refreshKey={tick} />
+      <EmailPrefs initialOptIn={marketingOptIn} />
     </>
   );
 }

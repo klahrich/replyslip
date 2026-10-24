@@ -10,6 +10,7 @@ import {
   storedSignInEmail,
   verifySignInCode,
 } from './auth-client';
+import { MARKETING_CONSENT_TEXT } from './marketing-consent';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 type Step = 'email' | 'code';
@@ -29,6 +30,7 @@ export function SignInForm({ sent }: { sent: boolean }) {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [resent, setResent] = useState(false);
+  const [marketing, setMarketing] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
 
@@ -73,7 +75,7 @@ export function SignInForm({ sent }: { sent: boolean }) {
     setBusy(true);
     setError('');
     setNotice('');
-    const res = await verifySignInCode(email.trim(), value);
+    const res = await verifySignInCode(email.trim(), value, marketing);
     if (!res.ok) {
       setBusy(false);
       setError(res.message);
@@ -151,6 +153,16 @@ export function SignInForm({ sent }: { sent: boolean }) {
         <button className="btn" type="submit" disabled={busy || !canVerify}>
           {busy ? 'Checking…' : 'Sign in'}
         </button>
+        <div className="si-consent">
+          <input
+            id="si-marketing"
+            name="marketing_opt_in"
+            type="checkbox"
+            checked={marketing}
+            onChange={(e) => setMarketing(e.target.checked)}
+          />
+          <label htmlFor="si-marketing">{MARKETING_CONSENT_TEXT}</label>
+        </div>
         <p
           className={error ? 'form-msg err' : notice ? 'form-msg ok' : 'form-msg'}
           id="si-code-msg"

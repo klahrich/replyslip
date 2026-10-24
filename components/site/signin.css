@@ -8,3 +8,6 @@
 .si .textbtn{background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-decoration:underline;text-underline-offset:.22em;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent)}
 .si .textbtn:disabled{color:var(--muted);cursor:default}
 .si .ok{color:var(--ok-on-bg)}
+.si .si-consent{flex-basis:100%;display:flex;align-items:flex-start;gap:10px;margin-top:6px;font-size:var(--s-small);color:var(--muted)}
+.si .si-consent input{flex:none;width:16px;height:16px;margin:3px 0 0;padding:0;accent-color:var(--accent);cursor:pointer}
+.si .si-consent label{flex:1 1 auto;flex-basis:auto;cursor:pointer}

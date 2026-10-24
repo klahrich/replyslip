@@ -32,6 +32,7 @@ export default async function DashboardPage() {
         created_at: user.workspace.createdAt.toISOString(),
       }}
       email={user.email}
+      marketingOptIn={user.marketingOptIn}
       origin={origin}
       paths={{ llms, skill, gettingStarted, api, mcp }}
     />
