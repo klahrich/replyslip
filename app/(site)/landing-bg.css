@@ -1,0 +1,40 @@
+/* Hero background. One quiet layer behind the header and hero, in the sage accent, fading into --bg before the first band.
+   Pick the variant with BG in app/(site)/page.tsx (data-bg on .lp). CSS and SVG only; text sits on --bg-level contrast. */
+.lp{position:relative;isolation:isolate}
+.lp-bg{position:absolute;inset:0 0 auto;height:clamp(820px,110vh,1100px);z-index:-1;pointer-events:none;overflow:hidden}
+.lp-bg::before{content:"";position:absolute;inset:0}
+
+/* glow: a soft sage aurora behind the slip that drifts very slowly */
+.lp[data-bg=glow] .lp-bg::before{
+  inset:-12% -8%;
+  background:
+    radial-gradient(34% 40% at 64% 36%,color-mix(in srgb,var(--accent) 30%,transparent),color-mix(in srgb,var(--accent) 11%,transparent) 45%,transparent 72%),
+    radial-gradient(26% 26% at 86% 14%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 70%),
+    radial-gradient(30% 34% at 16% 4%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 70%),
+    radial-gradient(46% 26% at 40% 84%,color-mix(in srgb,var(--perf) 16%,transparent),transparent 72%)
+}
+@media (prefers-reduced-motion:no-preference){.lp[data-bg=glow] .lp-bg::before{animation:lp-drift 38s ease-in-out infinite alternate}}
+@keyframes lp-drift{from{transform:translate3d(-2%,-1%,0) scale(1)}to{transform:translate3d(2%,2%,0) scale(1.06)}}
+@media (max-width:899px){.lp[data-bg=glow] .lp-bg::before{background:
+  radial-gradient(75% 26% at 78% 44%,color-mix(in srgb,var(--accent) 22%,transparent),transparent 72%),
+  radial-gradient(60% 22% at 15% 12%,color-mix(in srgb,var(--accent) 8%,transparent),transparent 70%)}}
+
+/* grid: a dot grid in the slip's perforation sage, aligned to the content column, strongest behind the slip and gone at the edges */
+.lp[data-bg=grid] .lp-bg::before{
+  --step:28px;
+  background-image:radial-gradient(circle at 2px 2px,var(--perf) 1.25px,transparent 1.75px);
+  background-size:var(--step) var(--step);
+  background-position:var(--m) 20px;
+  -webkit-mask-image:radial-gradient(60% 55% at 62% 38%,rgb(0 0 0 / .8) 0%,rgb(0 0 0 / .4) 45%,transparent 80%);
+          mask-image:radial-gradient(60% 55% at 62% 38%,rgb(0 0 0 / .8) 0%,rgb(0 0 0 / .4) 45%,transparent 80%)
+}
+@media (max-width:899px){.lp[data-bg=grid] .lp-bg::before{--step:20px;-webkit-mask-image:radial-gradient(90% 45% at 60% 55%,rgb(0 0 0 / .7),transparent 80%);mask-image:radial-gradient(90% 45% at 60% 55%,rgb(0 0 0 / .7),transparent 80%)}}
+
+/* contour: faint topographic lines in sage, like a survey map under the relay */
+.lp[data-bg=contour] .lp-bg::before{
+  background:url(/bg/contours.svg) 50% 0/cover no-repeat;
+  opacity:.2;
+  -webkit-mask-image:radial-gradient(75% 85% at 68% 30%,#000 35%,transparent 88%);
+          mask-image:radial-gradient(75% 85% at 68% 30%,#000 35%,transparent 88%)
+}
+@media (max-width:899px){.lp[data-bg=contour] .lp-bg::before{background-size:auto 100%;background-position:70% 0}}
