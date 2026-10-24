@@ -1,0 +1,14 @@
+/* Soft vertical light bands over the hero glow, like light through blinds.
+   The band layer sits above the lights inside .lp-bg; soft-light brightens a band in proportion to the light under it,
+   so the bands catch the moving glow and vanish on bare --bg. .lp-bg gets an opaque --bg so the blend has a backdrop. */
+.lp-bg{background:var(--bg)}
+.lp-bg .st{position:absolute;inset:0 -60px;display:block;pointer-events:none;
+  background:repeating-linear-gradient(90deg,transparent 0,rgb(200 225 200 / .55) 16px,rgb(200 225 200 / .55) 58px,transparent 74px,transparent 132px);
+  mix-blend-mode:soft-light;opacity:.34;
+  -webkit-mask-image:radial-gradient(70% 75% at 50% 35%,#000 20%,transparent 80%);
+          mask-image:radial-gradient(70% 75% at 50% 35%,#000 20%,transparent 80%);
+  animation:lp-blinds 48s ease-in-out infinite alternate}
+/* GlowBg.tsx sets .lp-idle while the hero is offscreen or the tab is hidden. */
+.lp-bg.lp-idle .st{animation-play-state:paused}
+@keyframes lp-blinds{to{transform:translate3d(28px,0,0)}}
+@media (prefers-reduced-motion:reduce){.lp-bg .st{animation:none}}

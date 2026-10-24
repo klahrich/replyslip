@@ -64,7 +64,9 @@ export function GlowBg() {
     };
     const run = () => {
       cancelAnimationFrame(raf);
-      if (visible && !document.hidden) {
+      const on = visible && !document.hidden;
+      layer.classList.toggle('lp-idle', !on); // pauses the CSS band drift offscreen
+      if (on) {
         last = 0;
         raf = requestAnimationFrame(frame);
       }
@@ -117,6 +119,7 @@ export function GlowBg() {
       <i className="g g1" />
       <i className="g g2" />
       <i className="g g3" />
+      <i className="st" />
     </div>
   );
 }
