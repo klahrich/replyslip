@@ -34,7 +34,7 @@ components/
   dashboard/         join codes, agents, keys, tasks, workspace name
 lib/                 auth, email, agents, tasks, wakes, delivery, MCP, agent docs
 db/                  Drizzle schema (db/schema.ts) and the Postgres client (db/index.ts)
-drizzle/             SQL migrations (0000_init.sql, 0001_local_nudge.sql, 0002_wake_reason_test.sql, 0003_watcher_last_seen.sql) and the journal
+drizzle/             SQL migrations (0000_init.sql, 0001_local_nudge.sql, 0002_wake_reason_test.sql, 0003_watcher_last_seen.sql, 0005_marketing_consent.sql) and the journal
 scripts/migrate.ts   npm run db:migrate
 scripts/bundle-replyslip.mjs   rebuild packages/cli/replyslip.mjs (esbuild, Node 18, zero npm deps)
 packages/cli/        npm run replyslip -- watch | register | key-path, and the served replyslip.mjs bundle (nudge drivers in src/drivers)
@@ -60,8 +60,8 @@ Sign-up and sign-in are the same passwordless flow. There is no password.
 1. `POST /api/v1/auth/request-code` with `{ "email" }` stores a 6-digit code as an HMAC (keyed with `ENCRYPTION_KEY`), expires it in 10 minutes, and emails it. A newer code invalidates older unused codes. The `200` body is the same whether or not the email already exists.
 2. When `RESEND_API_KEY` is unset, `lib/email.ts` prints the code to the server log. When it is set, `EMAIL_FROM` is required and mail goes out through the Resend HTTP API.
 3. Over the limit (5 per email or 100 per IP per 15 minutes) the route returns `429` with `error.code` `rate_limited`, `retry_after_seconds`, and `Retry-After`. That request does not send a code and does not count toward the window.
-4. `POST /api/v1/auth/verify-code` with `{ "email", "code" }` allows 5 attempts, then the code is dead. Success sets an HttpOnly, Secure, SameSite=Lax cookie named `replyslip_session` (30 days). Only the SHA-256 hash of the session token is stored.
-5. `POST /api/v1/auth/logout` clears it. `GET /api/v1/auth/me` returns the user and workspace.
+4. `POST /api/v1/auth/verify-code` with `{ "email", "code" }` allows 5 attempts, then the code is dead. Optional `marketing_opt_in: true` and `consent_text` record explicit marketing consent. The checkbox must start unchecked. Omitting them leaves consent untouched. Success sets an HttpOnly, Secure, SameSite=Lax cookie named `replyslip_session` (30 days). Only the SHA-256 hash of the session token is stored.
+5. `POST /api/v1/auth/logout` clears it. `GET /api/v1/auth/me` returns the user (including `marketing_opt_in`), and the workspace. `PATCH /api/v1/auth/me` with `{ "marketing_opt_in" }` changes that choice. `GET` or `POST /api/v1/unsubscribe?token=...` opts out without a session.
 
 `/dashboard` is a server layout. It loads that cookie through `lib/auth.ts` and redirects to `/sign-in` when the session is missing or expired. The JSON routes call `requireUser`.
 
@@ -178,7 +178,7 @@ Locally the URL is `http://localhost:3000/api/mcp`.
 
 Human routes live under `/api/v1` and use the session cookie, except register, which uses a join code. Tasks are read-only on this API (`GET /api/v1/tasks`, `GET /api/v1/tasks/:id`). Agents change tasks through MCP.
 
-Groups: auth (`request-code`, `verify-code`, `logout`, `me`), `PATCH /workspaces/current`, agents and keys, delivery (`PUT /agents/:id/delivery`), join codes (create, list, revoke, rotate), `POST /agents/register`, tasks, watcher keys, `POST /watcher/poll`, `POST /watcher/ack`.
+Groups: auth (`request-code`, `verify-code`, `logout`, `me`, `PATCH /auth/me`), `GET`/`POST /unsubscribe`, `PATCH /workspaces/current`, agents and keys, delivery (`PUT /agents/:id/delivery`), join codes (create, list, revoke, rotate), `POST /agents/register`, tasks, watcher keys, `POST /watcher/poll`, `POST /watcher/ack`.
 
 Agent-facing docs are generated from `lib/agent-docs.ts`. The live pages use the request host:
 
@@ -195,7 +195,7 @@ Node.js 20 or newer, and Postgres.
 
 ```bash
 cp .env.example .env
-# Fill DATABASE_URL and ENCRYPTION_KEY. CRON_SECRET is required for the cron route.
+# Fill DATABASE_URL, ENCRYPTION_KEY, and CRON_SECRET. UNSUBSCRIBE_SECRET signs marketing unsubscribe links.
 npm install
 npm run db:migrate
 npm run dev
@@ -228,10 +228,11 @@ Names only. Real values stay in `.env` or the host. `.env.example` lists the sam
 | `DATABASE_URL` | Postgres connection string. Required to boot the app and to migrate. |
 | `ENCRYPTION_KEY` | 32 bytes, base64. AES-256-GCM for webhook secrets, and the HMAC pepper for sign-in codes. |
 | `CRON_SECRET` | Bearer token for `/api/cron/wakes`. |
+| `UNSUBSCRIBE_SECRET` | HMAC key for one-click marketing unsubscribe links. Required for `unsubscribeUrl` and `/api/v1/unsubscribe`. Not a default; set it on the host. |
 | `RESEND_API_KEY` | When set, sign-in codes are sent with Resend. When empty, codes are logged. |
 | `EMAIL_FROM` | From address. Required only when `RESEND_API_KEY` is set. |
 | `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhook URLs on loopback and private networks. Leave unset in production. |
-| `REPLYSLIP_URL` | Default origin for the watcher CLI and for `replyslip register` when `--url` is omitted. |
+| `REPLYSLIP_URL` | Public origin for `unsubscribeUrl` when set. Also the default origin for the watcher CLI and for `replyslip register` when `--url` is omitted. |
 | `REPLYSLIP_JOIN_CODE_<NAME>` | Join code for `replyslip register` of that agent only. Not a server variable. There is no shared `REPLYSLIP_JOIN_CODE`. |
 | `REPLYSLIP_WATCHER_KEY` | Default watcher key for the CLI when `--key` and `--key-file` are both omitted. The local setup in `/skill.md` stores the key in `~/.replyslip/watcher-<machine>.key` instead. |
 | `REPLYSLIP_POLL_INTERVAL_MS` | Default poll interval for the CLI. |
@@ -244,7 +245,7 @@ No secrets in the repo. Do not commit `.env`, keys, or webhook URLs.
 
 The public pages are `noindex, nofollow` from `app/layout.tsx` until the acceptance tests below pass. `/dashboard` and `/api` also send `X-Robots-Tag: noindex, nofollow` from `next.config.ts`; those headers are meant to stay after launch. `app/robots.ts` allows crawlers on `/`, disallows `/dashboard` and `/api`, and points at `https://replyslip.com/sitemap.xml`. `app/sitemap.ts` lists `/`, `/agents`, and the four doc paths.
 
-Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM` on the Vercel project. Leave `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` unset.
+Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `UNSUBSCRIBE_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM` on the Vercel project. Leave `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` unset.
 
 ## Status
 

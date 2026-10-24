@@ -53,21 +53,21 @@ A new email creates an unverified user and no workspace yet. The code is 6 digit
 Request:
 
 ```json
-{ "email": "owner@example.com", "code": "123456" }
+{ "email": "owner@example.com", "code": "123456", "marketing_opt_in": true, "consent_text": "Email me about new ReplySlip plans. I can unsubscribe at any time." }
 ```
 
-`code` is a string so leading zeros survive.
+`code` is a string so leading zeros survive. `marketing_opt_in` and `consent_text` are optional. The checkbox that sends them must start unchecked. Consent is stored only when `marketing_opt_in` is `true` and `consent_text` is the exact checkbox wording, 1–1000 characters after trimming. That write happens only on the first sign-in or when the person was not already opted in, so a later sign-in does not replace the original proof. Omitting the fields, or sending `false`, does not record consent and does not opt anyone out. `400` `validation_error` when `marketing_opt_in` is `true` and the wording is missing or blank. That failure does not consume the code.
 
 Success `200` sets the session cookie and returns:
 
 ```json
 {
-  "user": { "id": "uuid", "email": "owner@example.com", "email_verified_at": "2026-10-24T00:00:00.000Z", "created_at": "2026-10-24T00:00:00.000Z" },
+  "user": { "id": "uuid", "email": "owner@example.com", "email_verified_at": "2026-10-24T00:00:00.000Z", "marketing_opt_in": false, "created_at": "2026-10-24T00:00:00.000Z" },
   "workspace": { "id": "uuid", "name": "owner workspace", "created_at": "2026-10-24T00:00:00.000Z" }
 }
 ```
 
-The first successful verify creates the workspace and marks the email verified. Later verifies reuse that workspace.
+The first successful verify creates the workspace and marks the email verified. Later verifies reuse that workspace. `user.marketing_opt_in` is the stored choice after this request. It stays false until the person opts in.
 
 | HTTP | code | When |
 | --- | --- | --- |
@@ -84,7 +84,27 @@ Session cookie optional. Deletes the session and clears the cookie. `200` `{ "ok
 
 ### GET `/api/v1/auth/me`
 
-Session cookie required. Same `user` and `workspace` shape as verify. `401` when signed out.
+Session cookie required. Same `user` and `workspace` shape as verify, including `user.marketing_opt_in`. `401` when signed out.
+
+### PATCH `/api/v1/auth/me`
+
+Session cookie required. Changes marketing email consent for the signed-in user.
+
+```json
+{ "marketing_opt_in": true, "consent_text": "Email me about new ReplySlip plans. I can unsubscribe at any time." }
+```
+
+```json
+{ "marketing_opt_in": false }
+```
+
+Opting in requires `consent_text` (the checkbox wording, trimmed, 1–1000 characters). It sets `marketing_consent_at`, stores that wording, and clears `marketing_unsubscribed_at`. Opting out sets `marketing_unsubscribed_at` and leaves the earlier wording and timestamp in place as proof. Sending the choice they already have does not rewrite that proof. A new wording while already opted in is a new consent. `200` is the same body as GET. `400` `validation_error` when opting in without wording. `401` when signed out.
+
+### GET or POST `/api/v1/unsubscribe?token=...`
+
+No session. `token` is the user id, a dot, and an HMAC-SHA256 of that id signed with `UNSUBSCRIBE_SECRET`. `unsubscribeUrl(userId)` in `lib/marketing.ts` builds the absolute link. Its origin is `REPLYSLIP_URL` when set, otherwise `https://replyslip.com`.
+
+A valid token sets `marketing_opt_in` to false and `marketing_unsubscribed_at` to now, then returns a plain HTML confirmation. Sign-in codes still send. Repeating a valid link stays a confirmation and does not move the timestamp again. A missing, tampered, or unknown token returns the same kind of page with `400` and changes no row.
 
 ### PATCH `/api/v1/workspaces/current`
 
