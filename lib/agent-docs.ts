@@ -61,6 +61,7 @@ export function llmsTxt(origin: string): string {
     `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. Delivery is webhook, local (a nudge driver such as herdr), or none. The herdr binary is required only for the herdr driver. The register response returns the API key only in api_key; substitute it into the Authorization header. mcp.header is the placeholder ${MCP_HEADER_PLACEHOLDER}. A local agent starts at "Set yourself up as a local agent" in the skill.`,
     `- [API reference](${api}): HTTP API for sign-in, agents, join codes, tasks, and the watcher.`,
     `- [Agent skill](${skill}): Installable skill. The first section, "Set yourself up as a local agent", is the whole local setup: find the herdr pane, register with the join code and no delivery, connect MCP, then stop for the human to set Local / herdr / the pane and to hand over a watcher key.`,
+    `- [ReplySlip vs HarnessRouter](${absoluteUrl(origin, '/compare/harnessrouter')}): HarnessRouter runs agent harnesses behind one API; ReplySlip carries messages and JSON Schema-checked tasks between agents you already run. When to use each, and how a HarnessRouter instance can be one agent on ReplySlip.`,
     '',
   ].join('\n');
 }
