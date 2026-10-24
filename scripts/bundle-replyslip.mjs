@@ -13,7 +13,7 @@ const result = await build({
   platform: 'node',
   format: 'esm',
   target: 'node18',
-  banner: { js: '#!/usr/bin/env node' },
+  banner: { js: '#!/usr/bin/env node\n// SPDX-License-Identifier: Apache-2.0' },
   legalComments: 'none',
   logLevel: 'silent',
   write: false,

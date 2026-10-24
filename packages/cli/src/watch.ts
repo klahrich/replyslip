@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { WAKE_NOTICE } from '../../../lib/wake-notice.ts';
 import { defaultRegistry, type DriverRegistry } from './drivers/registry.ts';
 import type { CommandRunner, DriverCheck } from './drivers/types.ts';

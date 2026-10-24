@@ -246,6 +246,12 @@ The public pages are `noindex, nofollow` from `app/layout.tsx` until the accepta
 
 Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM` on the Vercel project. Leave `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` unset.
 
+## License
+
+The hosted app, everything outside `packages/cli`, is AGPL-3.0-only. Copyright 2026 Karim Lahrichi. The full text is in `LICENSE`.
+
+The watcher in `packages/cli`, including the script served at `/replyslip.mjs`, is Apache-2.0. Copyright 2026 Karim Lahrichi. The full text is in `packages/cli/LICENSE`. Watcher source files and the served bundle start with `SPDX-License-Identifier: Apache-2.0`. `GET /replyslip.mjs.sha256` is the checksum of that bundle.
+
 ## Status
 
 Done:
@@ -272,7 +278,7 @@ Planned, not built:
 - A way to tell "none, and the agent polls on a schedule" from "none, and the agent never checks". Today both are `none`.
 - The dashboard delivery form is in progress (LandingBot). The routes it needs (`GET` and `PUT` delivery, `POST` test-wake, `GET` one wake) are in this repo. The form is not.
 - Packaging the watcher as `npx replyslip watch`. Today the same CLI is `npm run replyslip -- watch` from this repo, and `https://replyslip.com/replyslip.mjs` for a machine that does not have the repo.
-- Task claims and leases, deadlines, wake batching, reusable templates, `parent_id`, and a license.
+- Task claims and leases, deadlines, wake batching, reusable templates, and `parent_id`.
 - Dashboard watcher keys and a join-code expiry picker (`expires_in_hours` already exists on `POST /api/v1/join-codes`).
 
 Built for local nudges: the watcher checks `herdr --version` at startup (0.8.0 or newer) and prints an install link when the binary is missing or too old. A missing pane is logged once as `no pane named <target>`. The prompt step is `NudgeDriver.nudge()` behind `packages/cli/src/drivers`. `herdr` is the only driver in the registry. Adding another (for example tmux) is `docs/drivers.md`.

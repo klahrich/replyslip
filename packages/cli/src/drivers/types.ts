@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type DriverCheck = { ok: boolean; version?: string; message?: string };
 
 export type NudgeResult = { ok: boolean; error?: string };

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { chmod, mkdir, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';

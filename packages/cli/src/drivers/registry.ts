@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { createHerdrDriver } from './herdr.ts';
 import type { CommandRunner, NudgeDriver } from './types.ts';
 
