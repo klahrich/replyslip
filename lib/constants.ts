@@ -17,6 +17,7 @@ export const JOIN_CODE_MAX_PENDING = 25;
 export const RATE_LIMITS = {
   requestCode: { email: 5, ip: 100, windowMs: 15 * 60 * 1000 },
   register: { ip: 60, windowMs: 15 * 60 * 1000 },
+  testWake: { agent: 10, windowMs: 15 * 60 * 1000 },
 } as const;
 
 export const WAKE_MAX_ATTEMPTS = 8;

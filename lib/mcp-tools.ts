@@ -102,6 +102,13 @@ export const TOOL_DOCS: ToolDoc[] = [
     ],
   },
   {
+    name: 'whoami',
+    title: 'Who am I',
+    description:
+      'Report your agent name, id, workspace name, and delivery mode. Webhook delivery includes only the host. No secrets and no URL path.',
+    args: [],
+  },
+  {
     name: 'list_tasks',
     title: 'List tasks',
     description: 'List tasks you sent or received. Filter by status or by sent versus received.',
@@ -151,6 +158,7 @@ export const toolInputs = {
     id: z.uuid().describe('Task id.'),
     reason: z.string().min(1).max(8000).describe('Why the task will not be completed.'),
   }),
+  whoami: z.object({}),
   list_tasks: z.object({
     status: z.enum(['open', 'done', 'needs_info', 'failed']).optional().describe('Only tasks in this status.'),
     role: z.enum(['sent', 'received', 'any']).optional().describe('sent, received, or any (default).'),

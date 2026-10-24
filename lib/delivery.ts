@@ -16,12 +16,15 @@ const BLOCKED_HEADERS = new Set([
   'authorization',
 ]);
 
+const requiredSecret = z.string().min(1).max(2000);
+const optionalSecret = z.union([z.string().max(2000), z.null()]).optional();
+
 export const webhookAuthSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('none') }),
-  z.object({ type: z.literal('bearer'), token: z.string().min(1).max(2000) }),
+  z.object({ type: z.literal('bearer'), token: requiredSecret }),
   z.object({
     type: z.literal('hmac'),
-    secret: z.string().min(1).max(2000),
+    secret: requiredSecret,
   }),
   z.object({
     type: z.literal('headers'),
@@ -30,6 +33,14 @@ export const webhookAuthSchema = z.discriminatedUnion('type', [
     }),
   }),
 ]);
+
+/** PUT body. Omitted secrets stay stored. Empty string or null does not clear a secret the chosen auth type still needs. */
+export const webhookAuthUpdateSchema = z.object({
+  type: z.enum(['none', 'bearer', 'hmac', 'headers']),
+  token: optionalSecret,
+  secret: optionalSecret,
+  headers: z.union([z.record(z.string(), z.string()), z.null()]).optional(),
+});
 
 const localTargetSchema = z
   .string()
@@ -56,18 +67,33 @@ const legacyHerdrSchema = z
     target: value.pane,
   }));
 
+const webhookDeliverySchema = z.object({
+  mode: z.literal('webhook'),
+  url: z.string().min(1).max(2000),
+  auth: webhookAuthSchema,
+});
+
 export const deliveryInputSchema = z.union([
+  z.object({ mode: z.literal('none') }),
+  localDeliverySchema,
+  legacyHerdrSchema,
+  webhookDeliverySchema,
+]);
+
+export type DeliveryInput = z.infer<typeof deliveryInputSchema>;
+
+export const deliveryUpdateSchema = z.union([
   z.object({ mode: z.literal('none') }),
   localDeliverySchema,
   legacyHerdrSchema,
   z.object({
     mode: z.literal('webhook'),
-    url: z.string().min(1).max(2000),
-    auth: webhookAuthSchema,
+    url: z.union([z.string().max(2000), z.null()]).optional(),
+    auth: webhookAuthUpdateSchema,
   }),
 ]);
 
-export type DeliveryInput = z.infer<typeof deliveryInputSchema>;
+export type DeliveryUpdate = z.infer<typeof deliveryUpdateSchema>;
 
 export type StoredDelivery = {
   deliveryMode: 'none' | 'webhook' | 'local';
@@ -126,6 +152,100 @@ export function deliveryColumns(input: DeliveryInput): StoredDelivery {
   return base;
 }
 
+type ExistingDelivery = Pick<
+  AgentRow,
+  | 'deliveryMode'
+  | 'webhookUrl'
+  | 'webhookAuthMode'
+  | 'webhookSecretCiphertext'
+  | 'webhookHeadersCiphertext'
+>;
+
+function secretStillRequired(label: string): never {
+  throw new HttpError(
+    400,
+    'secret_required',
+    `${label} is still required for this auth type. An empty value does not clear it. Switch auth type to clear a secret that type no longer needs.`,
+  );
+}
+
+function resolveRequiredSecret(input: {
+  provided: string | null | undefined;
+  sameKind: boolean;
+  stored: string | null;
+  label: string;
+}): string {
+  if (input.provided === undefined) {
+    if (input.sameKind && input.stored) return input.stored;
+    throw new HttpError(400, 'secret_required', `${input.label} is required.`);
+  }
+  if (input.provided === null || input.provided === '') secretStillRequired(input.label);
+  if (input.provided.length > 2000) {
+    throw new HttpError(400, 'validation_error', `${input.label} is too long.`);
+  }
+  return encryptSecret(input.provided);
+}
+
+/** Apply a delivery PUT. Omitted webhook secrets are copied from the stored ciphertext. */
+export function applyDeliveryUpdate(existing: ExistingDelivery, input: DeliveryUpdate): StoredDelivery {
+  if (input.mode !== 'webhook') return deliveryColumns(input);
+
+  let urlString: string;
+  if (input.url === undefined) {
+    if (existing.deliveryMode !== 'webhook' || !existing.webhookUrl) {
+      throw new HttpError(400, 'invalid_webhook_url', 'Webhook URL is required.');
+    }
+    urlString = assertPublicWebhookUrl(existing.webhookUrl).toString();
+  } else if (input.url === null || input.url === '') {
+    throw new HttpError(400, 'invalid_webhook_url', 'Webhook URL is required for webhook delivery.');
+  } else {
+    urlString = assertPublicWebhookUrl(input.url).toString();
+  }
+
+  const sameWebhook = existing.deliveryMode === 'webhook';
+  const base: StoredDelivery = {
+    deliveryMode: 'webhook',
+    webhookUrl: urlString,
+    webhookAuthMode: input.auth.type,
+    webhookSecretCiphertext: null,
+    webhookHeadersCiphertext: null,
+    ...emptyLocal,
+  };
+
+  if (input.auth.type === 'bearer') {
+    base.webhookSecretCiphertext = resolveRequiredSecret({
+      provided: input.auth.token,
+      sameKind: sameWebhook && existing.webhookAuthMode === 'bearer',
+      stored: existing.webhookSecretCiphertext,
+      label: 'Bearer token',
+    });
+  } else if (input.auth.type === 'hmac') {
+    base.webhookSecretCiphertext = resolveRequiredSecret({
+      provided: input.auth.secret,
+      sameKind: sameWebhook && existing.webhookAuthMode === 'hmac',
+      stored: existing.webhookSecretCiphertext,
+      label: 'HMAC secret',
+    });
+  } else if (input.auth.type === 'headers') {
+    if (input.auth.headers === undefined) {
+      if (sameWebhook && existing.webhookAuthMode === 'headers' && existing.webhookHeadersCiphertext) {
+        base.webhookHeadersCiphertext = existing.webhookHeadersCiphertext;
+      } else {
+        throw new HttpError(400, 'secret_required', 'Static headers are required.');
+      }
+    } else if (input.auth.headers === null || Object.keys(input.auth.headers).length === 0) {
+      secretStillRequired('Static headers');
+    } else {
+      for (const value of Object.values(input.auth.headers)) {
+        if (value === '') secretStillRequired('Header value');
+      }
+      assertHeaderMap(input.auth.headers);
+      base.webhookHeadersCiphertext = encryptSecret(JSON.stringify(input.auth.headers));
+    }
+  }
+  return base;
+}
+
 function assertHeaderMap(headers: Record<string, string>): void {
   const entries = Object.entries(headers);
   if (entries.length > 20) {
@@ -177,28 +297,138 @@ export function localNudgeOf(agent: {
   return null;
 }
 
-export function publicDelivery(agent: DeliveryRow) {
+export type SecretMask = { set: boolean; last4: string | null };
+
+export type MaskedHeader = { name: string; value: SecretMask };
+
+export type MaskedDelivery = {
+  mode: 'none' | 'webhook' | 'local';
+  driver: string | null;
+  target: string | null;
+  /** scheme://host only. The path is not returned. */
+  url: string | null;
+  url_set: boolean;
+  url_path_last4: string | null;
+  auth_type: string | null;
+  secret_set: boolean;
+  token: SecretMask;
+  secret: SecretMask;
+  headers: MaskedHeader[];
+  /** Deprecated alias of `target` for local delivery. */
+  pane: string | null;
+};
+
+const unsetSecret: SecretMask = { set: false, last4: null };
+
+function maskSecret(value: string | null | undefined): SecretMask {
+  if (!value) return unsetSecret;
+  return { set: true, last4: value.slice(-4) };
+}
+
+function decryptOrNull(payload: string | null): string | null {
+  if (!payload) return null;
+  try {
+    return decryptSecret(payload);
+  } catch {
+    return null;
+  }
+}
+
+export function maskWebhookUrl(raw: string | null): {
+  url: string | null;
+  url_set: boolean;
+  url_path_last4: string | null;
+} {
+  if (!raw) return { url: null, url_set: false, url_path_last4: null };
+  try {
+    const parsed = new URL(raw);
+    const path = parsed.pathname;
+    const url_path_last4 = path.length > 1 ? path.slice(-4) : null;
+    return { url: `${parsed.protocol}//${parsed.host}`, url_set: true, url_path_last4 };
+  } catch {
+    return { url: null, url_set: true, url_path_last4: null };
+  }
+}
+
+function maskedHeaders(ciphertext: string | null): MaskedHeader[] {
+  const plain = decryptOrNull(ciphertext);
+  if (!plain) return ciphertext ? [] : [];
+  try {
+    const parsed = JSON.parse(plain) as Record<string, unknown>;
+    return Object.entries(parsed)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      .map(([name, value]) => ({ name, value: maskSecret(value) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+export function publicDelivery(agent: DeliveryRow): MaskedDelivery {
   const nudge = localNudgeOf(agent);
+  const urlMask = maskWebhookUrl(agent.deliveryMode === 'webhook' ? agent.webhookUrl : null);
   if (nudge || agent.deliveryMode === 'local' || agent.deliveryMode === 'herdr') {
     return {
-      mode: 'local' as const,
+      mode: 'local',
       driver: nudge?.driver ?? (agent.deliveryMode === 'herdr' ? 'herdr' : agent.localDriver),
       target: nudge?.target ?? null,
-      url: null,
+      ...maskWebhookUrl(null),
       auth_type: null,
       secret_set: false,
+      token: unsetSecret,
+      secret: unsetSecret,
+      headers: [],
       pane: nudge?.target ?? null,
     };
   }
+  const auth = agent.deliveryMode === 'webhook' ? agent.webhookAuthMode : null;
+  const storedSecret = (ciphertext: string | null): SecretMask => {
+    if (!ciphertext) return unsetSecret;
+    const plain = decryptOrNull(ciphertext);
+    return plain === null ? { set: true, last4: null } : maskSecret(plain);
+  };
+  const token = auth === 'bearer' ? storedSecret(agent.webhookSecretCiphertext) : unsetSecret;
+  const secret = auth === 'hmac' ? storedSecret(agent.webhookSecretCiphertext) : unsetSecret;
+  const headers = auth === 'headers' ? maskedHeaders(agent.webhookHeadersCiphertext) : [];
+  const secret_set = token.set || secret.set || headers.some((header) => header.value.set) || Boolean(agent.webhookHeadersCiphertext);
   return {
-    mode: agent.deliveryMode,
+    mode: agent.deliveryMode === 'webhook' ? 'webhook' : 'none',
     driver: null,
     target: null,
-    url: agent.webhookUrl,
-    auth_type: agent.webhookAuthMode,
-    secret_set: Boolean(agent.webhookSecretCiphertext || agent.webhookHeadersCiphertext),
+    ...urlMask,
+    auth_type: auth,
+    secret_set,
+    token,
+    secret,
+    headers,
     pane: null,
   };
+}
+
+export function whoamiDelivery(agent: DeliveryRow):
+  | { mode: 'local'; driver: string; target: string }
+  | { mode: 'webhook'; host: string }
+  | { mode: 'none' } {
+  const nudge = localNudgeOf(agent);
+  if (nudge || agent.deliveryMode === 'local' || agent.deliveryMode === 'herdr') {
+    return {
+      mode: 'local',
+      driver: nudge?.driver ?? (agent.deliveryMode === 'herdr' ? 'herdr' : agent.localDriver) ?? '',
+      target: nudge?.target ?? '',
+    };
+  }
+  if (agent.deliveryMode === 'webhook') {
+    let host = '';
+    if (agent.webhookUrl) {
+      try {
+        host = new URL(agent.webhookUrl).host;
+      } catch {
+        host = '';
+      }
+    }
+    return { mode: 'webhook', host };
+  }
+  return { mode: 'none' };
 }
 
 export type WebhookCall = {

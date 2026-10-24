@@ -232,7 +232,7 @@ export const wakes = pgTable(
     check('wakes_status_check', sql`${table.status} in ('pending', 'delivered', 'failed', 'cancelled')`),
     check(
       'wakes_reason_check',
-      sql`${table.reason} in ('message', 'task', 'result', 'question', 'failure')`,
+      sql`${table.reason} in ('message', 'task', 'result', 'question', 'failure', 'test')`,
     ),
     index('wakes_due_idx').on(table.status, table.nextAttemptAt),
   ],
