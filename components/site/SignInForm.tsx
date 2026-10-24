@@ -1,17 +1,29 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { RATE_LIMITS } from '@/lib/constants';
-import { requestSignInCode, verifySignInCode } from './auth-client';
+import {
+  forgetSignInEmail,
+  rememberSignInEmail,
+  requestSignInCode,
+  storedSignInEmail,
+  verifySignInCode,
+} from './auth-client';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 type Step = 'email' | 'code';
 
-export function SignInForm({ initialEmail, initialStep }: { initialEmail: string; initialStep: Step }) {
+const noSubscribe = () => () => {};
+
+/** `sent` means the landing form already asked for a code; the email itself comes from sessionStorage. */
+export function SignInForm({ sent }: { sent: boolean }) {
   const router = useRouter();
-  const [step, setStep] = useState<Step>(initialStep);
-  const [email, setEmail] = useState(initialEmail);
+  const stored = useSyncExternalStore(noSubscribe, storedSignInEmail, () => null);
+  const [stepChoice, setStep] = useState<Step | null>(null);
+  const [emailInput, setEmail] = useState<string | null>(null);
+  const step: Step = stepChoice ?? (sent && stored ? 'code' : 'email');
+  const email = emailInput ?? stored ?? '';
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -42,6 +54,7 @@ export function SignInForm({ initialEmail, initialStep }: { initialEmail: string
       return;
     }
     setEmail(value);
+    rememberSignInEmail(value);
     setCode('');
     if (step === 'code') {
       setResent(true);
@@ -67,6 +80,7 @@ export function SignInForm({ initialEmail, initialStep }: { initialEmail: string
       if (res.code === 'invalid_code') setCode('');
       return;
     }
+    forgetSignInEmail();
     router.replace('/dashboard');
     router.refresh();
   }
@@ -155,6 +169,8 @@ export function SignInForm({ initialEmail, initialStep }: { initialEmail: string
           className="textbtn"
           onClick={() => {
             setStep('email');
+            setEmail(email);
+            forgetSignInEmail();
             setCode('');
             setError('');
             setNotice('');

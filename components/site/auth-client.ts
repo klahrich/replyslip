@@ -1,10 +1,12 @@
 /** Browser helpers for the sign-in routes in app/api/v1/auth. */
 
-type ApiError = { error?: { code?: string; message?: string } };
+type ApiError = { error?: { code?: string; message?: string; retry_after_seconds?: number } };
 
-export type AuthResult = { ok: true; message?: string } | { ok: false; code: string; message: string };
+export type AuthResult =
+  | { ok: true; message?: string }
+  | { ok: false; code: string; message: string; retryAfterSeconds?: number };
 
-async function post(path: string, body: unknown): Promise<{ status: number; data: unknown }> {
+async function post(path: string, body: unknown): Promise<{ status: number; data: unknown; retryAfter: string | null }> {
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -17,7 +19,7 @@ async function post(path: string, body: unknown): Promise<{ status: number; data
   } catch {
     data = null;
   }
-  return { status: res.status, data };
+  return { status: res.status, data, retryAfter: res.headers.get('retry-after') };
 }
 
 const NETWORK_ERROR: AuthResult = {
@@ -37,10 +39,23 @@ function failure(status: number, data: unknown, messages: Record<string, string>
   return { ok: false, code, message };
 }
 
+/** "Too many requests, try again in X minutes", from the 429 body or the Retry-After header. */
+export function retryMessage(seconds: number | undefined): string {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return 'Too many requests. Wait a few minutes and try again.';
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `Too many requests, try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`;
+}
+
 export async function requestSignInCode(email: string): Promise<AuthResult> {
   try {
-    const { status, data } = await post('/api/v1/auth/request-code', { email });
+    const { status, data, retryAfter } = await post('/api/v1/auth/request-code', { email });
+    // Older backends answer 200 even when rate-limited; that still reads as "maybe sent".
     if (status === 200) return { ok: true, message: (data as { message?: string } | null)?.message };
+    if (status === 429) {
+      const fromBody = (data as ApiError | null)?.error?.retry_after_seconds;
+      const seconds = typeof fromBody === 'number' ? fromBody : retryAfter ? Number(retryAfter) : undefined;
+      return { ok: false, code: 'rate_limited', message: retryMessage(seconds), retryAfterSeconds: seconds };
+    }
     return failure(status, data, { validation_error: 'Enter a valid email address.' });
   } catch {
     return NETWORK_ERROR;
@@ -60,5 +75,39 @@ export async function verifySignInCode(email: string, code: string): Promise<Aut
     });
   } catch {
     return NETWORK_ERROR;
+  }
+}
+
+/*
+ * The landing form hands the email to /sign-in through sessionStorage so it
+ * never lands in a URL. Only the email is stored, never a code or key.
+ */
+const EMAIL_KEY = 'replyslip:sign-in-email';
+const EMAIL_TTL_MS = 15 * 60 * 1000;
+
+export function rememberSignInEmail(email: string): void {
+  try {
+    sessionStorage.setItem(EMAIL_KEY, JSON.stringify({ email, at: Date.now() }));
+  } catch {
+    // Storage blocked: /sign-in falls back to asking for the email.
+  }
+}
+
+export function forgetSignInEmail(): void {
+  try {
+    sessionStorage.removeItem(EMAIL_KEY);
+  } catch {}
+}
+
+/** Stored email if the handoff is fresh. Returns a string, so it is a stable useSyncExternalStore snapshot. */
+export function storedSignInEmail(): string | null {
+  try {
+    const raw = sessionStorage.getItem(EMAIL_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as { email?: unknown; at?: unknown };
+    if (typeof v.email !== 'string' || typeof v.at !== 'number' || Date.now() - v.at > EMAIL_TTL_MS) return null;
+    return v.email;
+  } catch {
+    return null;
   }
 }

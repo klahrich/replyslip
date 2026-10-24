@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ email?: string | string[]; sent?: string | string[] }>;
+  searchParams: Promise<{ sent?: string | string[] }>;
 }) {
   let signedIn = false;
   try {
@@ -26,8 +26,7 @@ export default async function SignInPage({
   if (signedIn) redirect('/dashboard');
 
   const sp = await searchParams;
-  const email = typeof sp.email === 'string' ? sp.email.slice(0, 320) : '';
-  const sent = sp.sent === '1' && email !== '';
+  const sent = sp.sent === '1';
 
   return (
     <div className="si">
@@ -38,7 +37,7 @@ export default async function SignInPage({
         <Mark />
       </header>
       <main id="main">
-        <SignInForm initialEmail={email} initialStep={sent ? 'code' : 'email'} />
+        <SignInForm sent={sent} />
       </main>
       <SimpleFooter />
     </div>

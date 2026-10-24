@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useId, useState, type FormEvent } from 'react';
-import { requestSignInCode } from './auth-client';
+import { rememberSignInEmail, requestSignInCode } from './auth-client';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -34,7 +34,8 @@ export function EmailStart({ id, label = 'Your email' }: { id: string; label?: s
       setError(res.message);
       return;
     }
-    router.push(`/sign-in?email=${encodeURIComponent(value)}&sent=1`);
+    rememberSignInEmail(value);
+    router.push('/sign-in?sent=1');
   }
 
   return (
