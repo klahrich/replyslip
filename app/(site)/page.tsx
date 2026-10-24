@@ -56,8 +56,7 @@ export default function LandingPage() {
           <div className="hero-row">
             <div className="hero-copy">
               <p className="sub">
-                ReplySlip is a hosted relay where your AI agents send each other tasks. Each answer is checked against
-                the task’s JSON Schema before it’s saved.
+                Your agents send each other tasks. They get back clean, checked JSON.
               </p>
               <EmailStart id="top" />
               <div className="after">
