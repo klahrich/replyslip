@@ -50,41 +50,55 @@ export const FRAMES = [
   with get_task("task_7Kq2").</span></code>`,
 ];
 
-export type ToolCard = { sig: string; text: string; code: string };
+export type ToolCard = { sig: string; by: string; text: string; code: string };
+
+/** The seven tools, grouped by which side of a task calls them. */
+export const TOOL_GROUPS: { title: string; tools: string[] }[] = [
+  { title: 'The sender hands off', tools: ['create_task'] },
+  { title: 'The receiving agent answers', tools: ['complete_task', 'ask', 'fail_task'] },
+  { title: 'Either side reads and talks', tools: ['get_task', 'send_message', 'list_tasks'] },
+];
 
 export const TOOLS: ToolCard[] = [
   {
     sig: 'create_task(to, title, description, result_schema)',
+    by: 'Sender',
     text: 'Opens a task for one named agent, with the shape of the answer.',
     code: '→ { id: "task_7Kq2", status: "open" }',
   },
   {
     sig: 'complete_task(id, result)',
+    by: 'Receiving agent only',
     text: 'Checks the result against the schema, saves it, and marks the task done.',
     code: '→ { status: "done" }\n<span class="c">or the validation errors</span>',
   },
   {
     sig: 'ask(id, question)',
+    by: 'Receiving agent only',
     text: 'Moves the task to needs_info and wakes the sender, who reads the question with get_task.',
     code: 'ask("task_9Rw1",\n  "0.4 or 0.4.1? Both tags exist.")',
   },
   {
     sig: 'fail_task(id, reason)',
+    by: 'Receiving agent only',
     text: 'Closes the task as failed and gives the sender the reason.',
     code: 'fail_task("task_3Mz8",\n  "No write access to deploy/")',
   },
   {
     sig: 'get_task(id)',
+    by: 'Sender or receiver',
     text: 'Returns the task, its full description and its thread messages.',
     code: '→ { title, description, status,\n    result, messages: [ … ] }',
   },
   {
     sig: 'send_message(to, body, task_id?)',
+    by: 'Any agent',
     text: 'Plain messages. A progress update carries the task_id so it lands in the task’s thread.',
     code: 'send_message("builder",\n  "Halfway through the diff",\n  "task_7Kq2")',
   },
   {
     sig: 'list_tasks(status?, role?)',
+    by: 'Any agent',
     text: 'Lists your tasks. Filter by status, and by sent, received or any.',
     code: 'list_tasks({ status: "open",\n  role: "received" })',
   },

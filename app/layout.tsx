@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from 'next';
+import { Archivo } from 'next/font/google';
 import './globals.css';
 import { SITE_URL, openGraph, shareDescription, shareTitle as title } from '@/components/site/seo';
 
 const favicon =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%230a0a0a'/%3E%3Crect x='7' y='6' width='18' height='20' rx='1' fill='%23dedad3'/%3E%3Ccircle cx='10' cy='17' r='1' fill='%230a0a0a'/%3E%3Ccircle cx='14' cy='17' r='1' fill='%230a0a0a'/%3E%3Ccircle cx='18' cy='17' r='1' fill='%230a0a0a'/%3E%3Ccircle cx='22' cy='17' r='1' fill='%230a0a0a'/%3E%3Cpath d='M11 22l2.5 2L19 20' stroke='%23256f82' stroke-width='2' fill='none'/%3E%3C/svg%3E";
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23a9bfa9'/%3E%3Crect x='7' y='6' width='18' height='20' rx='1' fill='%231f2225'/%3E%3Ccircle cx='10' cy='17' r='1' fill='%23e9eae7'/%3E%3Ccircle cx='14' cy='17' r='1' fill='%23e9eae7'/%3E%3Ccircle cx='18' cy='17' r='1' fill='%23e9eae7'/%3E%3Ccircle cx='22' cy='17' r='1' fill='%23e9eae7'/%3E%3Cpath d='M11 22l2.5 2L19 20' stroke='%23e9eae7' stroke-width='2' fill='none'/%3E%3C/svg%3E";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -18,15 +19,18 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', title, description: shareDescription, images: ['/assets/og.png'] },
 };
 
-export const viewport: Viewport = { themeColor: '#dedad3' };
+const archivo = Archivo({ subsets: ['latin'], display: 'swap', variable: '--font-archivo' });
+
+/** Site palette: 'a' | 'b' | 'c', defined in app/globals.css. Keep themeColor and the favicon in step. */
+const PALETTE = 'b';
+
+export const viewport: Viewport = { themeColor: '#1f2225' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={archivo.variable} data-palette={PALETTE} suppressHydrationWarning>
       <head>
-        <link rel="preload" href="/assets/switzer-400.woff2" as="font" type="font/woff2" crossOrigin="" />
-        <link rel="preload" href="/assets/switzer-500.woff2" as="font" type="font/woff2" crossOrigin="" />
-        {/* Lets CSS hide reveal-on-scroll content only when scripts run. */}
+        {/* Marks that scripts run; CSS only uses it for progressive enhancements, never to hide content. */}
         <script dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('js')" }} />
       </head>
       <body>{children}</body>

@@ -7,4 +7,4 @@
 .si .row-links{margin-top:20px;display:flex;flex-wrap:wrap;gap:8px 24px;font-size:var(--s-small);color:var(--muted)}
 .si .textbtn{background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-decoration:underline;text-underline-offset:.22em;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent)}
 .si .textbtn:disabled{color:var(--muted);cursor:default}
-.si .ok{color:#1f5f3a}
+.si .ok{color:var(--ok-on-bg)}
