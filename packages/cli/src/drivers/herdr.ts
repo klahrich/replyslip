@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { PANE_NAME_PATTERN } from '../../../../lib/constants.ts';
 import { capture, runCommand } from './command.ts';
 import type { CommandRunner, NudgeDriver } from './types.ts';

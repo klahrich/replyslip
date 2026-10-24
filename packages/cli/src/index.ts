@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { runReplyslip } from './cli.ts';
 
 runReplyslip(process.argv.slice(2))

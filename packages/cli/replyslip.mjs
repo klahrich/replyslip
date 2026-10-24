@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 
 // packages/cli/src/cli.ts
 import { readFile, stat as stat2 } from "node:fs/promises";

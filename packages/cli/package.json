@@ -1,0 +1,6 @@
+{
+  "name": "replyslip-cli",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "ReplySlip watcher and register CLI. Apache-2.0. The hosted app at the repository root is AGPL-3.0-only."
+}
