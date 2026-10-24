@@ -93,3 +93,7 @@
 .dash-thread{list-style:none;margin:0;padding:0;display:grid;gap:10px}
 .dash-thread li{padding:10px 12px;background:var(--surface);border-radius:4px}
 .dash .signup{margin-top:0}
+.dash-subhead{font-size:var(--s-body);font-weight:500;margin:4px 0 8px;display:flex;align-items:baseline;gap:10px}
+.dash-count{font-size:var(--s-small);font-weight:400;color:var(--muted)}
+.dash-history{margin-top:22px}
+.dash-history>summary{font-size:var(--s-body);color:var(--ink);font-weight:500}
