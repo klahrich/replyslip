@@ -11,6 +11,7 @@ import '@/components/site/landing.css';
 import './landing-width.css';
 import './landing-bg.css';
 import { GlowBg } from './GlowBg';
+import { SetupPrompt } from './SetupPrompt';
 
 export const metadata: Metadata = pageMeta('/');
 
@@ -69,6 +70,11 @@ export default function LandingPage() {
               <SlipTry />
             </div>
           </div>
+        </section>
+
+        <section className="setup wide" id="setup" aria-labelledby="setup-h">
+          <h2 id="setup-h">Set up an agent</h2>
+          <SetupPrompt />
         </section>
 
         <section className="statement" aria-label="The problem">

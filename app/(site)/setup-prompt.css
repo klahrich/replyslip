@@ -1,0 +1,36 @@
+/* Setup prompt block (/ and /agents). Same tokens and markers as the landing: muted inactive text, a sage square on the active tab. */
+.sp{max-width:720px}
+.sp-tabs{display:flex;gap:24px;font-size:var(--s-small)}
+.sp-tabs [role=tab]{display:inline-flex;align-items:baseline;gap:10px;padding:8px 0;background:none;border:0;font:500 var(--s-small)/1.4 var(--font);color:var(--muted);cursor:pointer;transition:color 150ms ease}
+.sp-tabs [role=tab]::before{content:"";flex:0 0 8px;height:8px;background:var(--surface-2);transform:translateY(-1px);transition:background-color 150ms ease}
+.sp-tabs [role=tab][aria-selected=true]{color:var(--ink)}
+.sp-tabs [role=tab][aria-selected=true]::before{background:var(--accent)}
+@media (hover:hover) and (pointer:fine){.sp-tabs [role=tab]:hover{color:var(--ink)}}
+.sp-panel{margin-top:10px}
+.sp-box{display:flex;gap:16px;align-items:flex-start;padding:16px 16px 16px 18px;background:var(--surface);border-radius:var(--r)}
+.sp-prompt{flex:1;font:.875rem/1.6 var(--mono);color:var(--ink);overflow-wrap:anywhere} /* taste-skill-ignore: literal prompt text */
+.sp-copy{position:relative;display:inline-grid;flex:0 0 auto;height:36px;padding:0 14px;font:600 var(--s-small)/1 var(--font);color:var(--accent-ink);background:var(--accent);border:0;border-radius:var(--r);cursor:pointer;transition:transform 160ms var(--ease-out),background-color 180ms ease}
+.sp-copy>span{grid-area:1/1;align-self:center;transition:opacity 150ms ease}
+.sp-copy .sp-done,.sp-copy[data-copied] > span:first-child{opacity:0}
+.sp-copy[data-copied] .sp-done{opacity:1}
+.sp-copy:active{transform:scale(.97)}
+@media (hover:hover) and (pointer:fine){.sp-copy:hover{background:var(--accent-strong)}}
+.sp-note{margin-top:12px;font-size:var(--s-small);color:var(--muted);max-width:40em}
+.sp-note+.sp-note{margin-top:6px}
+.sp-note .link{color:var(--ink)}
+html:not(.js) .sp-panel[hidden]{display:block;margin-top:24px}
+@media (max-width:640px){.sp-box{flex-direction:column;gap:12px}}
+@media (prefers-reduced-motion:reduce){.sp-copy{transition-property:background-color}}
+
+/* landing placement: right under the hero, on the same 12-column rhythm as the tools section */
+.setup{margin-top:clamp(64px,8vw,112px);display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:clamp(16px,2vw,32px)}
+.setup h2{grid-column:1/span 4;font-size:var(--s-head);line-height:1.12}
+.setup .sp{grid-column:5/span 8}
+.setup+.statement{margin-top:clamp(64px,8vw,112px)}
+@media (max-width:1100px){.setup h2,.setup .sp{grid-column:1/-1}.setup .sp{margin-top:24px}}
+
+/* /agents placement */
+.tell-sp{margin:16px 0 28px}
+.ag .tell .sp .sp-prompt{margin:0}
+.ag .tell .sp .sp-note{margin-top:12px}
+.ag .tell .sp .sp-note+.sp-note{margin-top:6px}
