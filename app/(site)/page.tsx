@@ -5,13 +5,14 @@ import { EmailStart } from '@/components/site/EmailStart';
 import { LandingEffects } from '@/components/site/LandingEffects';
 import { MarkIcon } from '@/components/site/Mark';
 import { SlipTry } from '@/components/site/SlipTry';
-import { FRAMES, TOOLS, TOOL_GROUPS } from '@/components/site/landing-code';
+import { FRAMES } from '@/components/site/landing-code';
 import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
 import './landing-width.css';
 import './landing-bg.css';
 import { GlowBg } from './GlowBg';
 import { SetupPrompt } from './SetupPrompt';
+import { TOOL_LIST } from './tool-list';
 
 export const metadata: Metadata = pageMeta('/');
 
@@ -143,14 +144,14 @@ export default function LandingPage() {
         <section className="tools" id="tools" aria-labelledby="tools-h">
           <div className="wide tools-in">
             <div className="tools-head">
-              <h2 id="tools-h">Seven tools, over MCP</h2>
+              <h2 id="tools-h">Eight tools, over MCP</h2>
               <p className="lede">
-                Every agent gets the same seven tools. The relay takes the caller’s name from its key, so it knows who
+                Every agent gets the same eight tools. The relay takes the caller’s name from its key, so it knows who
                 may call what.
               </p>
             </div>
             <table className="tool-table">
-              <caption className="vh">The seven ReplySlip tools, who calls each one, and what it does</caption>
+              <caption className="vh">The eight ReplySlip tools, who calls each one, and what it does</caption>
               <thead>
                 <tr>
                   <th scope="col">Tool</th>
@@ -158,28 +159,17 @@ export default function LandingPage() {
                   <th scope="col">What it does</th>
                 </tr>
               </thead>
-              {TOOL_GROUPS.map((g) => (
-                <tbody key={g.title}>
-                  <tr className="grp">
-                    <th scope="rowgroup" colSpan={3}>
-                      {g.title}
+              <tbody>
+                {TOOL_LIST.map((t) => (
+                  <tr key={t.sig}>
+                    <th scope="row">
+                      <code translate="no">{t.sig}</code>
                     </th>
+                    <td className="by">{t.by}</td>
+                    <td>{t.text}</td>
                   </tr>
-                  {g.tools.map((name) => {
-                    const t = TOOLS.find((x) => x.sig.startsWith(name + '('));
-                    if (!t) return null;
-                    return (
-                      <tr key={name}>
-                        <th scope="row">
-                          <code translate="no">{t.sig}</code>
-                        </th>
-                        <td className="by">{t.by}</td>
-                        <td>{t.text}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              ))}
+                ))}
+              </tbody>
             </table>
           </div>
         </section>
@@ -501,6 +491,11 @@ issues:  users.email loses its
             <a className="link" href="#faq">
               FAQ
             </a>
+          </li>
+          <li>
+            <Link className="link" href="/compare/harnessrouter">
+              ReplySlip vs HarnessRouter
+            </Link>
           </li>
         </ul>
         <p className="yr">© 2026 ClaireVue</p>

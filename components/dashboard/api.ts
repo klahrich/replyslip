@@ -39,9 +39,12 @@ export async function api<T>(path: string, init?: { method?: 'GET' | 'POST' | 'P
     data = null;
   }
   if (!res.ok) {
-    const err = (
-      data as { error?: { code?: string; message?: string; details?: unknown; retry_after_seconds?: number } } | null
-    )?.error;
+    const raw = data as {
+      error?: { code?: string; message?: string; details?: unknown; retry_after_seconds?: number } | string;
+      message?: string;
+      retry_after_seconds?: number;
+    } | null;
+    const err = typeof raw?.error === 'string' ? { code: raw.error, message: raw.message } : raw?.error;
     if (res.status === 401 && typeof window !== 'undefined') {
       window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
     }

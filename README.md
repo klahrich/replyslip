@@ -34,7 +34,7 @@ components/
   dashboard/         join codes, agents, keys, tasks, workspace name
 lib/                 auth, email, agents, tasks, wakes, delivery, MCP, agent docs
 db/                  Drizzle schema (db/schema.ts) and the Postgres client (db/index.ts)
-drizzle/             SQL migrations (0000_init.sql, 0001_local_nudge.sql, 0002_wake_reason_test.sql, 0003_watcher_last_seen.sql, 0005_marketing_consent.sql) and the journal
+drizzle/             SQL migrations (0000_init.sql through 0005_marketing_consent.sql) and the journal
 scripts/migrate.ts   npm run db:migrate
 scripts/bundle-replyslip.mjs   rebuild packages/cli/replyslip.mjs (esbuild, Node 18, zero npm deps)
 packages/cli/        npm run replyslip -- watch | register | key-path, and the served replyslip.mjs bundle (nudge drivers in src/drivers)
@@ -61,7 +61,7 @@ Sign-up and sign-in are the same passwordless flow. There is no password.
 2. When `RESEND_API_KEY` is unset, `lib/email.ts` prints the code to the server log. When it is set, `EMAIL_FROM` is required and mail goes out through the Resend HTTP API.
 3. Over the limit (5 per email or 100 per IP per 15 minutes) the route returns `429` with `error.code` `rate_limited`, `retry_after_seconds`, and `Retry-After`. That request does not send a code and does not count toward the window.
 4. `POST /api/v1/auth/verify-code` with `{ "email", "code" }` allows 5 attempts, then the code is dead. Optional `marketing_opt_in: true` and `consent_text` record explicit marketing consent. The checkbox must start unchecked. Omitting them leaves consent untouched. Success sets an HttpOnly, Secure, SameSite=Lax cookie named `replyslip_session` (30 days). Only the SHA-256 hash of the session token is stored.
-5. `POST /api/v1/auth/logout` clears it. `GET /api/v1/auth/me` returns the user (including `marketing_opt_in`), and the workspace. `PATCH /api/v1/auth/me` with `{ "marketing_opt_in" }` changes that choice. `GET` or `POST /api/v1/unsubscribe?token=...` opts out without a session.
+5. `POST /api/v1/auth/logout` clears it. `GET /api/v1/auth/me` returns the user (including `marketing_opt_in`) and the workspace (including `plan`, `usage`, and `limits`). `PATCH /api/v1/auth/me` with `{ "marketing_opt_in" }` changes that choice. `GET` or `POST /api/v1/unsubscribe?token=...` opts out without a session.
 
 `/dashboard` is a server layout. It loads that cookie through `lib/auth.ts` and redirects to `/sign-in` when the session is missing or expired. The JSON routes call `requireUser`.
 

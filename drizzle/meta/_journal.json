@@ -33,6 +33,13 @@
     {
       "idx": 4,
       "version": "7",
+      "when": 1762300000000,
+      "tag": "0004_workspace_plan",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
       "when": 1762400000000,
       "tag": "0005_marketing_consent",
       "breakpoints": true
