@@ -3,45 +3,42 @@
 import { useEffect } from 'react';
 
 /**
- * Scroll reveals, the hero status flip, the pinned "how a task works" stage,
- * the tools row and the FAQ pane. Ported from the static draft's inline script.
+ * Progressive enhancements only; every element is visible and readable before this runs.
+ * The task-list status flip, the pinned "how a task works" stage and the FAQ pane.
  */
 export function LandingEffects() {
   useEffect(() => {
     const cleanups: Array<() => void> = [];
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    // reveals
-    const io = new IntersectionObserver(
-      (es) => {
-        for (const e of es)
-          if (e.isIntersecting) {
-            e.target.classList.add('is-in');
-            io.unobserve(e.target);
-          }
-      },
-      { rootMargin: '0px 0px -10% 0px', threshold: 0.1 },
-    );
-    document.querySelectorAll('[data-reveal]').forEach((el) => io.observe(el));
-    cleanups.push(() => io.disconnect());
-
-    // hero exhibit: the open task quietly becomes done, then rests on open
+    // task list: once in view, the open task quietly becomes done, then rests on open
     const flip = document.getElementById('flip');
     if (flip && !reduce) {
       let t: ReturnType<typeof setTimeout> | undefined;
       let n = 0;
+      let seen = false;
       const loop = () => {
         flip.classList.toggle('flip');
-        if (++n < 4) t = setTimeout(loop, 5600);
+        if (++n < 4) t = setTimeout(loop, 4200);
       };
-      t = setTimeout(loop, 3200);
+      const fo = new IntersectionObserver(
+        (es) => {
+          if (seen || !es.some((e) => e.isIntersecting)) return;
+          seen = true;
+          fo.disconnect();
+          t = setTimeout(loop, 1200);
+        },
+        { threshold: 0.6 },
+      );
+      fo.observe(flip);
       const onVis = () => {
         clearTimeout(t);
-        if (!document.hidden && n < 4) t = setTimeout(loop, 3200);
+        if (seen && !document.hidden && n < 4) t = setTimeout(loop, 1200);
       };
       document.addEventListener('visibilitychange', onVis);
       cleanups.push(() => {
         clearTimeout(t);
+        fo.disconnect();
         document.removeEventListener('visibilitychange', onVis);
         flip.classList.remove('flip');
       });
@@ -65,52 +62,6 @@ export function LandingEffects() {
     );
     steps.forEach((s) => so.observe(s));
     cleanups.push(() => so.disconnect());
-
-    // tools row: light the panel at the start of the row
-    const row = document.getElementById('tool-row');
-    const prev = document.getElementById('tool-prev');
-    const next = document.getElementById('tool-next');
-    if (row && prev && next) {
-      const tools = [...row.querySelectorAll<HTMLElement>('.tool')];
-      let lit = 0;
-      let raf = 0;
-      const light = (i: number) => {
-        lit = i;
-        tools.forEach((t, j) => t.classList.toggle('lit', j === i));
-      };
-      const onScroll = () => {
-        cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(() => {
-          const x = row.getBoundingClientRect().left + parseFloat(getComputedStyle(row).scrollPaddingLeft || '0');
-          let best = 0;
-          let d = Infinity;
-          tools.forEach((t, j) => {
-            const dd = Math.abs(t.getBoundingClientRect().left - x);
-            if (dd < d) {
-              d = dd;
-              best = j;
-            }
-          });
-          if (best !== lit) light(best);
-        });
-      };
-      const go = (i: number) => {
-        const k = Math.max(0, Math.min(tools.length - 1, i));
-        tools[k]?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest', inline: 'start' });
-        light(k);
-      };
-      const onPrev = () => go(lit - 1);
-      const onNext = () => go(lit + 1);
-      row.addEventListener('scroll', onScroll, { passive: true });
-      prev.addEventListener('click', onPrev);
-      next.addEventListener('click', onNext);
-      cleanups.push(() => {
-        cancelAnimationFrame(raf);
-        row.removeEventListener('scroll', onScroll);
-        prev.removeEventListener('click', onPrev);
-        next.removeEventListener('click', onNext);
-      });
-    }
 
     // faq: index on the left, one answer in the pane (wide screens)
     const pane = document.getElementById('faq-pane');

@@ -32,77 +32,111 @@ function check(txt: string): string[] {
   return errs;
 }
 
+/**
+ * The reply slip: the example task's answer form, checked in the browser the way
+ * the relay checks complete_task. Rendered on the server, so it reads as a slip
+ * without JavaScript; sending needs JavaScript.
+ */
 export function SlipTry() {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState(START);
   const [out, setOut] = useState<null | string[]>(null);
+  const [sends, setSends] = useState(0);
+
+  const state = out === null ? 'idle' : out.length ? 'bad' : 'ok';
 
   return (
-    <div className="slip" id="try">
-      <h3 data-reveal>Fill in the slip yourself</h3>
-      <p className="hint" data-reveal style={{ ['--i' as string]: 1 }}>
-        Edit the reviewer’s result and send it. This page checks it against the task’s schema the way the relay does.
-      </p>
-      <div className="slip-box" data-ui data-reveal style={{ ['--i' as string]: 2 }}>
-        <div className="srow">
-          <label htmlFor="slip-input">result for task_7Kq2</label>
-          <span>schema: verdict, issues</span>
+    <div className="slip" id="try" data-ui data-state={state}>
+      <div className="slip-head">
+        <span className="slip-name">Reply slip</span>
+        <span>task_7Kq2 · example</span>
+      </div>
+      <dl className="slip-task">
+        <div>
+          <dt>From</dt>
+          <dd>builder</dd>
         </div>
-        <textarea
-          ref={ref}
-          id="slip-input"
-          className="code"
-          spellCheck={false}
-          autoComplete="off"
-          aria-describedby="slip-out"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-        <div className="acts">
-          <button className="btn-ink" type="button" onClick={() => setOut(check(value))}>
-            Send complete_task
-          </button>
-          <button
-            className="textbtn"
-            type="button"
-            onClick={() => {
-              setValue(VALID);
-              setOut(null);
-              ref.current?.focus();
-            }}
-          >
-            Fill in a valid answer
-          </button>
+        <div>
+          <dt>To</dt>
+          <dd>reviewer</dd>
         </div>
-        <div className="verdict" id="slip-out" role="status" aria-live="polite">
-          {out === null ? null : out.length ? (
+        <div className="w">
+          <dt>Task</dt>
+          <dd>Review the signup migration. Approve it or list what must change.</dd>
+        </div>
+        <div className="w">
+          <dt>Answer must have</dt>
+          <dd>
+            <code translate="no">verdict</code>: <code translate="no">&quot;approve&quot;</code> or{' '}
+            <code translate="no">&quot;request_changes&quot;</code>, and <code translate="no">issues</code>: a list of
+            strings. Nothing else.
+          </dd>
+        </div>
+      </dl>
+      <div className="slip-tear" aria-hidden="true" />
+      <label className="slip-label" htmlFor="slip-input">
+        The reviewer’s result. Edit it, then send.
+      </label>
+      <textarea
+        ref={ref}
+        id="slip-input"
+        className="code"
+        rows={5}
+        spellCheck={false}
+        autoComplete="off"
+        aria-describedby="slip-out"
+        aria-invalid={state === 'bad' ? true : undefined}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <div className="acts">
+        <button
+          className="btn-ink"
+          type="button"
+          onClick={() => {
+            setOut(check(value));
+            setSends((n) => n + 1);
+          }}
+        >
+          Send <code translate="no">complete_task</code>
+        </button>
+        <button
+          className="textbtn"
+          type="button"
+          onClick={() => {
+            setValue(VALID);
+            setOut(null);
+            ref.current?.focus();
+          }}
+        >
+          Fill in a valid answer
+        </button>
+      </div>
+      <div className="verdict" id="slip-out" role="status" aria-live="polite">
+        {out === null ? (
+          <p className="wait">Not sent yet. The first answer breaks the schema in three places.</p>
+        ) : out.length ? (
+          <pre translate="no" key={sends}>
+            <code translate="no">
+              <span className="e">
+                {'error: result does not match result_schema\n' + out.map((e) => '  ' + e).join('\n')}
+              </span>
+              {'\n'}
+              <span className="c">{'  Nothing saved. builder not woken. Fix it and send again.'}</span>
+            </code>
+          </pre>
+        ) : (
+          <div className="pass" key={sends}>
+            <span className="stamp">Valid · saved</span>
             <pre translate="no">
               <code translate="no">
-                <span className="e">
-                  {'error: result does not match result_schema\n' + out.map((e) => '  ' + e).join('\n')}
-                </span>
+                <span className="ok">{'→ { id: "task_7Kq2", status: "done" }'}</span>
                 {'\n'}
-                <span className="c">{'  Nothing saved. builder not woken. Fix it and send again.'}</span>
+                <span className="c">{'  builder is woken and reads the result.'}</span>
               </code>
             </pre>
-          ) : (
-            <>
-              <pre translate="no">
-                <code translate="no">
-                  <span className="ok">{'→ { id: "task_7Kq2", status: "done" }'}</span>
-                  {'\n'}
-                  <span className="c">{'  Result saved. builder is woken.'}</span>
-                </code>
-              </pre>
-              <p className="next">
-                That’s the whole loop.{' '}
-                <a className="link" href="#access">
-                  Get started
-                </a>
-              </p>
-            </>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

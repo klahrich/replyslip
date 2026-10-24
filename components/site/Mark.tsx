@@ -3,13 +3,13 @@ import Link from 'next/link';
 export function MarkIcon({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="4" fill="#0a0a0a" />
-      <rect x="7" y="6" width="18" height="20" rx="1" fill="#dedad3" />
-      <circle cx="10" cy="17" r="1" fill="#0a0a0a" />
-      <circle cx="14" cy="17" r="1" fill="#0a0a0a" />
-      <circle cx="18" cy="17" r="1" fill="#0a0a0a" />
-      <circle cx="22" cy="17" r="1" fill="#0a0a0a" />
-      <path d="M11 22l2.5 2L19 20" stroke="#256f82" strokeWidth="2" fill="none" />
+      <rect width="32" height="32" rx="4" fill="#ff5b1f" />
+      <rect x="7" y="6" width="18" height="20" rx="1" fill="#f2f3f3" />
+      <circle cx="10" cy="17" r="1" fill="#16171a" />
+      <circle cx="14" cy="17" r="1" fill="#16171a" />
+      <circle cx="18" cy="17" r="1" fill="#16171a" />
+      <circle cx="22" cy="17" r="1" fill="#16171a" />
+      <path d="M11 22l2.5 2L19 20" stroke="#16171a" strokeWidth="2" fill="none" />
     </svg>
   );
 }

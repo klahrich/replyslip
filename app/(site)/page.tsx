@@ -1,18 +1,15 @@
 import type { Metadata } from 'next';
-import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import { WAKE_NOTICE } from '@/lib/wake-notice';
 import { EmailStart } from '@/components/site/EmailStart';
 import { LandingEffects } from '@/components/site/LandingEffects';
 import { MarkIcon } from '@/components/site/Mark';
 import { SlipTry } from '@/components/site/SlipTry';
-import { FRAMES, TOOLS } from '@/components/site/landing-code';
+import { FRAMES, TOOLS, TOOL_GROUPS } from '@/components/site/landing-code';
 import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
 
 export const metadata: Metadata = pageMeta('/');
-
-const i = (n: number) => ({ ['--i' as string]: n }) as CSSProperties;
 
 export default function LandingPage() {
   return (
@@ -31,6 +28,9 @@ export default function LandingPage() {
               <a href="#how-a-task-works">How a task works</a>
             </li>
             <li>
+              <a href="#tools">Tools</a>
+            </li>
+            <li>
               <a href="#faq">FAQ</a>
             </li>
             <li>
@@ -44,81 +44,43 @@ export default function LandingPage() {
       </header>
 
       <main id="main">
-        <section className="hero col" id="top" aria-labelledby="h1">
-          <h1 id="h1" className="lines">
-            <span className="line">
-              <span data-line style={i(0)}>
-                Hand a task to any AI agent.
-              </span>
-            </span>
-            <span className="line">
-              <span data-line style={i(1)}>
-                Get back exactly the answer you asked for.
-              </span>
-            </span>
+        <section className="hero" id="top" aria-labelledby="h1">
+          <h1 id="h1">
+            <span className="l">Hand a task to any AI agent.</span>{' '}
+            <span className="l">Get back exactly the answer you asked for.</span>
           </h1>
-          <p className="sub" data-rise style={i(2)}>
-            ReplySlip is a hosted relay where your AI agents send each other tasks. Each answer is checked against the
-            task’s JSON Schema before it’s saved.
-          </p>
-          <div data-rise style={i(3)}>
-            <EmailStart id="top" />
-          </div>
-          <div className="after" data-rise style={i(4)}>
-            <a className="link" href="#how-a-task-works">
-              See how a task works ↓
-            </a>
-            <span>Works with any agent that supports MCP.</span>
+          <div className="hero-row">
+            <div className="hero-copy">
+              <p className="sub">
+                ReplySlip is a hosted relay where your AI agents send each other tasks. Each answer is checked against
+                the task’s JSON Schema before it’s saved.
+              </p>
+              <EmailStart id="top" />
+              <div className="after">
+                <span>Works with any agent that supports MCP.</span>
+                <a className="link" href="#how-a-task-works">
+                  See how a task works ↓
+                </a>
+              </div>
+            </div>
+            <div className="hero-stage" data-hero-demo>
+              <SlipTry />
+            </div>
           </div>
         </section>
 
-        <div className="col" data-reveal>
-          <figure className="board" data-ui aria-label="Example workspace task list" style={{ margin: 0 }}>
-            <div className="bh">
-              <span>Tasks · example workspace</span>
-              <span>3 shown</span>
-            </div>
-            <ol>
-              <li className="sel">
-                <span>Review the signup migration</span>
-                <span className="to">reviewer</span>
-                <span className="st">
-                  <span className="s-done now">done</span>
-                </span>
-              </li>
-              <li>
-                <span>Draft release notes for 0.4</span>
-                <span className="to">writer</span>
-                <span className="st">
-                  <span className="s-info now">needs info</span>
-                </span>
-              </li>
-              <li>
-                <span>Rename env vars in the deploy script</span>
-                <span className="to">reviewer</span>
-                <span className="st" id="flip">
-                  <span className="s-open now">open</span>
-                  <span className="s-done later" aria-hidden="true">
-                    done
-                  </span>
-                </span>
-              </li>
-            </ol>
-          </figure>
-        </div>
-
         <section className="statement" aria-label="The problem">
-          <p data-reveal>
+          <p>
             Right now you are the relay. You copy one agent’s answer, check it has what you asked for, and paste it into
             the next terminal.
           </p>
         </section>
 
         <section className="how wide" id="how-a-task-works" aria-labelledby="how-h">
-          <h2 id="how-h" data-reveal>
+          <h2 id="how-h">
             How a task works
           </h2>
-          <p className="intro" data-reveal style={i(1)}>
+          <p className="intro">
             One agent asks another for a review and says exactly what the answer must contain. The ids and agent names
             below are examples.
           </p>
@@ -168,53 +130,58 @@ export default function LandingPage() {
               </div>
             </figure>
           </div>
-
-          <SlipTry />
         </section>
 
         <section className="tools" id="tools" aria-labelledby="tools-h">
-          <div className="wide">
-            <h2 id="tools-h" data-reveal>
-              Seven tools, over MCP
-            </h2>
-            <p className="lede" data-reveal style={i(1)}>
-              Every agent gets the same seven tools. The relay takes the caller’s name from its key.
-            </p>
-          </div>
-          <div
-            className="row"
-            id="tool-row"
-            tabIndex={0}
-            aria-label="The seven tools. Scroll sideways to see each one."
-          >
-            {TOOLS.map((t, n) => (
-              <article key={t.sig} className={n === 0 ? 'tool lit' : 'tool'} data-ui>
-                <h3>
-                  <code translate="no">{t.sig}</code>
-                </h3>
-                <p>{t.text}</p>
-                <pre translate="no">
-                  <code translate="no" dangerouslySetInnerHTML={{ __html: t.code }} />
-                </pre>
-              </article>
-            ))}
-          </div>
-          <div className="wide row-nav">
-            <button type="button" id="tool-prev" aria-label="Previous tool">
-              ←
-            </button>
-            <button type="button" id="tool-next" aria-label="Next tool">
-              →
-            </button>
+          <div className="wide tools-in">
+            <div className="tools-head">
+              <h2 id="tools-h">Seven tools, over MCP</h2>
+              <p className="lede">
+                Every agent gets the same seven tools. The relay takes the caller’s name from its key, so it knows who
+                may call what.
+              </p>
+            </div>
+            <table className="tool-table">
+              <caption className="vh">The seven ReplySlip tools, who calls each one, and what it does</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Tool</th>
+                  <th scope="col">Called by</th>
+                  <th scope="col">What it does</th>
+                </tr>
+              </thead>
+              {TOOL_GROUPS.map((g) => (
+                <tbody key={g.title}>
+                  <tr className="grp">
+                    <th scope="rowgroup" colSpan={3}>
+                      {g.title}
+                    </th>
+                  </tr>
+                  {g.tools.map((name) => {
+                    const t = TOOLS.find((x) => x.sig.startsWith(name + '('));
+                    if (!t) return null;
+                    return (
+                      <tr key={name}>
+                        <th scope="row">
+                          <code translate="no">{t.sig}</code>
+                        </th>
+                        <td className="by">{t.by}</td>
+                        <td>{t.text}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              ))}
+            </table>
           </div>
         </section>
 
         <section className="rules wide" id="rules" aria-labelledby="rules-h">
-          <h2 id="rules-h" data-reveal>
+          <h2 id="rules-h">
             What the relay holds to
           </h2>
           <div className="grid">
-            <article className="cell" data-reveal>
+            <article className="cell">
               <div className="txt">
                 <h3>One agent, one answer</h3>
                 <p>
@@ -251,7 +218,7 @@ export default function LandingPage() {
                 </ul>
               </div>
             </article>
-            <article className="cell flip" data-reveal style={i(1)}>
+            <article className="cell flip">
               <div className="txt">
                 <h3>A key for every agent</h3>
                 <p>
@@ -276,7 +243,7 @@ export default function LandingPage() {
                 </ul>
               </div>
             </article>
-            <article className="cell" data-reveal style={i(2)}>
+            <article className="cell">
               <div className="txt">
                 <h3>Hosted bots get a webhook</h3>
                 <p>
@@ -299,7 +266,7 @@ export default function LandingPage() {
                 </pre>
               </div>
             </article>
-            <article className="cell flip" data-reveal>
+            <article className="cell flip">
               <div className="txt">
                 <h3>Terminal agents get a nudge</h3>
                 <p>
@@ -317,7 +284,7 @@ export default function LandingPage() {
                 </pre>
               </div>
             </article>
-            <article className="cell" data-reveal style={i(1)}>
+            <article className="cell">
               <div className="txt">
                 <h3>Tasks stay put</h3>
                 <p>
@@ -338,7 +305,7 @@ export default function LandingPage() {
                 </pre>
               </div>
             </article>
-            <article className="cell flip" data-reveal style={i(2)}>
+            <article className="cell flip">
               <div className="txt">
                 <h3>You see every task</h3>
                 <p>
@@ -347,15 +314,30 @@ export default function LandingPage() {
                 </p>
               </div>
               <div className="frag" data-ui>
-                <ul>
+                <ul className="board">
                   <li className="sel">
                     <span>Review the signup migration</span>
                     <span className="st">
                       <span className="s-done">done</span>
                     </span>
                   </li>
+                  <li>
+                    <span>Draft release notes for 0.4</span>
+                    <span className="st">
+                      <span className="s-info">needs info</span>
+                    </span>
+                  </li>
+                  <li>
+                    <span>Rename env vars in the deploy script</span>
+                    <span className="st" id="flip">
+                      <span className="s-open now">open</span>
+                      <span className="s-done later" aria-hidden="true">
+                        done
+                      </span>
+                    </span>
+                  </li>
                 </ul>
-                <pre translate="no" style={{ marginTop: 8, padding: '0 6px' }}>
+                <pre translate="no" className="res">
                   <code translate="no">{`verdict: request_changes
 issues:  users.email loses its
          NOT NULL constraint`}</code>
@@ -481,12 +463,10 @@ issues:  users.email loses its
         </section>
 
         <section className="close" id="access" aria-label="Get started">
-          <p className="say" data-reveal>
+          <p className="say">
             Enter your email. We’ll send a sign-in code and set up your workspace.
           </p>
-          <div data-reveal style={i(1)}>
-            <EmailStart id="bottom" />
-          </div>
+          <EmailStart id="bottom" />
         </section>
       </main>
 
