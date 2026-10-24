@@ -11,7 +11,7 @@ colors:
   accent: "#a9bfa9"
   accent-hover: "#bccfbc"
   accent-ink: "#1a1d1f"
-  stage: "#2a2f33"
+  stage: "#30353a"
   perforation: "#667a67"
   paper: "#e9eae7"
   paper-2: "#dcdeda"
@@ -19,9 +19,9 @@ colors:
   paper-muted: "#4e555b"
   paper-line: "#9aa09f"
   slip-well: "#f4f5f3"
-  field: "#25292c"
-  field-2: "#30353a"
-  close: "#282c30"
+  field: "#2a2e32"
+  field-2: "#353b40"
+  close: "#2a2e32"
   ok: "#2f6b45"
   ok-on-ground: "#8fcaa0"
   info: "#7a5300"
@@ -140,7 +140,8 @@ Colour lives only in the palette blocks at the top of `app/globals.css`. `<html 
 **Palette B, Charcoal and sage (active).** `PALETTE = 'b'` in `app/layout.tsx`.
 - Ground **#1f2225** (soft charcoal, not black), cells **#282c30**, inactive markers **#353a3f**. Text is **ink** `#ecebe7` (13.4:1) and **muted** `#a7adb2` (7.1:1; 5.1:1 on surface-2).
 - **Accent** sage `#a9bfa9` is used for the primary button (text `#1a1d1f`, 8.6:1; hover `#bccfbc`), the focus ring (8.2:1 on the ground), the active step and the FAQ marker. It is never a surface.
-- The hero **stage** `#2a2f33` is a slightly lifted charcoal block; the slip is **paper** `#e9eae7` with text `#1c1f22` / `#4e555b` (≥5.6:1). The perforation is a darker sage `#667a67` (3.8:1 on paper). The closing band is `#282c30`.
+- Three calm steps of charcoal give the page its structure: ground `#1f2225`, the alternate **field** bands and the closing band `#2a2e32` (1.17:1 against the ground; field-2 `#353b40` for table group rows), and the hero **stage** `#30353a` (1.29:1), the lightest, so the slip's stage reads as a distinct block. Text on the bands: ink 11.5:1, muted 6.0:1 (5.0:1 on field-2), ok-on-ground 7.3:1, err-on-ground 6.6:1.
+- The slip on the stage is **paper** `#e9eae7` with text `#1c1f22` / `#4e555b` (≥5.6:1). The perforation is a darker sage `#667a67` (3.8:1 on paper). The closing band matches the field bands, with the sage button at 7.0:1 against it.
 - Status on paper: **ok** `#2f6b45`, **info** `#7a5300`, **err** `#a8321f` (≥4.68:1 on paper-2). On the ground: **ok-on-ground** `#8fcaa0`, **err-on-ground** `#f0a090`.
 - Inputs are light paper `#e9eae7` on the charcoal ground (13.2:1), so they need no separate border.
 - **Mark**: sage square, charcoal slip, paper dots and check. The favicon and `themeColor` (`#1f2225`) match.
