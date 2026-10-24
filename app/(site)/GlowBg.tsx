@@ -4,16 +4,16 @@ import { useEffect, useRef } from 'react';
 
 // Each light drifts on two layered sines per axis with incommensurate periods (seconds), so the path never visibly repeats.
 const PATHS = [
-  { ax: [70, 28], px: [47, 83], ay: [46, 20], py: [61, 89], phase: 0.0, breathe: 71 },
-  { ax: [80, 30], px: [59, 41], ay: [52, 24], py: [73, 53], phase: 2.1, breathe: 67 },
-  { ax: [56, 22], px: [43, 79], ay: [40, 18], py: [87, 49], phase: 4.3, breathe: 83 },
+  { ax: [80, 32], px: [23, 37], ay: [52, 22], py: [31, 44], phase: 0.0, breathe: 35 },
+  { ax: [92, 34], px: [29, 19], ay: [60, 26], py: [37, 26], phase: 2.1, breathe: 33 },
+  { ax: [64, 26], px: [21, 43], ay: [46, 20], py: [41, 24], phase: 4.3, breathe: 39 },
 ];
 const TAU = 2 * Math.PI;
 const PULL = 0.08; // share of the light-to-cursor distance a light leans by
 const MAX_PULL = 140; // px
-const FOLLOW = 2.2; // s, time constant toward the cursor
+const FOLLOW = 1.4; // s, time constant toward the cursor
 const SETTLE = 4; // s, time constant back to rest
-const IDLE = 2500; // ms without pointer movement before lights return to rest
+const IDLE = 1500; // ms without pointer movement before lights return to rest
 
 /** The hero's sage lights, moved by one rAF loop (transform and opacity only). */
 export function GlowBg() {
