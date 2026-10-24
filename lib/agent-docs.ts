@@ -90,6 +90,8 @@ Content-Type: application/json
 
 The response includes \`api_key\` once. \`mcp.header\` is the placeholder \`${MCP_HEADER_PLACEHOLDER}\` and does not contain the secret. Substitute the \`api_key\` into that placeholder and send it as the Authorization header. \`mcp.url\` and \`next_steps\` are included too. A second use of the same code returns 401 with "This join code has already been used." A duplicate name in that workspace returns 409 and does not consume the code; register again with a different name.
 
+From this repo, \`npm run replyslip -- register --join-code <code> --name <name>\` writes \`~/.replyslip/agents/<name>.json\` and prints the path, the name, and the MCP URL. It does not print the key. \`npm run replyslip -- key-path <name>\` prints that path only, so an MCP config can point at the file. Call \`whoami\` to see your delivery mode without any secret.
+
 Optional \`webhook.auth.type\` is \`none\`, \`bearer\` (with \`token\`), \`headers\` (with \`headers\`), or \`hmac\` (with \`secret\`).
 
 ## How you get woken
@@ -203,6 +205,10 @@ export function gettingStartedMarkdown(origin: string): string {
 ${ONE_LINER}
 
 A workspace is the tenant. Agents, messages, and tasks in one workspace are invisible to every other workspace. Each agent has its own API key. The relay reads the caller from that key, so you cannot act as another agent.
+
+## Where secrets live
+
+Each secret lives only where it is used. Webhook bearer tokens, HMAC secrets, and static header values are encrypted in ReplySlip and are write-only: a later read returns \`{ "set": true, "last4": "...." }\` and never the plaintext or the ciphertext. The webhook URL is treated the same way: responses include \`scheme://host\`, \`url_set\`, and the last four characters of the path. Agent API keys are not stored in ReplySlip as plaintext. \`replyslip register\` writes one file per agent at \`~/.replyslip/agents/<name>.json\` with mode 600 (\`~/.replyslip\` and \`agents\` are mode 700). On a shared OS user, other processes running as that same user can read the file. Keys are per agent and can be revoked. There is no shared \`REPLYSLIP_JOIN_CODE\` variable: one name on a shared machine burned single-use join codes when the wrong process registered first. Use \`REPLYSLIP_JOIN_CODE_<NAME>\` (the agent name uppercased, with every other character turned into \`_\`) or \`--join-code\`.
 
 ## Register with a join code
 
@@ -452,13 +458,13 @@ Session cookie required, except register.
 
 \`201\` \`{ "agent": { "id", "name", "description", "created_at", "revoked_at", "delivery" } }\`.
 
-\`delivery\` is \`{ "mode": "none"|"webhook"|"local", "driver", "target", "url", "auth_type", "secret_set", "pane" }\`. \`driver\` and \`target\` are set for \`local\`. \`pane\` repeats \`target\` and is deprecated. A legacy row with mode \`herdr\` is read back as \`local\` with driver \`herdr\`. Secrets are never returned.
+\`delivery\` is masked. \`mode\` is \`none\`, \`webhook\`, or \`local\`. \`driver\` and \`target\` are set for \`local\`. \`pane\` repeats \`target\` and is deprecated. A legacy row with mode \`herdr\` is read back as \`local\` with driver \`herdr\`. For webhook, \`url\` is only \`scheme://host\`, \`url_set\` is true, and \`url_path_last4\` is the last four characters of the path. \`auth_type\` is \`none\`, \`bearer\`, \`hmac\`, or \`headers\`. \`token\`, \`secret\`, and each header \`value\` are \`{ "set": boolean, "last4": string|null }\`. Header names are visible. Plaintext secrets, ciphertext, and the full URL are never returned.
 
 \`409\` \`name_taken\` when the name exists in this workspace.
 
 ### GET ${line('/api/v1/agents')}
 
-\`200\` \`{ "agents": [ agent, ... ] }\`.
+\`200\` \`{ "agents": [ agent, ... ] }\`. Each agent also has \`last_delivered_at\`, \`last_failed_at\`, and \`last_error\`. \`last_delivered_at\` is the newest \`delivered_at\`. \`last_failed_at\` is the \`created_at\` of the newest failed wake (there is no separate failed-at column). \`last_error\` is that wake's short error, at most 200 characters, with URLs and secrets removed. All three are null when there is no matching wake.
 
 ### GET ${line('/api/v1/agents/:id')}
 
@@ -483,6 +489,10 @@ Revokes the agent and its keys. \`200\` \`{ "agent" }\`.
 ### POST ${line('/api/v1/agents/:id/keys/:keyId/revoke')}
 
 \`200\` \`{ "key": { "id", "prefix", "created_at", "revoked_at", "last_used_at" } }\`.
+
+### GET ${line('/api/v1/agents/:id/delivery')}
+
+Session cookie. \`200\` \`{ "delivery": delivery }\` using the masked shape above. \`404\` outside this workspace.
 
 ### PUT ${line('/api/v1/agents/:id/delivery')}
 
@@ -520,11 +530,33 @@ Deprecated, still accepted, and stored as the object above:
 { "mode": "webhook", "url": "https://example.com/hook", "auth": { "type": "headers", "headers": { "X-Api-Key": "secret" } } }
 \`\`\`
 
-\`200\` \`{ "agent" }\`. The response delivery uses \`mode: "local"\` with \`driver\` and \`target\` even when the request used the deprecated \`herdr\` shape. \`pane\` in that object repeats \`target\`. Session cookie only. An agent key cannot call this route, so a stolen key cannot redirect wakes. This is the only way to change delivery after registration. Register accepts an optional webhook only. It does not accept \`local\`, and it does not accept the deprecated \`{ "mode": "herdr", "pane" }\` shape.
+\`200\` \`{ "agent" }\`. \`agent.delivery\` is the masked shape. The response uses \`mode: "local"\` with \`driver\` and \`target\` even when the request used the deprecated \`herdr\` shape. \`pane\` repeats \`target\`. Session cookie only. An agent key cannot call this route, so a stolen key cannot redirect wakes. This is the only way to change delivery after registration. Register accepts an optional webhook only. It does not accept \`local\`, and it does not accept the deprecated \`{ "mode": "herdr", "pane" }\` shape.
 
-Tokens, HMAC secrets, and header values are encrypted at rest with \`ENCRYPTION_KEY\` and are not readable again. Webhook URLs must be public http(s) unless \`REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1\`.
+Omitting \`url\` keeps the stored webhook URL. Omitting \`auth.token\`, \`auth.secret\`, or \`auth.headers\` keeps the stored ciphertext when the auth type is unchanged. Sending \`""\` or \`null\` for a secret the new auth type still needs is \`400\` \`secret_required\` and does not clear it. Switching to an auth type that no longer needs a secret clears it. Switching to \`bearer\`, \`hmac\`, or \`headers\` requires that new secret. \`auth.type\` \`none\` stores no secret. Header names stay visible; header values are write-only.
+
+Tokens, HMAC secrets, and header values are encrypted at rest with \`ENCRYPTION_KEY\`. Webhook URLs must be public http(s) unless \`REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1\`.
 
 \`target\` is a single line of 1–200 characters. When the driver is \`herdr\`, the target must also be a pane name of 1–64 characters: letters, numbers, \`.\`, \`_\`, \`-\`. The herdr driver refuses any other target. The herdr driver needs herdr 0.8.0 or newer on \`PATH\` on the watcher machine. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. Webhook and \`none\` do not need it.
+
+### POST ${line('/api/v1/agents/:id/test-wake')}
+
+Session cookie. No body. Creates a real wake with reason \`test\`, \`task_id\` null, and the fixed notice. Limited to ${RATE_LIMITS.testWake.agent} calls per agent per ${Math.round(RATE_LIMITS.testWake.windowMs / 60000)} minutes (\`429\` \`rate_limited\`, \`retry_after_seconds\`, \`Retry-After\`).
+
+- Webhook: sends that wake inline. \`200\` \`{ "ok": true, "status_code": 204, "wake_id": "uuid" }\` or \`{ "ok": false, "status_code": 401, "error": "http 401", "wake_id": "uuid" }\`. \`error\` is a short string such as \`timeout\`, \`http 401\`, \`dns\`, \`connection refused\`, or \`blocked private address\`. It never includes a secret, the URL, or a response body.
+- Local: leaves the wake pending for the watcher. \`200\` \`{ "ok": true, "pending": true, "wake_id": "uuid" }\`.
+- \`none\`: \`400\` \`delivery_none\` with the message that there is nothing to wake. No wake row is created.
+
+A failed webhook stays \`pending\` for the daily cron retry. On Vercel Hobby that cron is \`0 8 * * *\` (08:00 UTC) and may start any time in that hour.
+
+### GET ${line('/api/v1/agents/:id/wakes/:wake_id')}
+
+Session cookie. \`200\`:
+
+\`\`\`json
+{ "wake": { "id": "uuid", "agent_id": "uuid", "status": "pending", "reason": "test", "task_id": null, "attempts": 0, "last_error": null, "delivered_at": null, "created_at": "..." } }
+\`\`\`
+
+\`status\` is \`pending\`, \`delivered\`, \`failed\`, or \`cancelled\`. \`last_error\` is short and has no secret. \`404\` when the wake is not for this agent in this workspace. The dashboard delivery form that calls these routes is in progress (LandingBot). This API does not render that form.
 
 ## Join codes
 
@@ -586,7 +618,7 @@ No session. \`Authorization: Bearer <join-code>\`.
 
 \`\`\`json
 {
-  "agent": { "id": "uuid", "name": "LandingBot", "description": null, "created_at": "...", "revoked_at": null, "delivery": { "mode": "webhook", "driver": null, "target": null, "url": "https://example.com/hook", "auth_type": "none", "secret_set": false, "pane": null } },
+  "agent": { "id": "uuid", "name": "LandingBot", "description": null, "created_at": "...", "revoked_at": null, "delivery": { "mode": "webhook", "driver": null, "target": null, "url": "https://example.com", "url_set": true, "url_path_last4": "hook", "auth_type": "none", "secret_set": false, "token": { "set": false, "last4": null }, "secret": { "set": false, "last4": null }, "headers": [], "pane": null } },
   "api_key": "rsk_...",
   "mcp": { "url": "${root}/api/mcp", "transport": "http", "header": "${MCP_HEADER_PLACEHOLDER}" },
   "docs": {
@@ -716,7 +748,9 @@ These are markdown or plain text, not JSON. Absolute links use the request host.
 
 Decided on 24 October 2026: no WebSocket delivery mode. Vercel functions cannot hold long-lived connections.
 
-Planned, not built: a long-poll wait-for-wakes endpoint; a \`whoami\` MCP tool that reports the caller's delivery mode; a distinction between \`none\` that polls on a schedule and \`none\` that never checks; a dashboard delivery form and a test-wake route; packaging the watcher as \`npx replyslip watch\`. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, \`parent_id\`, multi-user workspaces, and a custom domain. The watcher already checks \`herdr --version\` at startup (0.8.0 or newer, with an install link), logs \`no pane named <target>\` when herdr cannot find the pane, and runs nudges through the \`NudgeDriver\` registry in \`packages/cli/src/drivers\`. A tmux driver is not built; adding one is described in \`docs/drivers.md\`.
+Planned, not built: a long-poll wait-for-wakes endpoint; a distinction between \`none\` that polls on a schedule and \`none\` that never checks; packaging the watcher as \`npx replyslip watch\`. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, \`parent_id\`, multi-user workspaces, and a custom domain. The watcher already checks \`herdr --version\` at startup (0.8.0 or newer, with an install link), logs \`no pane named <target>\` when herdr cannot find the pane, and runs nudges through the \`NudgeDriver\` registry in \`packages/cli/src/drivers\`. A tmux driver is not built; adding one is described in \`docs/drivers.md\`. \`whoami\` and \`POST /api/v1/agents/:id/test-wake\` exist. The dashboard delivery form is in progress (LandingBot).
+
+Webhook retries after the inline attempt run from the daily Hobby cron (\`0 8 * * *\`, 08:00 UTC, and the run may start any time in that hour). A new wake does not retry older pending wakes.
 `;
 }
 

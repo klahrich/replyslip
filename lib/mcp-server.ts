@@ -1,6 +1,10 @@
 import type { AuthInfo } from '@modelcontextprotocol/server';
+import { eq } from 'drizzle-orm';
 import { createMcpHandler, withMcpAuth } from 'mcp-handler';
-import { authenticateAgentKey, type AgentPrincipal } from './agents';
+import { getDb } from '@/db';
+import { workspaces } from '@/db/schema';
+import { authenticateAgentKey, getAgent, type AgentPrincipal } from './agents';
+import { whoamiDelivery } from './delivery';
 import { HttpError } from './errors';
 import { TOOL_DOCS, toolInputs } from './mcp-tools';
 import { askTask, completeTask, createTask, failTask, getTask, listTasks, sendMessage } from './tasks';
@@ -170,6 +174,34 @@ export const mcpHandler = createMcpHandler(
         try {
           const task = await failTask(principalFrom(ctx as ToolCtx), args.id, args.reason);
           return ok({ task });
+        } catch (err) {
+          return fail(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'whoami',
+      {
+        title: docsByName.get('whoami')!.title,
+        description: docsByName.get('whoami')!.description,
+        inputSchema: toolInputs.whoami,
+      },
+      async (_args, ctx) => {
+        try {
+          const principal = principalFrom(ctx as ToolCtx);
+          const agent = await getAgent(principal.workspaceId, principal.agentId);
+          const [workspace] = await getDb()
+            .select({ name: workspaces.name })
+            .from(workspaces)
+            .where(eq(workspaces.id, principal.workspaceId))
+            .limit(1);
+          return ok({
+            name: agent.name,
+            id: agent.id,
+            workspace_name: workspace?.name ?? null,
+            delivery: whoamiDelivery(agent),
+          });
         } catch (err) {
           return fail(err);
         }

@@ -1,13 +1,20 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getDb, type DbTx } from '@/db';
-import { agents, wakes } from '@/db/schema';
+import { agents, wakes, type AgentRow } from '@/db/schema';
 import { WAKE_MAX_ATTEMPTS, WEBHOOK_TIMEOUT_MS } from './constants';
 import { HttpError } from './errors';
 import { safeEqualString } from './crypto';
 import { buildWebhookCall, localNudgeOf } from './delivery';
+import { assertPublicWebhookUrl } from './webhook-url';
 import { WAKE_NOTICE } from './wake-notice';
 
-export type WakeReason = 'message' | 'task' | 'result' | 'question' | 'failure';
+export type WakeReason = 'message' | 'task' | 'result' | 'question' | 'failure' | 'test';
+
+export type WebhookAttempt = {
+  outcome: 'delivered' | 'pending' | 'skipped';
+  statusCode?: number;
+  error?: string;
+};
 
 type WakeInsert = {
   workspaceId: string;
@@ -55,8 +62,56 @@ function backoffSeconds(attempts: number): number {
   return Math.min(30 * 2 ** Math.max(0, attempts - 1), 3600);
 }
 
+/** Short, secret-free description of a webhook failure. Never includes the URL, a secret, or a response body. */
+export function classifyWebhookFailure(err: unknown, statusCode?: number): string {
+  if (statusCode !== undefined) return `http ${statusCode}`;
+  const codes = new Set<string>();
+  const names = new Set<string>();
+  const messages: string[] = [];
+  const stack: unknown[] = [err];
+  const seen = new Set<unknown>();
+  while (stack.length > 0) {
+    const item = stack.pop();
+    if (!item || typeof item !== 'object' || seen.has(item)) continue;
+    seen.add(item);
+    if (item instanceof Error) {
+      names.add(item.name);
+      messages.push(item.message);
+    }
+    const record = item as { code?: unknown; cause?: unknown; errors?: unknown[] };
+    if (typeof record.code === 'string') codes.add(record.code);
+    if (record.cause) stack.push(record.cause);
+    if (Array.isArray(record.errors)) stack.push(...record.errors);
+  }
+  const text = messages.join('\n');
+  if (
+    names.has('TimeoutError') ||
+    names.has('AbortError') ||
+    codes.has('ABORT_ERR') ||
+    codes.has('UND_ERR_CONNECT_TIMEOUT') ||
+    /timeout/i.test(text)
+  ) {
+    return 'timeout';
+  }
+  if (codes.has('ENOTFOUND') || codes.has('EAI_AGAIN') || /ENOTFOUND|getaddrinfo/i.test(text)) return 'dns';
+  if (codes.has('ECONNREFUSED') || /ECONNREFUSED/i.test(text)) return 'connection refused';
+  if (/private|loopback/i.test(text)) return 'blocked private address';
+  return 'delivery failed';
+}
+
+export function publicWakeError(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw
+    .replace(/https?:\/\/\S+/gi, '[url]')
+    .replace(/\bv1\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2,}/g, '[secret]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [secret]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.slice(0, 200);
+}
+
 /** Claim a due webhook wake and POST a short notice. Failures stay pending for cron. */
-export async function deliverWebhookWake(wakeId: string): Promise<'delivered' | 'pending' | 'skipped'> {
+export async function deliverWebhookWake(wakeId: string): Promise<WebhookAttempt> {
   const db = getDb();
   const claimed = await db.transaction(async (tx) => {
     const locked = await tx.execute<{ id: string }>(sql`
@@ -81,15 +136,16 @@ export async function deliverWebhookWake(wakeId: string): Promise<'delivered' | 
       .returning();
     return updated ?? null;
   });
-  if (!claimed) return 'skipped';
+  if (!claimed) return { outcome: 'skipped' };
 
   const [agent] = await db.select().from(agents).where(eq(agents.id, claimed.agentId)).limit(1);
   if (!agent || agent.deliveryMode !== 'webhook' || !agent.webhookUrl) {
     await markFailed(claimed.id, 'Agent has no webhook delivery config.');
-    return 'pending';
+    return { outcome: 'pending', error: 'delivery failed' };
   }
 
   try {
+    assertPublicWebhookUrl(agent.webhookUrl);
     const body = wakeNoticeBody({
       id: claimed.id,
       agentName: agent.name,
@@ -106,32 +162,30 @@ export async function deliverWebhookWake(wakeId: string): Promise<'delivered' | 
       signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
     });
     await response.body?.cancel().catch(() => undefined);
-    if (response.status >= 300 && response.status < 400) {
-      throw new Error(`Webhook redirected with HTTP ${response.status}`);
-    }
     if (response.status < 200 || response.status >= 300) {
-      throw new Error(`Webhook returned HTTP ${response.status}`);
+      throw Object.assign(new Error('http'), { statusCode: response.status });
     }
     await db
       .update(wakes)
       .set({ status: 'delivered', deliveredAt: new Date(), lastError: null })
       .where(and(eq(wakes.id, claimed.id), eq(wakes.status, 'pending')));
-    return 'delivered';
+    return { outcome: 'delivered', statusCode: response.status };
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Webhook delivery failed';
-    console.error(`[replyslip] webhook wake ${claimed.id} failed: ${message}`);
+    const statusCode = err && typeof err === 'object' && 'statusCode' in err ? Number((err as { statusCode: unknown }).statusCode) : undefined;
+    const error = classifyWebhookFailure(err, Number.isFinite(statusCode) ? statusCode : undefined);
+    console.error(`[replyslip] webhook wake ${claimed.id} failed: ${error}`);
     if (claimed.attempts >= WAKE_MAX_ATTEMPTS) {
-      await markFailed(claimed.id, message);
+      await markFailed(claimed.id, error);
     } else {
       await db
         .update(wakes)
         .set({
-          lastError: message.slice(0, 500),
+          lastError: error.slice(0, 200),
           nextAttemptAt: new Date(Date.now() + backoffSeconds(claimed.attempts) * 1000),
         })
         .where(and(eq(wakes.id, claimed.id), eq(wakes.status, 'pending')));
     }
-    return 'pending';
+    return { outcome: 'pending', error, ...(Number.isFinite(statusCode) ? { statusCode } : {}) };
   }
 }
 
@@ -158,7 +212,7 @@ export async function dispatchDueWebhookWakes(limit = 50): Promise<{ attempted: 
   let delivered = 0;
   for (const row of due) {
     const outcome = await deliverWebhookWake(row.id);
-    if (outcome === 'delivered') delivered += 1;
+    if (outcome.outcome === 'delivered') delivered += 1;
   }
   return { attempted: due.length, delivered };
 }
@@ -248,6 +302,98 @@ export async function ackWakes(workspaceId: string, wakeIds: string[]): Promise<
     .where(and(eq(wakes.workspaceId, workspaceId), inArray(wakes.id, wakeIds), eq(wakes.status, 'pending')))
     .returning({ id: wakes.id });
   return updated.length;
+}
+
+export async function createTestWake(agent: AgentRow): Promise<string> {
+  if (agent.revokedAt) throw new HttpError(409, 'agent_revoked', 'This agent has been revoked.');
+  if (agent.deliveryMode === 'none') {
+    throw new HttpError(
+      400,
+      'delivery_none',
+      'This agent has delivery mode none, so there is nothing to wake. Set webhook or local delivery first.',
+    );
+  }
+  if (agent.deliveryMode === 'webhook' && !agent.webhookUrl) {
+    throw new HttpError(400, 'invalid_webhook_url', 'This agent has no webhook URL.');
+  }
+  if ((agent.deliveryMode === 'local' || agent.deliveryMode === 'herdr') && !localNudgeOf(agent)) {
+    throw new HttpError(400, 'invalid_delivery', 'This agent has no local driver and target.');
+  }
+  const [wake] = await getDb()
+    .insert(wakes)
+    .values({
+      workspaceId: agent.workspaceId,
+      agentId: agent.id,
+      reason: 'test',
+      taskId: null,
+      messageId: null,
+    })
+    .returning();
+  if (!wake) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+  return wake.id;
+}
+
+export async function getAgentWake(workspaceId: string, agentId: string, wakeId: string) {
+  const [wake] = await getDb()
+    .select()
+    .from(wakes)
+    .where(and(eq(wakes.id, wakeId), eq(wakes.agentId, agentId), eq(wakes.workspaceId, workspaceId)))
+    .limit(1);
+  if (!wake) throw new HttpError(404, 'not_found', 'No wake was found.');
+  return {
+    id: wake.id,
+    agent_id: wake.agentId,
+    status: wake.status,
+    reason: wake.reason,
+    task_id: wake.taskId,
+    attempts: wake.attempts,
+    last_error: publicWakeError(wake.lastError),
+    delivered_at: wake.deliveredAt?.toISOString() ?? null,
+    created_at: wake.createdAt.toISOString(),
+  };
+}
+
+export type AgentWakeActivity = {
+  last_delivered_at: string | null;
+  last_failed_at: string | null;
+  last_error: string | null;
+};
+
+function isoTime(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+export async function agentWakeActivity(workspaceId: string): Promise<Map<string, AgentWakeActivity>> {
+  const db = getDb();
+  const delivered = await db.execute<{ agent_id: string; last_delivered_at: Date | string | null }>(sql`
+    select agent_id, max(delivered_at) as last_delivered_at
+    from wakes
+    where workspace_id = ${workspaceId} and status = 'delivered'
+    group by agent_id
+  `);
+  const failed = await db.execute<{ agent_id: string; last_failed_at: Date | string; last_error: string | null }>(sql`
+    select distinct on (agent_id) agent_id, created_at as last_failed_at, last_error
+    from wakes
+    where workspace_id = ${workspaceId} and status = 'failed'
+    order by agent_id, created_at desc
+  `);
+  const map = new Map<string, AgentWakeActivity>();
+  for (const row of delivered) {
+    map.set(row.agent_id, {
+      last_delivered_at: isoTime(row.last_delivered_at),
+      last_failed_at: null,
+      last_error: null,
+    });
+  }
+  for (const row of failed) {
+    const current = map.get(row.agent_id) ?? { last_delivered_at: null, last_failed_at: null, last_error: null };
+    current.last_failed_at = isoTime(row.last_failed_at);
+    current.last_error = publicWakeError(row.last_error);
+    map.set(row.agent_id, current);
+  }
+  return map;
 }
 
 export function assertCronAuthorized(req: Request): void {

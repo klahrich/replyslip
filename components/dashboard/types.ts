@@ -1,12 +1,20 @@
 /** Response shapes of the /api/v1 routes, as documented in docs/API.md. */
 
+export type SecretMask = { set: boolean; last4: string | null };
+
 export type Delivery = {
   mode: 'none' | 'webhook' | 'local' | 'herdr';
   driver: string | null;
   target: string | null;
+  /** scheme://host only. The path is not returned. */
   url: string | null;
+  url_set: boolean;
+  url_path_last4: string | null;
   auth_type: string | null;
   secret_set: boolean;
+  token: SecretMask;
+  secret: SecretMask;
+  headers: { name: string; value: SecretMask }[];
   /** Deprecated alias of `target` for local delivery. */
   pane: string | null;
 };
@@ -18,6 +26,9 @@ export type Agent = {
   created_at: string;
   revoked_at: string | null;
   delivery: Delivery;
+  last_delivered_at?: string | null;
+  last_failed_at?: string | null;
+  last_error?: string | null;
 };
 
 export type AgentKey = {

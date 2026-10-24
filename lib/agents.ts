@@ -10,7 +10,7 @@ import {
   JOIN_CODE_MIN_TTL_MS,
 } from './constants';
 import { randomToken, sha256, tokenPrefix } from './crypto';
-import { deliveryColumns, publicDelivery, type DeliveryInput } from './delivery';
+import { applyDeliveryUpdate, deliveryColumns, publicDelivery, type DeliveryInput, type DeliveryUpdate } from './delivery';
 import { HttpError, isUniqueViolation } from './errors';
 import { clientIp } from './origin';
 import { consumeRateLimit } from './rate-limit';
@@ -161,10 +161,10 @@ export async function revokeAgentKey(workspaceId: string, agentId: string, keyId
   return key;
 }
 
-export async function setAgentDelivery(workspaceId: string, agentId: string, input: DeliveryInput) {
+export async function setAgentDelivery(workspaceId: string, agentId: string, input: DeliveryUpdate) {
   const agent = await getAgent(workspaceId, agentId);
   if (agent.revokedAt) throw new HttpError(409, 'agent_revoked', 'This agent has been revoked.');
-  const columns = deliveryColumns(input);
+  const columns = applyDeliveryUpdate(agent, input);
   const [updated] = await getDb()
     .update(agents)
     .set(columns)
