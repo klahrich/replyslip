@@ -492,6 +492,11 @@ issues:  users.email loses its
               FAQ
             </a>
           </li>
+          <li>
+            <Link className="link" href="/compare/harnessrouter">
+              ReplySlip vs HarnessRouter
+            </Link>
+          </li>
         </ul>
         <p className="yr">© 2026 ClaireVue</p>
       </footer>
