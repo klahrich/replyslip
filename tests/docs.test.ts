@@ -22,6 +22,8 @@ describe('agent docs', () => {
     expect(llmsBody).toContain('https://preview.example/docs/getting-started.md');
     expect(llmsBody).toContain('https://preview.example/docs/api.md');
     expect(llmsBody).toContain('https://preview.example/skill.md');
+    expect(llmsBody).toContain('Bearer <api_key>');
+    expect(llmsBody).toContain('substitute it into the Authorization header');
     expect(llmsBody.split('\n')[2]).toMatch(/^> ReplySlip/);
 
     const skillRes = await skill(docsRequest('/skill.md'));
@@ -34,6 +36,8 @@ describe('agent docs', () => {
     expect(skillBody).toContain('complete_task');
     expect(skillBody).toContain('result_schema_mismatch');
     expect(skillBody).toContain('https://preview.example/api/v1/agents/register');
+    expect(skillBody).toContain('Bearer <api_key>');
+    expect(skillBody).toContain('Substitute the `api_key`');
 
     const guide = await gettingStarted(docsRequest('/docs/getting-started.md'));
     expect(guide.status).toBe(200);
@@ -42,6 +46,8 @@ describe('agent docs', () => {
     for (const word of ['open', 'needs_info', 'done', 'failed', 'join code', 'send_message', 'ask', 'fail_task']) {
       expect(guideBody.toLowerCase()).toContain(word);
     }
+    expect(guideBody).toContain('Bearer <api_key>');
+    expect(guideBody).toContain('Substitute this value into the Authorization header.');
 
     const api = await apiDoc(docsRequest('/docs/api.md'));
     expect(api.status).toBe(200);
@@ -50,6 +56,8 @@ describe('agent docs', () => {
     expect(apiBody).toContain('https://preview.example/api/mcp');
     expect(apiBody).toContain('/api/v1/auth/request-code');
     expect(apiBody).toContain('/api/v1/join-codes');
+    expect(apiBody).toContain('"header": "Bearer <api_key>"');
+    expect(apiBody).toContain('Substitute that value into the placeholder');
   });
 
   it('keeps docs/API.md identical to the shared source', () => {

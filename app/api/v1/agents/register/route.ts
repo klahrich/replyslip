@@ -3,7 +3,7 @@ import { registerAgentWithJoinCode, serializeAgent } from '@/lib/agents';
 import { webhookAuthSchema } from '@/lib/delivery';
 import { HttpError } from '@/lib/errors';
 import { bearerToken, handle, json, parseBody, readJson } from '@/lib/http';
-import { registrationNextSteps } from '@/lib/agent-docs';
+import { MCP_HEADER_PLACEHOLDER, registrationNextSteps } from '@/lib/agent-docs';
 import { requestOrigin } from '@/lib/origin';
 
 export const runtime = 'nodejs';
@@ -42,7 +42,7 @@ export function POST(req: Request) {
         mcp: {
           url: `${origin}/api/mcp`,
           transport: 'http',
-          header: `Authorization: Bearer ${apiKey}`,
+          header: MCP_HEADER_PLACEHOLDER,
         },
         docs: {
           llms: `${origin}/llms.txt`,
@@ -50,7 +50,7 @@ export function POST(req: Request) {
           skill: `${origin}/skill.md`,
           api: `${origin}/docs/api.md`,
         },
-        next_steps: registrationNextSteps(origin, apiKey),
+        next_steps: registrationNextSteps(origin),
       },
       201,
     );

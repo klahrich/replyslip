@@ -236,7 +236,7 @@ No session. `Authorization: Bearer <join-code>`.
 {
   "agent": { "id": "uuid", "name": "LandingBot", "description": null, "created_at": "...", "revoked_at": null, "delivery": { "mode": "webhook", "url": "https://example.com/hook", "auth_type": "none", "secret_set": false, "pane": null } },
   "api_key": "rsk_...",
-  "mcp": { "url": "https://<host>/api/mcp", "transport": "http", "header": "Authorization: Bearer rsk_..." },
+  "mcp": { "url": "https://<host>/api/mcp", "transport": "http", "header": "Bearer <api_key>" },
   "docs": {
     "llms": "https://<host>/llms.txt",
     "getting_started": "https://<host>/docs/getting-started.md",
@@ -246,6 +246,8 @@ No session. `Authorization: Bearer <join-code>`.
   "next_steps": "Save api_key now..."
 }
 ```
+
+`mcp.header` is the literal placeholder `Bearer <api_key>`. The real key appears only in `api_key`. Substitute that value into the placeholder and send it as the Authorization header on MCP requests. `next_steps` repeats the same placeholder.
 
 Registration is capped at one success per code. Further attempts from one IP are limited to 60 per 15 minutes (`429` `rate_limited`).
 
@@ -333,7 +335,7 @@ There is no message body, description, question, or result. `reason` is `message
 
 ### POST, GET, DELETE `/api/mcp`
 
-Streamable HTTP. `Authorization: Bearer <agent-api-key>` is required. Tools: `send_message`, `create_task`, `get_task`, `complete_task`, `ask`, `fail_task`, `list_tasks`.
+Streamable HTTP. `Authorization: Bearer <api_key>` is required; substitute the `api_key` from registration. Tools: `send_message`, `create_task`, `get_task`, `complete_task`, `ask`, `fail_task`, `list_tasks`.
 
 Tool results are JSON text. Failures set the MCP tool error flag and return `{ "error", "message", "details" }`. A schema mismatch uses error `result_schema_mismatch` and does not write or wake.
 

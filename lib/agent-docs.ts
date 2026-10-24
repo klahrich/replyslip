@@ -33,11 +33,14 @@ function toolSection(origin: string): string {
   }).join('\n\n');
 }
 
-export function registrationNextSteps(origin: string, apiKey: string): string {
+/** Value of `mcp.header` in the register response. The real key is only in `api_key`. */
+export const MCP_HEADER_PLACEHOLDER = 'Bearer <api_key>';
+
+export function registrationNextSteps(origin: string): string {
   const mcp = absoluteUrl(origin, DOC_PATHS.mcp);
   return [
     'Save api_key now. ReplySlip stores only a hash of it and will not show it again.',
-    `Connect with Streamable HTTP to ${mcp} and send header "Authorization: Bearer ${apiKey}" on every request.`,
+    `Connect with Streamable HTTP to ${mcp}. mcp.header is the placeholder "${MCP_HEADER_PLACEHOLDER}". Substitute the api_key value from this response into that placeholder and send it as the Authorization header on every request.`,
     'Call list_tasks to see work addressed to you, then get_task to read a task and its thread. complete_task only succeeds when result matches that task\'s result_schema.',
     'If complete_task returns result_schema_mismatch, nothing was saved and the sender was not woken. Fix the result and call complete_task again.',
     `Read ${absoluteUrl(origin, DOC_PATHS.gettingStarted)} and install the skill at ${absoluteUrl(origin, DOC_PATHS.skill)}.`,
@@ -53,7 +56,7 @@ export function llmsTxt(origin: string): string {
     '',
     `> ${ONE_LINER}`,
     '',
-    `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. Delivery is webhook, herdr, or none. The herdr binary is required only for herdr delivery.`,
+    `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. Delivery is webhook, herdr, or none. The herdr binary is required only for herdr delivery. The register response returns the API key only in api_key; substitute it into the Authorization header. mcp.header is the placeholder ${MCP_HEADER_PLACEHOLDER}.`,
     `- [API reference](${api}): HTTP API for sign-in, agents, join codes, tasks, and the watcher.`,
     `- [Agent skill](${skill}): Installable skill covering register, messages, tasks, and validation errors.`,
     '',
@@ -85,7 +88,7 @@ Content-Type: application/json
 {"name":"LandingBot","description":"Drafts landing pages","webhook":{"url":"https://example.com/replyslip","auth":{"type":"none"}}}
 \`\`\`
 
-The response includes \`api_key\` once, \`mcp.url\`, and \`next_steps\`. A second use of the same code returns 401 with "This join code has already been used." A duplicate name in that workspace returns 409 and does not consume the code; register again with a different name.
+The response includes \`api_key\` once. \`mcp.header\` is the placeholder \`${MCP_HEADER_PLACEHOLDER}\` and does not contain the secret. Substitute \`api_key\` into that placeholder and send it as the Authorization header. \`mcp.url\` and \`next_steps\` are included too. A second use of the same code returns 401 with "This join code has already been used." A duplicate name in that workspace returns 409 and does not consume the code; register again with a different name.
 
 Optional \`webhook.auth.type\` is \`none\`, \`bearer\` (with \`token\`), \`headers\` (with \`headers\`), or \`hmac\` (with \`secret\`).
 
@@ -105,14 +108,14 @@ Your \`rsk_\` key belongs in the MCP config and reads and answers tasks. A watch
 
 ## Connect
 
-Add the MCP server over Streamable HTTP. Send the agent key on every request. Do not use the join code here. Any MCP-capable agent can use this config:
+Add the MCP server over Streamable HTTP. Substitute the \`api_key\` from the register response into the Authorization header. Do not use the join code here. Any MCP-capable agent can use this config:
 
 \`\`\`json
 {
   "mcpServers": {
     "replyslip": {
       "url": "${mcp}",
-      "headers": { "Authorization": "Bearer <api-key>" }
+      "headers": { "Authorization": "${MCP_HEADER_PLACEHOLDER}" }
     }
   }
 }
@@ -223,11 +226,11 @@ Content-Type: application/json
 Success is HTTP 201 with:
 
 - \`agent\` — id, name, description, delivery summary
-- \`api_key\` — the only time the secret is returned
+- \`api_key\` — the only time the secret is returned. Substitute this value into the Authorization header.
 - \`mcp.url\` — \`${mcp}\`
-- \`mcp.header\` — the Authorization header to send
+- \`mcp.header\` — the literal placeholder \`${MCP_HEADER_PLACEHOLDER}\`. It is not the secret. Substitute \`api_key\` into it and send that value as the Authorization header.
 - \`docs\` — links to this guide, the API reference, and the skill
-- \`next_steps\` — the same instructions in short form
+- \`next_steps\` — the same instructions in short form, including the placeholder
 
 | Response | Meaning |
 | --- | --- |
@@ -282,14 +285,14 @@ The first POST is inline, in the request that saved the message, task, result, q
 
 ## Connect any MCP-capable agent
 
-ReplySlip speaks MCP over Streamable HTTP at \`${mcp}\`. Send the agent key on every request:
+ReplySlip speaks MCP over Streamable HTTP at \`${mcp}\`. Substitute the \`api_key\` from the register response into the Authorization header and send it on every request:
 
 \`\`\`json
 {
   "mcpServers": {
     "replyslip": {
       "url": "${mcp}",
-      "headers": { "Authorization": "Bearer <api-key>" }
+      "headers": { "Authorization": "${MCP_HEADER_PLACEHOLDER}" }
     }
   }
 }
@@ -575,7 +578,7 @@ No session. \`Authorization: Bearer <join-code>\`.
 {
   "agent": { "id": "uuid", "name": "LandingBot", "description": null, "created_at": "...", "revoked_at": null, "delivery": { "mode": "webhook", "url": "https://example.com/hook", "auth_type": "none", "secret_set": false, "pane": null } },
   "api_key": "rsk_...",
-  "mcp": { "url": "${root}/api/mcp", "transport": "http", "header": "Authorization: Bearer rsk_..." },
+  "mcp": { "url": "${root}/api/mcp", "transport": "http", "header": "${MCP_HEADER_PLACEHOLDER}" },
   "docs": {
     "llms": "${root}/llms.txt",
     "getting_started": "${root}/docs/getting-started.md",
@@ -585,6 +588,8 @@ No session. \`Authorization: Bearer <join-code>\`.
   "next_steps": "Save api_key now..."
 }
 \`\`\`
+
+\`mcp.header\` is the literal placeholder \`${MCP_HEADER_PLACEHOLDER}\`. The real key appears only in \`api_key\`. Substitute that value into the placeholder and send it as the Authorization header on MCP requests. \`next_steps\` repeats the same placeholder.
 
 Registration is capped at one success per code. Further attempts from one IP are limited to ${RATE_LIMITS.register.ip} per ${requestWindowMinutes} minutes (\`429\` \`rate_limited\`).
 
@@ -672,7 +677,7 @@ There is no message body, description, question, or result. \`reason\` is \`mess
 
 ### POST, GET, DELETE ${line('/api/mcp')}
 
-Streamable HTTP. \`Authorization: Bearer <agent-api-key>\` is required. Tools: ${TOOL_DOCS.map((tool) => `\`${tool.name}\``).join(', ')}.
+Streamable HTTP. \`Authorization: ${MCP_HEADER_PLACEHOLDER}\` is required; substitute the \`api_key\` from registration. Tools: ${TOOL_DOCS.map((tool) => `\`${tool.name}\``).join(', ')}.
 
 Tool results are JSON text. Failures set the MCP tool error flag and return \`{ "error", "message", "details" }\`. A schema mismatch uses error \`result_schema_mismatch\` and does not write or wake.
 
