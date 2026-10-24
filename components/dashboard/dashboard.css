@@ -97,3 +97,9 @@
 .dash-count{font-size:var(--s-small);font-weight:400;color:var(--muted)}
 .dash-history{margin-top:22px}
 .dash-history>summary{font-size:var(--s-body);color:var(--ink);font-weight:500}
+.dash-ws-name{display:flex;align-items:baseline;gap:6px 16px;flex-wrap:wrap}
+.dash-hero .dash-ws-name h1{margin:4px 0 10px}
+.dash-rename{margin:8px 0 6px;max-width:40rem}
+.dash-rename label{display:block;font-size:var(--s-small);color:var(--muted);margin-bottom:6px}
+.dash-rename-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.dash-rename input{flex:1 1 240px;min-width:0;height:44px;padding:0 12px;font:500 var(--s-lead)/1 var(--font);color:var(--ink);background:#f1eee9;border:1px solid #8d877e;border-radius:4px}

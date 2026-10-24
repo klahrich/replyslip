@@ -6,6 +6,7 @@ import { Agents } from './Agents';
 import { api, errorText, formatTime, SIGNED_OUT_EVENT } from './api';
 import { JoinCodes, type DocPaths } from './JoinCodes';
 import { Tasks } from './Tasks';
+import { WorkspaceName } from './WorkspaceName';
 import type { Agent, AgentKey, JoinCode } from './types';
 
 type Workspace = { id: string; name: string; created_at: string };
@@ -89,7 +90,7 @@ export function Dashboard({
     <>
       <section className="dash-hero" aria-labelledby="ws-h">
         <p className="dash-muted">Workspace</p>
-        <h1 id="ws-h">{workspace.name}</h1>
+        <WorkspaceName initialName={workspace.name} />
         <p className="dash-muted">
           Signed in as {email} · created {formatTime(workspace.created_at)}
           {loaded ? ` · ${live} active ${live === 1 ? 'agent' : 'agents'}` : ''}
