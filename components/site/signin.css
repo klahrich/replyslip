@@ -1,0 +1,10 @@
+/* /sign-in, scoped under .si */
+.si main{margin:clamp(56px,12vh,140px) var(--mr) 0 var(--al);max-width:520px}
+.si h1{font-size:clamp(2rem,1rem + 3.4vw,3.5rem);line-height:1.04}
+.si .lead{margin-top:20px;color:var(--ink)}
+.si .signup{margin-top:32px}
+.si .code-input{font-family:var(--mono);letter-spacing:.3em;font-size:1.25rem} /* taste-skill-ignore: literal code, tool names and file paths only */
+.si .row-links{margin-top:20px;display:flex;flex-wrap:wrap;gap:8px 24px;font-size:var(--s-small);color:var(--muted)}
+.si .textbtn{background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-decoration:underline;text-underline-offset:.22em;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent)}
+.si .textbtn:disabled{color:var(--muted);cursor:default}
+.si .ok{color:#1f5f3a}
