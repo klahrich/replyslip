@@ -1,4 +1,4 @@
-/* Landing page. Direction "The product performs" (taste-skill): graphite ground, the reply slip on an orange stage.
+/* Landing page. Direction "The product performs" (taste-skill): the reply slip on a shaped stage. Colours come only from the palette tokens in globals.css.
    Content is never hidden waiting for script or animation; motion only moves things that are already visible. */
 
 .top{padding-top:20px}
@@ -13,7 +13,7 @@
 .hero .signup{margin-top:28px}
 .hero .after{margin-top:16px;display:flex;flex-direction:column;gap:6px;font-size:var(--s-small);color:var(--muted)}
 .hero .after a{color:var(--ink);font-weight:500;align-self:start}
-.hero-stage{grid-column:6/span 7;margin-right:calc(var(--m) * -1);background:var(--accent);padding:clamp(20px,2.4vw,32px) clamp(20px,3.2vw,48px) clamp(20px,2.4vw,32px) clamp(20px,2.4vw,32px);clip-path:polygon(28px 0,100% 0,100% 100%,0 100%,0 28px)}
+.hero-stage{grid-column:6/span 7;margin-right:calc(var(--m) * -1);background:var(--stage);padding:clamp(20px,2.4vw,32px) clamp(20px,3.2vw,48px) clamp(20px,2.4vw,32px) clamp(20px,2.4vw,32px);clip-path:polygon(28px 0,100% 0,100% 100%,0 100%,0 28px)}
 @media (max-width:899px){
   .hero-copy,.hero-stage{grid-column:1/-1}
   .hero-stage{margin:36px calc(var(--m) * -1) 0;padding:20px var(--m)}
@@ -23,7 +23,7 @@
 }
 
 /* the reply slip (paper) */
-.slip{position:relative;max-width:640px;background:var(--paper);color:var(--paper-ink);border-radius:2px;padding:18px 20px 20px;font-size:var(--s-small);line-height:1.5;caret-color:var(--paper-ink)}
+.slip{position:relative;max-width:640px;background:var(--paper);color:var(--paper-ink);border:1px solid var(--paper-edge);border-radius:2px;padding:18px 20px 20px;font-size:var(--s-small);line-height:1.5;caret-color:var(--paper-ink)}
 .slip :focus-visible{outline-color:var(--paper-ink)}
 .slip ::selection{background:var(--paper-ink);color:var(--paper)}
 .slip-head{display:flex;justify-content:space-between;gap:12px;color:var(--paper-muted)}
@@ -36,16 +36,16 @@
 .slip-task dd{margin:0}
 .slip-task .w:first-of-type dd,.slip-task div:nth-child(-n+2) dd{font-weight:600}
 .slip-task code{font-size:.8125rem}
-.slip-tear{height:12px;margin:14px -20px 12px;background:radial-gradient(circle at 6px 6px,var(--accent) 3px,transparent 3.5px) 0 0/14px 12px repeat-x}
+.slip-tear{height:12px;margin:14px -20px 12px;background:radial-gradient(circle at 6px 6px,var(--perf) 3px,transparent 3.5px) 0 0/14px 12px repeat-x}
 .slip-label{display:block;margin-bottom:6px;color:var(--paper-muted)}
-.slip textarea{display:block;width:100%;resize:vertical;padding:10px 12px;line-height:1.55;color:var(--paper-ink);background:#fff;border:1px solid var(--paper-line);border-radius:2px;transition:border-color 160ms ease}
+.slip textarea{display:block;width:100%;resize:vertical;padding:10px 12px;line-height:1.55;color:var(--paper-ink);background:var(--well);border:1px solid var(--paper-line);border-radius:2px;transition:border-color 160ms ease}
 .slip textarea:focus-visible{outline:2px solid var(--paper-ink);outline-offset:1px}
 .slip textarea[aria-invalid=true]{border-color:var(--err)}
 .slip .acts{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;margin-top:10px}
 .btn-ink{height:44px;padding:0 16px;font:600 var(--s-small)/1 var(--font);color:var(--paper);background:var(--paper-ink);border:0;border-radius:var(--r);cursor:pointer;transition:transform 160ms var(--ease-out),background-color 180ms ease}
 .btn-ink code{font-size:.8125rem;font-weight:500}
 .btn-ink:active{transform:scale(.97)}
-@media (hover:hover) and (pointer:fine){.btn-ink:hover{background:#2f3238}}
+@media (hover:hover) and (pointer:fine){.btn-ink:hover{background:color-mix(in srgb,var(--paper-ink) 82%,var(--paper))}}
 .textbtn{background:none;border:0;padding:10px 0;font:500 var(--s-small)/1.4 var(--font);color:var(--paper-ink);cursor:pointer;text-decoration:underline;text-underline-offset:.22em;text-decoration-color:color-mix(in srgb,currentColor 40%,transparent)}
 .verdict{margin-top:10px;min-height:7.4rem}
 .verdict .wait{color:var(--paper-muted);padding-top:2px}
@@ -82,7 +82,7 @@ html:not(.js) .verdict .wait::after{content:" Sending needs JavaScript."}
 .frame>pre{grid-area:1/1;margin:0;white-space:pre;overflow-x:auto;line-height:1.6;transition:opacity 280ms var(--ease-out),filter 280ms var(--ease-out),transform 280ms var(--ease-out)}
 .js .frame>pre{opacity:0;filter:blur(2px);transform:translateY(6px);pointer-events:none}
 .js .frame>pre.cur{opacity:1;filter:none;transform:none;pointer-events:auto}
-pre .k{color:#1f4f5c}pre .s{color:#5c3d00}pre .c{color:var(--paper-muted)}pre .e{color:var(--err)}pre .ok{color:var(--ok)}
+pre .k{color:var(--code-k)}pre .s{color:var(--code-s)}pre .c{color:var(--paper-muted)}pre .e{color:var(--err)}pre .ok{color:var(--ok)}
 html:not(.js) .stage{position:static}
 html:not(.js) .frame{gap:28px}
 html:not(.js) .frame>pre{grid-area:auto}
@@ -125,8 +125,8 @@ html:not(.js) .frame>pre{grid-area:auto}
 .frag{margin:0 24px;padding:14px 16px;background:var(--paper);color:var(--paper-ink);border-radius:2px 2px 0 0;font-size:var(--s-small)}
 .cell.flip .frag{border-radius:0 0 2px 2px}
 .frag pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
-.frag.term{background:#0d0e10;color:#e6e8eb}
-.frag.term .c{color:#9aa0a8}
+.frag.term{background:var(--term-bg);color:var(--term-ink)}
+.frag.term .c{color:var(--term-muted)}
 .frag ul{list-style:none;margin:0;padding:0}
 .frag li{display:flex;justify-content:space-between;gap:12px;padding:8px 6px;border-radius:2px}
 .frag li.sel{background:var(--paper-2)}
@@ -161,18 +161,11 @@ html:not(.js) .frame>pre{grid-area:auto}
 @media (min-width:900px){.js .faq .ans{display:none}}
 @media (max-width:899px){.faq-list{grid-column:1/-1}.pane{display:none}}
 
-/* close: one sentence and the form on the orange band */
-.close{margin-top:var(--gap-section);background:var(--accent);color:var(--accent-ink);padding:clamp(72px,10vw,140px) var(--m)}
+/* close: one sentence and the form on a quiet band */
+.close{margin-top:var(--gap-section);background:var(--close-bg);color:var(--close-ink);padding:clamp(72px,10vw,140px) var(--m)}
 .close p.say{font-size:clamp(1.375rem,1.1rem + 1vw,2.125rem);line-height:1.3;letter-spacing:-.02em;font-weight:500;max-width:36ch}
 .close .signup{margin-top:28px}
-.close .signup label{color:var(--accent-ink)}
-.close .signup input{border-color:var(--paper)}
-.close .signup input:focus-visible{outline-color:var(--accent-ink)}
-.close .btn{background:var(--accent-ink);color:var(--ink)}
-@media (hover:hover) and (pointer:fine){.close .btn:hover{background:#2f3238}}
-.close :focus-visible{outline-color:var(--accent-ink)}
-.close ::selection{background:var(--accent-ink);color:var(--accent)}
-.close .form-msg,.close .form-msg.err{color:var(--accent-ink)}
+.close .signup label,.close .form-msg{color:var(--close-ink)}
 
 /* phone */
 @media (max-width:640px){

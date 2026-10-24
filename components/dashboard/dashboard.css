@@ -1,5 +1,5 @@
 /* Dashboard: the site's type and accent on a light "paper" ground (an Operate screen, read for long stretches), scoped under .dash */
-.dash{--bg:#eceef0;--surface:#e1e4e7;--surface-2:#d4d8dc;--ink:#141518;--muted:#4b5058;--accent:#ff5b1f;--accent-strong:#e8501a;--accent-ink:#141518;--focus:#c2410c;--err:#b42318;
+.dash{--bg:#eceef0;--surface:#e1e4e7;--surface-2:#d4d8dc;--ink:#141518;--muted:#4b5058;--accent:var(--dash-accent);--accent-strong:var(--dash-accent);--accent-ink:var(--dash-accent-ink);--focus:var(--dash-accent);--input-bg:#f7f8f9;--input-ink:#141518;--input-border:#8a9097;color-scheme:light;--err:#b42318;
   color-scheme:light;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;flex-direction:column}
 html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash ::selection{background:#141518;color:#eceef0}

@@ -1,12 +1,14 @@
-/* ReplySlip site tokens and shared styles. Palette "Carbon and slip": graphite ground (the terminal), paper slips
-   (the answer form), one signal orange (the action and the stage). See DESIGN.md. */
+/* ReplySlip site tokens. Colour lives only in these palette blocks; pick one with data-palette on <html> (app/layout.tsx).
+   Roles: bg/surface/ink/muted = the page; accent = the CTA and small details only; stage = the hero block the slip sits on;
+   paper = product fragments (slip, code stage, rule fragments); field = the alternate band; close = the closing band. See DESIGN.md. */
+/* A: Paper and ink blue */
+:root[data-palette="a"],:root:not([data-palette]){color-scheme:light;--bg:#fbfbfa;--surface:#f0f1f2;--surface-2:#dfe2e5;--ink:#111214;--muted:#545a61;--accent:#1f3f8f;--accent-ink:#ffffff;--accent-strong:#183272;--stage:#e9ecf0;--perf:#1f3f8f;--paper:#ffffff;--paper-2:#eef0f3;--paper-ink:#111214;--paper-muted:#545a61;--paper-line:#9aa1a9;--well:#f7f8f9;--field:#f0f1f2;--field-2:#e1e4e8;--field-ink:#111214;--field-muted:#4c5259;--close-bg:#e9ecf0;--close-ink:#111214;--input-bg:#ffffff;--input-border:#8b929a;--input-ink:#111214;--ok:#17673a;--info:#7f5200;--err:#b42318;--ok-on-bg:#17673a;--err-on-bg:#b42318;--code-k:#1f3f8f;--code-s:#6b4500;--paper-edge:#d6dbe1;--focus:#1f3f8f;--select-bg:#1f3f8f;--select-ink:#ffffff;--dash-accent:#1f3f8f;--dash-accent-ink:#ffffff}
+/* B: Charcoal and sage */
+:root[data-palette="b"]{color-scheme:dark;--bg:#1f2225;--surface:#282c30;--surface-2:#353a3f;--ink:#ecebe7;--muted:#a7adb2;--accent:#a9bfa9;--accent-ink:#1a1d1f;--accent-strong:#bccfbc;--stage:#2a2f33;--perf:#667a67;--paper:#e9eae7;--paper-2:#dcdeda;--paper-ink:#1c1f22;--paper-muted:#4e555b;--paper-line:#9aa09f;--well:#f4f5f3;--field:#25292c;--field-2:#30353a;--field-ink:#ecebe7;--field-muted:#a7adb2;--close-bg:#282c30;--close-ink:#ecebe7;--input-bg:#e9eae7;--input-border:#e9eae7;--input-ink:#1c1f22;--ok:#2f6b45;--info:#7a5300;--err:#a8321f;--ok-on-bg:#8fcaa0;--err-on-bg:#f0a090;--code-k:#2c4f5e;--code-s:#6a4a12;--paper-edge:transparent;--focus:#a9bfa9;--select-bg:#a9bfa9;--select-ink:#1a1d1f;--dash-accent:#2f5b3e;--dash-accent-ink:#ffffff}
+/* C: Stone and terracotta */
+:root[data-palette="c"]{color-scheme:light;--bg:#d9d8d4;--surface:#cfcdc8;--surface-2:#c2bfb9;--ink:#1d1c1a;--muted:#4f4b45;--accent:#9a4630;--accent-ink:#ffffff;--accent-strong:#843b28;--stage:#cbc9c3;--perf:#9a4630;--paper:#f6f5f2;--paper-2:#e9e7e2;--paper-ink:#1d1c1a;--paper-muted:#57534c;--paper-line:#a8a39b;--well:#fcfbfa;--field:#d1cfca;--field-2:#c5c2bc;--field-ink:#1d1c1a;--field-muted:#4e4a44;--close-bg:#cfcdc8;--close-ink:#1d1c1a;--input-bg:#f6f5f2;--input-border:#77726a;--input-ink:#1d1c1a;--ok:#2e6a3e;--info:#7a5000;--err:#a3301c;--ok-on-bg:#2e6a3e;--err-on-bg:#9b2c1a;--code-k:#2c4a6b;--code-s:#6b4313;--paper-edge:#c5c2bc;--focus:#9a4630;--select-bg:#1d1c1a;--select-ink:#f6f5f2;--dash-accent:#9a4630;--dash-accent-ink:#ffffff}
 :root{
-  color-scheme:dark;
-  --bg:#16171a;--surface:#1f2125;--surface-2:#2a2d32;--ink:#eef0f2;--muted:#a4a9b0;
-  --accent:#ff5b1f;--accent-strong:#ff7a47;--accent-ink:#16171a;--focus:#ff5b1f;
-  --paper:#f2f3f3;--paper-2:#e4e6e8;--paper-ink:#141518;--paper-muted:#555b63;--paper-line:#b9bec4;
-  --field:#e9ebee;--field-2:#dde0e4;--field-ink:#16171a;--field-muted:#4b5058;
-  --ok:#0f6e3c;--ok-dark:#5fd08f;--info:#8a5a00;--info-dark:#f2c14e;--err:#b42318;--err-dark:#ff8a7a;
+  --term-bg:#15171a;--term-ink:#e6e8eb;--term-muted:#9aa0a8;
   --font:var(--font-archivo),ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace; /* taste-skill-ignore: literal code, tool names and file paths only */
   /* Five steps. Display is held to two lines for the 70-character headline at 1440px. */
@@ -22,14 +24,14 @@ html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;scroll-padding-top:24p
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 html{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 section[id],h2[id]{scroll-margin-top:24px}
-body{margin:0;background:var(--bg);color:var(--ink);font:400 var(--s-body)/1.55 var(--font);letter-spacing:.003em;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;caret-color:var(--accent)}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 var(--s-body)/1.55 var(--font);letter-spacing:.003em;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;caret-color:var(--ink)}
 img,svg{display:block}
 a{color:inherit}
 p{margin:0;text-wrap:pretty}
 h1,h2,h3{margin:0;font-weight:500;letter-spacing:-.02em;text-wrap:balance}
 code,pre,textarea.code{font-family:var(--mono);font-size:var(--s-small);font-variant-ligatures:none} /* taste-skill-ignore: literal code, tool names and file paths only */
 :focus-visible{outline:2px solid var(--focus);outline-offset:3px}
-::selection{background:var(--accent);color:var(--accent-ink)}
+::selection{background:var(--select-bg);color:var(--select-ink)}
 html{scrollbar-color:var(--surface-2) var(--bg)}
 .skip{position:absolute;left:var(--m);top:-60px;background:var(--accent);color:var(--accent-ink);padding:10px 16px;text-decoration:none;border-radius:var(--r);z-index:10}
 .skip:focus{top:12px}
@@ -52,7 +54,7 @@ html{scrollbar-color:var(--surface-2) var(--bg)}
 /* buttons and email form (hero, closing CTA, sign-in) */
 .signup{margin-top:32px;display:flex;flex-wrap:wrap;gap:8px;max-width:480px}
 .signup label{flex-basis:100%;font-size:var(--s-small);color:var(--muted)}
-.signup input{flex:1 1 200px;min-width:0;height:48px;padding:0 14px;font:inherit;font-size:var(--s-body);color:var(--paper-ink);background:var(--paper);border:1px solid var(--paper);border-radius:var(--r);caret-color:var(--paper-ink)}
+.signup input{flex:1 1 200px;min-width:0;height:48px;padding:0 14px;font:inherit;font-size:var(--s-body);color:var(--input-ink);background:var(--input-bg);border:1px solid var(--input-border);border-radius:var(--r);caret-color:var(--input-ink)}
 .signup input::placeholder{color:var(--paper-muted)}
 .signup input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .signup input[aria-invalid=true]{border-color:var(--err);box-shadow:inset 0 0 0 1px var(--err)}
@@ -60,7 +62,7 @@ html{scrollbar-color:var(--surface-2) var(--bg)}
 .btn:active{transform:scale(.97)}
 @media (hover:hover) and (pointer:fine){.btn:hover{background:var(--accent-strong)}}
 .form-msg{flex-basis:100%;min-height:1.5em;font-size:var(--s-small)}
-.form-msg.err{color:var(--err-dark)}
+.form-msg.err{color:var(--err-on-bg)}
 
 /* footer */
 .foot{display:grid;grid-template-columns:1fr auto 1fr;gap:16px 24px;align-items:baseline;padding:32px var(--m) 32px;font-size:var(--s-small);color:var(--muted)}
