@@ -7,11 +7,12 @@ import { POST as verifyCode } from '@/app/api/v1/auth/verify-code/route';
 import { GET as unsubscribeGet, POST as unsubscribePost } from '@/app/api/v1/unsubscribe/route';
 import { getDb } from '@/db';
 import { users } from '@/db/schema';
-import { unsubscribeUrl } from '@/lib/marketing';
+import { MARKETING_CONSENT_TEXTS, unsubscribeUrl } from '@/lib/marketing';
 import { call, emailAddress } from './helpers';
 import { latestCode } from './inbox';
 
-const WORDING = 'Email me about new ReplySlip plans. I can unsubscribe at any time.';
+const WORDING = MARKETING_CONSENT_TEXTS[0];
+const UNKNOWN_WORDING = 'Email me about new ReplySlip plans. I can unsubscribe at any time.';
 
 async function userRow(email: string) {
   const [row] = await getDb().select().from(users).where(eq(users.email, email)).limit(1);
@@ -75,7 +76,10 @@ describe('marketing consent', () => {
     expect(row.marketingConsentAt!.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
 
     await call(requestCode, 'http://localhost/api/v1/auth/request-code', { body: { email } });
-    const again = await verify(email, { marketing_opt_in: true, consent_text: 'A different sentence.' });
+    const unknown = await verify(email, { marketing_opt_in: true, consent_text: UNKNOWN_WORDING });
+    expect(unknown.status).toBe(400);
+    expect(unknown.data).toEqual({ error: 'invalid_consent_text' });
+    const again = await verify(email, { marketing_opt_in: true, consent_text: WORDING });
     expect(again.status).toBe(200);
     expect(again.data.user.marketing_opt_in).toBe(true);
     const same = await userRow(email);
@@ -128,13 +132,26 @@ describe('marketing consent', () => {
     expect((await userRow(email)).marketingUnsubscribedAt!.getTime()).toBe(withdrawn.marketingUnsubscribedAt!.getTime());
 
     await call(requestCode, 'http://localhost/api/v1/auth/request-code', { body: { email } });
-    const changed = await verify(email, { marketing_opt_in: true, consent_text: 'Plans and nothing else.' });
+    const rejected = await verify(email, { marketing_opt_in: true, consent_text: UNKNOWN_WORDING });
+    expect(rejected.status).toBe(400);
+    expect(rejected.data).toEqual({ error: 'invalid_consent_text' });
+    expect((await userRow(email)).marketingOptIn).toBe(false);
+    const changed = await verify(email, { marketing_opt_in: true, consent_text: WORDING });
     expect(changed.status).toBe(200);
     expect(changed.data.user.marketing_opt_in).toBe(true);
     const changedRow = await userRow(email);
-    expect(changedRow.marketingConsentText).toBe('Plans and nothing else.');
+    expect(changedRow.marketingConsentText).toBe(WORDING);
     expect(changedRow.marketingUnsubscribedAt).toBeNull();
     expect(changedRow.marketingConsentAt!.getTime()).toBeGreaterThan(withdrawn.marketingConsentAt!.getTime());
+
+    const badPatch = await call(patchMe, 'http://localhost/api/v1/auth/me', {
+      method: 'PATCH',
+      cookie,
+      body: { marketing_opt_in: true, consent_text: UNKNOWN_WORDING },
+    });
+    expect(badPatch.status).toBe(400);
+    expect(badPatch.data).toEqual({ error: 'invalid_consent_text' });
+    expect((await userRow(email)).marketingConsentAt!.getTime()).toBe(changedRow.marketingConsentAt!.getTime());
 
     const restored = await call(patchMe, 'http://localhost/api/v1/auth/me', {
       method: 'PATCH',
@@ -147,7 +164,7 @@ describe('marketing consent', () => {
     expect(back.marketingOptIn).toBe(true);
     expect(back.marketingUnsubscribedAt).toBeNull();
     expect(back.marketingConsentText).toBe(WORDING);
-    expect(back.marketingConsentAt!.getTime()).toBeGreaterThan(changedRow.marketingConsentAt!.getTime());
+    expect(back.marketingConsentAt!.getTime()).toBe(changedRow.marketingConsentAt!.getTime());
 
     const link = unsubscribeRequestUrl(back.id);
     expect(unsubscribeUrl(back.id)).toMatch(/^https:\/\/replyslip\.com\/api\/v1\/unsubscribe\?token=/);

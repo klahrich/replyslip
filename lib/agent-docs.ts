@@ -8,6 +8,7 @@ import {
   RESULT_SCHEMA_MAX_CHARS,
   WATCHER_ONLINE_MS,
 } from './constants';
+import { MARKETING_CONSENT_TEXTS } from './marketing';
 import { PLAN_LIMITS } from './plans';
 import { absoluteUrl } from './origin';
 import { TOOL_DOCS } from './mcp-tools';
@@ -516,7 +517,7 @@ ${ONE_LINER}
 
 Base URL: \`${root}\`
 
-Errors use \`{ "error": { "code", "message", "details"? } }\`. \`plan_limit\` is the exception: HTTP 403 with \`{ "error": "plan_limit", "limit": "agents" | "tasks_per_month", "max", "used", "resets_at"?, "message" }\`. \`resets_at\` is present only for \`tasks_per_month\` and is the ISO start of the next UTC month. Send \`Content-Type: application/json\` on requests with a body.
+Errors use \`{ "error": { "code", "message", "details"? } }\`. Two codes are flat instead. \`plan_limit\` is HTTP 403 with \`{ "error": "plan_limit", "limit": "agents" | "tasks_per_month", "max", "used", "resets_at"?, "message" }\`. \`resets_at\` is present only for \`tasks_per_month\` and is the ISO start of the next UTC month. \`invalid_consent_text\` is HTTP 400 \`{ "error": "invalid_consent_text" }\` when an opt-in sends checkbox wording that is not on the allowlist. Send \`Content-Type: application/json\` on requests with a body.
 
 A \`free\` workspace may have ${PLAN_LIMITS.free.agents} active agents (revoked agents do not count) and ${PLAN_LIMITS.free.tasksPerMonth.toLocaleString('en-US')} tasks created per UTC calendar month. \`create_task\` counts. \`ask\` is refused at that cap and does not add a task. \`send_message\`, \`complete_task\`, and \`fail_task\` do not count. \`plan\` \`unlimited\` has null limits. The app does not choose which workspace is unlimited.
 
@@ -565,10 +566,10 @@ A new email creates an unverified user and no workspace yet. The code is 6 digit
 Request:
 
 \`\`\`json
-{ "email": "owner@example.com", "code": "123456", "marketing_opt_in": true, "consent_text": "Email me about new ReplySlip plans. I can unsubscribe at any time." }
+{ "email": "owner@example.com", "code": "123456", "marketing_opt_in": true, "consent_text": "${MARKETING_CONSENT_TEXTS[0]}" }
 \`\`\`
 
-\`code\` is a string so leading zeros survive. \`marketing_opt_in\` and \`consent_text\` are optional. The checkbox that sends them must start unchecked. Consent is stored only when \`marketing_opt_in\` is \`true\` and \`consent_text\` is the exact checkbox wording, 1–1000 characters after trimming. That write happens only on the first sign-in or when the person was not already opted in, so a later sign-in does not replace the original proof. Omitting the fields, or sending \`false\`, does not record consent and does not opt anyone out. \`400\` \`validation_error\` when \`marketing_opt_in\` is \`true\` and the wording is missing or blank. That failure does not consume the code.
+\`code\` is a string so leading zeros survive. \`marketing_opt_in\` and \`consent_text\` are optional. The checkbox that sends them must start unchecked. Consent is stored only when \`marketing_opt_in\` is \`true\` and \`consent_text\`, after trimming, is exactly one of: ${MARKETING_CONSENT_TEXTS.map((text) => `\`"${text}"\``).join(', ')}. That write happens only on the first sign-in or when the person was not already opted in, so a later sign-in does not replace the original proof. Omitting the fields, or sending \`false\`, does not record consent and does not opt anyone out. \`400\` \`validation_error\` when \`marketing_opt_in\` is \`true\` and the wording is missing or blank. \`400\` \`{ "error": "invalid_consent_text" }\` when the wording is not on that list. Neither failure consumes the code.
 
 Success \`200\` sets the session cookie and returns:
 
@@ -603,14 +604,14 @@ Session cookie required. Same \`user\` and \`workspace\` shape as verify, includ
 Session cookie required. Changes marketing email consent for the signed-in user.
 
 \`\`\`json
-{ "marketing_opt_in": true, "consent_text": "Email me about new ReplySlip plans. I can unsubscribe at any time." }
+{ "marketing_opt_in": true, "consent_text": "${MARKETING_CONSENT_TEXTS[0]}" }
 \`\`\`
 
 \`\`\`json
 { "marketing_opt_in": false }
 \`\`\`
 
-Opting in requires \`consent_text\` (the checkbox wording, trimmed, 1–1000 characters). It sets \`marketing_consent_at\`, stores that wording, and clears \`marketing_unsubscribed_at\`. Opting out sets \`marketing_unsubscribed_at\` and leaves the earlier wording and timestamp in place as proof. Sending the choice they already have does not rewrite that proof. A new wording while already opted in is a new consent. \`200\` is the same body as GET. \`400\` \`validation_error\` when opting in without wording. \`401\` when signed out.
+Opting in requires \`consent_text\` to be one of the same allowed wordings as verify, after trimming. It sets \`marketing_consent_at\`, stores that wording, and clears \`marketing_unsubscribed_at\`. Opting out sets \`marketing_unsubscribed_at\` and leaves the earlier wording and timestamp in place as proof. Sending the choice they already have does not rewrite that proof. A new allowed wording while already opted in is a new consent. \`200\` is the same body as GET. \`400\` \`validation_error\` when opting in without wording. \`400\` \`{ "error": "invalid_consent_text" }\` when the wording is not on the allowlist. \`401\` when signed out.
 
 ### GET or POST ${line('/api/v1/unsubscribe?token=...')}
 
