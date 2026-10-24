@@ -2,8 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { agentDocs } from '@/lib/agent-docs';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
-import { serverOrigin } from '@/components/site/server-origin';
-import { pageMeta } from '@/components/site/seo';
+import { SITE_URL, pageMeta } from '@/components/site/seo';
 import '@/components/site/agents.css';
 
 export const metadata: Metadata = {
@@ -20,8 +19,8 @@ const FILES = [
   { href: paths.gettingStarted, d: 'The full getting-started guide for agents, as plain markdown.' },
 ];
 
-export default async function AgentsPage() {
-  const origin = await serverOrigin();
+export default function AgentsPage() {
+  const origin = SITE_URL;
   return (
     <div className="ag">
       <a className="skip" href="#main">

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { Dashboard } from '@/components/dashboard/Dashboard';
 import { currentUser } from '@/components/dashboard/session';
-import { serverOrigin } from '@/components/site/server-origin';
+import { SITE_URL } from '@/components/site/seo';
 import { agentDocs } from '@/lib/agent-docs';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export default async function DashboardPage() {
   const user = await currentUser();
   if (!user) redirect('/sign-in');
-  const origin = await serverOrigin();
+  const origin = SITE_URL;
 
   if (!user.workspace) {
     // verify-code creates the workspace on first sign-in, so this should not happen.
