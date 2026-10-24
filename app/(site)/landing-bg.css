@@ -1,0 +1,18 @@
+/* Hero glow: three soft sage lights framing the slip, fading into --bg before the first band.
+   Positions here are the rest state (also the static glow for reduced motion and no JS); GlowBg.tsx only adds transform and opacity. */
+.lp{position:relative;isolation:isolate}
+.lp-bg{position:absolute;inset:0 0 auto;height:clamp(860px,112vh,1120px);z-index:-1;pointer-events:none;overflow:hidden;
+  -webkit-mask-image:linear-gradient(#000 62%,transparent 97%);mask-image:linear-gradient(#000 62%,transparent 97%)}
+.lp-bg .g{position:absolute;display:block;border-radius:50%;will-change:transform,opacity;
+  background:radial-gradient(closest-side,var(--c) 0%,color-mix(in srgb,var(--c) 82%,transparent) 20%,color-mix(in srgb,var(--c) 52%,transparent) 40%,color-mix(in srgb,var(--c) 24%,transparent) 60%,color-mix(in srgb,var(--c) 7%,transparent) 80%,transparent 100%)}
+/* g1: palette sage, upper left of the slip, between headline and stage */
+.lp-bg .g1{--c:rgb(150 186 152 / .34);width:860px;height:680px;left:calc(50% - 500px);top:-60px}
+/* g2: deeper sage, under the slip's lower right corner */
+.lp-bg .g2{--c:rgb(96 156 112 / .5);width:960px;height:760px;left:calc(50% + 130px);top:380px}
+/* g3: warm sage, small, off the slip's top right corner */
+.lp-bg .g3{--c:rgb(176 196 146 / .2);width:760px;height:600px;left:calc(50% + 240px);top:-60px}
+@media (max-width:899px){
+  .lp-bg .g1{width:560px;height:460px;left:calc(100% - 420px);top:140px}
+  .lp-bg .g2{width:640px;height:560px;left:-120px;top:520px}
+  .lp-bg .g3{width:380px;height:340px;left:-160px;top:-80px}
+}

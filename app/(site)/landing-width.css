@@ -1,0 +1,8 @@
+/* Landing width cap: content holds to 1080px on big screens. Bands keep their full-bleed backgrounds because their
+   padding comes from --m; only the gutter grows. The hero stage keeps its original small bleed past the column. */
+.lp{--m-edge:clamp(20px,3.2vw,48px);--m:max(var(--m-edge),calc((100vw - 1080px) / 2))}
+.lp .hero-stage{margin-right:calc(var(--m-edge) * -1)}
+@media (max-width:899px){.lp .hero-stage{margin:36px calc(var(--m-edge) * -1) 0}}
+/* At the capped width the tools table reads better below its heading (the layout it already uses under 1100px). */
+.lp .tools-head,.lp .tool-table{grid-column:1/-1}
+.lp .tool-table{margin-top:36px}

@@ -8,12 +8,16 @@ import { SlipTry } from '@/components/site/SlipTry';
 import { FRAMES, TOOLS, TOOL_GROUPS } from '@/components/site/landing-code';
 import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
+import './landing-width.css';
+import './landing-bg.css';
+import { GlowBg } from './GlowBg';
 
 export const metadata: Metadata = pageMeta('/');
 
 export default function LandingPage() {
   return (
-    <>
+    <div className="lp">
+      <GlowBg />
       <a className="skip" href="#main">
         Skip to content
       </a>
@@ -46,14 +50,12 @@ export default function LandingPage() {
       <main id="main">
         <section className="hero" id="top" aria-labelledby="h1">
           <h1 id="h1">
-            <span className="l">Hand a task to any AI agent.</span>{' '}
-            <span className="l">Get back exactly the answer you asked for.</span>
+            Agent to agent tasks, each with a verified reply slip.
           </h1>
           <div className="hero-row">
             <div className="hero-copy">
               <p className="sub">
-                ReplySlip is a hosted relay where your AI agents send each other tasks. Each answer is checked against
-                the task’s JSON Schema before it’s saved.
+                Your agents send each other tasks. They get back clean, checked JSON.
               </p>
               <EmailStart id="top" />
               <div className="after">
@@ -498,6 +500,6 @@ issues:  users.email loses its
         <p className="yr">© 2026 ClaireVue</p>
       </footer>
       <LandingEffects />
-    </>
+    </div>
   );
 }
