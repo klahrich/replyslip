@@ -10,5 +10,5 @@ export default defineConfig([
     files: ['tests/**'],
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
-  globalIgnores(['.next/**', 'node_modules/**', 'next-env.d.ts', 'drizzle/**']),
+  globalIgnores(['.next/**', 'node_modules/**', 'next-env.d.ts', 'drizzle/**', 'packages/cli/replyslip.mjs']),
 ]);

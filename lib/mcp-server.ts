@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { createMcpHandler, withMcpAuth } from 'mcp-handler';
 import { getDb } from '@/db';
 import { workspaces } from '@/db/schema';
-import { authenticateAgentKey, getAgent, type AgentPrincipal } from './agents';
+import { authenticateAgentKey, getAgent, watcherPresence, workspaceWatcherLastSeen, type AgentPrincipal } from './agents';
 import { whoamiDelivery } from './delivery';
 import { HttpError } from './errors';
 import { TOOL_DOCS, toolInputs } from './mcp-tools';
@@ -196,11 +196,13 @@ export const mcpHandler = createMcpHandler(
             .from(workspaces)
             .where(eq(workspaces.id, principal.workspaceId))
             .limit(1);
+          const seen = await workspaceWatcherLastSeen(principal.workspaceId);
           return ok({
             name: agent.name,
             id: agent.id,
             workspace_name: workspace?.name ?? null,
             delivery: whoamiDelivery(agent),
+            ...watcherPresence(agent, seen),
           });
         } catch (err) {
           return fail(err);

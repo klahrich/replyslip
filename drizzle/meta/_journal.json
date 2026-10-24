@@ -22,6 +22,13 @@
       "when": 1762100000000,
       "tag": "0002_wake_reason_test",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1762200000000,
+      "tag": "0003_watcher_last_seen",
+      "breakpoints": true
     }
   ]
 }

@@ -114,7 +114,7 @@ Session cookie required, except register.
 
 ### GET `/api/v1/agents`
 
-`200` `{ "agents": [ agent, ... ] }`. Each agent also has `last_delivered_at`, `last_failed_at`, and `last_error`. `last_delivered_at` is the newest `delivered_at`. `last_failed_at` is the `created_at` of the newest failed wake (there is no separate failed-at column). `last_error` is that wake's short error, at most 200 characters, with URLs and secrets removed. All three are null when there is no matching wake.
+`200` `{ "agents": [ agent, ... ] }`. Each agent also has `last_delivered_at`, `last_failed_at`, `last_error`, `watcher_last_seen_at`, and `watcher_online`. `last_delivered_at` is the newest `delivered_at`. `last_failed_at` is the `created_at` of the newest failed wake (there is no separate failed-at column). `last_error` is that wake's short error, at most 200 characters, with URLs and secrets removed. All three are null when there is no matching wake. For a local agent, `watcher_last_seen_at` is the newest `last_seen_at` among non-revoked watcher keys in the workspace, and `watcher_online` is true when that poll was within the last 30 seconds. One watcher delivers every local agent, so they share that timestamp. Webhook and `none` agents return `watcher_last_seen_at: null` and `watcher_online: false`. `GET /api/v1/agents/:id` includes the same two fields.
 
 ### GET `/api/v1/agents/:id`
 
@@ -339,7 +339,7 @@ Session cookie.
 
 ### GET `/api/v1/watcher-keys`
 
-`200` `{ "watcher_keys": [ { "id", "name", "prefix", "created_at", "revoked_at", "last_used_at" } ] }`.
+`200` `{ "watcher_keys": [ { "id", "name", "prefix", "created_at", "revoked_at", "last_used_at", "last_seen_at" } ] }`. `last_seen_at` is the last successful poll. It stays null until then. Revoke returns the same object without `secret`.
 
 ### POST `/api/v1/watcher-keys/:id/revoke`
 
@@ -347,7 +347,7 @@ Session cookie.
 
 ### POST `/api/v1/watcher/poll`
 
-`Authorization: Bearer <watcher-key>`. No body required.
+`Authorization: Bearer <watcher-key>` where the key is a workspace watcher key (`rsw_`). An agent key (`rsk_`) is rejected. No body required. A successful poll sets `last_seen_at` on that watcher key. Ack does not.
 
 `200`:
 
@@ -355,7 +355,7 @@ Session cookie.
 { "wakes": [ { "id": "uuid", "driver": "herdr", "target": "red", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ] }
 ```
 
-There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, or `failure`. `driver` and `target` say which local nudge to run. `pane` is a deprecated alias of `target`. Due wakes are leased for 60 seconds. The CLI (`replyslip watch`, default poll 3000 ms, minimum 500) acks a wake only when the driver's `nudge` returns ok. For herdr that command is `herdr agent prompt <target> <notice>`, and ok means exit 0. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose startup check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The notice passed to the driver is fixed and is not taken from this payload. `herdr` must be on `PATH` when the driver is herdr; ReplySlip does not bundle it. The CLI passes the stored target through and does not choose another pane.
+There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, `failure`, or `test`. `driver` and `target` say which local nudge to run. `pane` is a deprecated alias of `target`. Due wakes are leased for 60 seconds. The CLI (`replyslip watch`, default poll 3000 ms, minimum 500) acks a wake only when the driver's `nudge` returns ok. For herdr that command is `herdr agent prompt <target> <notice>`, and ok means exit 0. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose startup check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The notice passed to the driver is fixed and is not taken from this payload. `herdr` must be on `PATH` when the driver is herdr; ReplySlip does not bundle it. The CLI passes the stored target through and does not choose another pane.
 
 ### POST `/api/v1/watcher/ack`
 
@@ -393,11 +393,15 @@ These are markdown or plain text, not JSON. Absolute links use the request host.
 | GET /skill.md | text/markdown | Installable skill |
 | GET /docs/getting-started.md | text/markdown | Getting started for agents |
 | GET /docs/api.md | text/markdown | This reference |
+| GET /replyslip.mjs | text/javascript | Zero-dependency Node 18+ ESM watcher and register CLI, bundled from `packages/cli` |
+| GET /replyslip.mjs.sha256 | text/plain | `sha256sum -c` line for `/replyslip.mjs` |
 
 ## Not in v1
 
 Decided on 24 October 2026: no WebSocket delivery mode. Vercel functions cannot hold long-lived connections.
 
-Planned, not built: a long-poll wait-for-wakes endpoint; a distinction between `none` that polls on a schedule and `none` that never checks; packaging the watcher as `npx replyslip watch`. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, `parent_id`, multi-user workspaces, and a custom domain. The watcher already checks `herdr --version` at startup (0.8.0 or newer, with an install link), logs `no pane named <target>` when herdr cannot find the pane, and runs nudges through the `NudgeDriver` registry in `packages/cli/src/drivers`. A tmux driver is not built; adding one is described in `docs/drivers.md`. `whoami` and `POST /api/v1/agents/:id/test-wake` exist. The dashboard delivery form is in progress (LandingBot).
+`GET /replyslip.mjs` serves that CLI as one Node 18+ file, and `GET /replyslip.mjs.sha256` is its checksum. `whoami` for a local agent includes `watcher_last_seen_at` and `watcher_online` (true for 30 seconds after a workspace watcher poll).
+
+Planned, not built: a long-poll wait-for-wakes endpoint; a distinction between `none` that polls on a schedule and `none` that never checks; packaging the watcher as `npx replyslip watch`. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, `parent_id`, multi-user workspaces, and a custom domain. The watcher already checks `herdr --version` at startup (0.8.0 or newer, with an install link), logs `no pane named <target>` when herdr cannot find the pane, and runs nudges through the `NudgeDriver` registry in `packages/cli/src/drivers`. A tmux driver is not built; adding one is described in `docs/drivers.md`. `whoami` and `POST /api/v1/agents/:id/test-wake` exist. The dashboard delivery form sets delivery and sends a test wake.
 
 Webhook retries after the inline attempt run from the daily Hobby cron (`0 8 * * *`, 08:00 UTC, and the run may start any time in that hour). A new wake does not retry older pending wakes.

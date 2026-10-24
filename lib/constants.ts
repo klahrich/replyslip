@@ -20,6 +20,9 @@ export const RATE_LIMITS = {
   testWake: { agent: 10, windowMs: 15 * 60 * 1000 },
 } as const;
 
+/** A local agent is watcher_online when some non-revoked workspace watcher key polled within this window. */
+export const WATCHER_ONLINE_MS = 30_000;
+
 export const WAKE_MAX_ATTEMPTS = 8;
 export const WEBHOOK_TIMEOUT_MS = 5_000;
 export const RESULT_SCHEMA_MAX_CHARS = 64_000;

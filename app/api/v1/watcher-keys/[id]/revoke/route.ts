@@ -1,4 +1,4 @@
-import { revokeWatcherKey } from '@/lib/agents';
+import { revokeWatcherKey, serializeWatcherKey } from '@/lib/agents';
 import { requireUser } from '@/lib/auth';
 import { handle, json, requireUuid } from '@/lib/http';
 
@@ -10,15 +10,6 @@ export function POST(req: Request, context: { params: Promise<{ id: string }> })
     const user = await requireUser(req);
     const { id } = await context.params;
     const key = await revokeWatcherKey(user.workspace.id, requireUuid(id, 'watcher key'));
-    return json({
-      watcher_key: {
-        id: key.id,
-        name: key.name,
-        prefix: key.tokenPrefix,
-        created_at: key.createdAt.toISOString(),
-        revoked_at: key.revokedAt?.toISOString() ?? null,
-        last_used_at: key.lastUsedAt?.toISOString() ?? null,
-      },
-    });
+    return json({ watcher_key: serializeWatcherKey(key) });
   });
 }
