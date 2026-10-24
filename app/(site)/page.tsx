@@ -10,6 +10,7 @@ import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
 import './landing-width.css';
 import './landing-bg.css';
+import './landing-stripes.css';
 import './hero-free.css';
 import { GlowBg } from './GlowBg';
 import { SetupPrompt } from './SetupPrompt';
