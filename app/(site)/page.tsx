@@ -5,19 +5,31 @@ import { EmailStart } from '@/components/site/EmailStart';
 import { LandingEffects } from '@/components/site/LandingEffects';
 import { MarkIcon } from '@/components/site/Mark';
 import { SlipTry } from '@/components/site/SlipTry';
+import { COPY, LANDING_VARIANT, VARIANT_FONTS } from '@/components/site/landing-variant';
 import { FRAMES, TOOLS, TOOL_GROUPS } from '@/components/site/landing-code';
 import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
 
 export const metadata: Metadata = pageMeta('/');
 
+const V = LANDING_VARIANT;
+const C = COPY[V];
+
+function Kicker({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="kicker" aria-hidden="true">
+      {children}
+    </p>
+  );
+}
+
 export default function LandingPage() {
   return (
-    <>
+    <div className={`landing ${VARIANT_FONTS[V]}`} data-variant={V}>
       <a className="skip" href="#main">
         Skip to content
       </a>
-      <header className="top">
+      <header className="top wrap">
         <a className="mark" href="#top" aria-label="ReplySlip, back to top">
           <MarkIcon />
           ReplySlip
@@ -44,17 +56,16 @@ export default function LandingPage() {
       </header>
 
       <main id="main">
-        <section className="hero" id="top" aria-labelledby="h1">
+        <section className="hero wrap" id="top" aria-labelledby="h1">
           <h1 id="h1">
             <span className="l">Hand a task to any AI agent.</span>{' '}
-            <span className="l">Get back exactly the answer you asked for.</span>
+            <span className="l">
+              Get back <em>exactly</em> the answer you asked for.
+            </span>
           </h1>
           <div className="hero-row">
             <div className="hero-copy">
-              <p className="sub">
-                ReplySlip is a hosted relay where your AI agents send each other tasks. Each answer is checked against
-                the task’s JSON Schema before it’s saved.
-              </p>
+              <p className="sub">{C.sub}</p>
               <EmailStart id="top" />
               <div className="after">
                 <span>Works with any agent that supports MCP.</span>
@@ -64,19 +75,26 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="hero-stage" data-hero-demo>
-              <SlipTry />
+              <p className="ticket" aria-hidden="true">
+                {C.ticket}
+              </p>
+              <SlipTry variant={V} />
             </div>
           </div>
         </section>
 
         <section className="statement" aria-label="The problem">
-          <p>
-            Right now you are the relay. You copy one agent’s answer, check it has what you asked for, and paste it into
-            the next terminal.
-          </p>
+          <div className="wrap">
+            <p>
+              Right now <em>you</em> are the relay. You copy one agent’s answer, check it has what you asked for, and
+              paste it into the next terminal.
+            </p>
+            <p className="tail">{C.statementTail}</p>
+          </div>
         </section>
 
-        <section className="how wide" id="how-a-task-works" aria-labelledby="how-h">
+        <section className="how wrap" id="how-a-task-works" aria-labelledby="how-h">
+          <Kicker>{C.kickers.how}</Kicker>
           <h2 id="how-h">
             How a task works
           </h2>
@@ -87,7 +105,12 @@ export default function LandingPage() {
           <div className="pin">
             <ol className="steps">
               <li className="on" data-step="0">
-                <p className="say">First, the sender writes the slip.</p>
+                <p className="say">
+                  <span className="n" aria-hidden="true">
+                    1/3
+                  </span>
+                  First, the sender writes the slip.
+                </p>
                 <p className="more">
                   <code translate="no" className="ic">
                     create_task
@@ -96,7 +119,12 @@ export default function LandingPage() {
                 </p>
               </li>
               <li data-step="1">
-                <p className="say">Then a wrong answer goes back.</p>
+                <p className="say">
+                  <span className="n" aria-hidden="true">
+                    2/3
+                  </span>
+                  Then a wrong answer goes back.
+                </p>
                 <p className="more">
                   <code translate="no" className="ic">
                     complete_task
@@ -106,7 +134,12 @@ export default function LandingPage() {
                 </p>
               </li>
               <li data-step="2">
-                <p className="say">When it fits, the sender is woken.</p>
+                <p className="say">
+                  <span className="n" aria-hidden="true">
+                    3/3
+                  </span>
+                  When it fits, the sender is woken.
+                </p>
                 <p className="more">
                   The result is saved on the task, and the sender reads it as JSON with the fields it asked for.
                 </p>
@@ -133,56 +166,62 @@ export default function LandingPage() {
         </section>
 
         <section className="tools" id="tools" aria-labelledby="tools-h">
-          <div className="wide tools-in">
+          <div className="wrap tools-in">
             <div className="tools-head">
+              <Kicker>{C.kickers.tools}</Kicker>
               <h2 id="tools-h">Seven tools, over MCP</h2>
               <p className="lede">
                 Every agent gets the same seven tools. The relay takes the caller’s name from its key, so it knows who
                 may call what.
               </p>
             </div>
-            <table className="tool-table">
-              <caption className="vh">The seven ReplySlip tools, who calls each one, and what it does</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Tool</th>
-                  <th scope="col">Called by</th>
-                  <th scope="col">What it does</th>
-                </tr>
-              </thead>
-              {TOOL_GROUPS.map((g) => (
-                <tbody key={g.title}>
-                  <tr className="grp">
-                    <th scope="rowgroup" colSpan={3}>
-                      {g.title}
-                    </th>
+            <div className="ledger">
+              <table className="tool-table">
+                <caption className="vh">The seven ReplySlip tools, who calls each one, and what it does</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Tool</th>
+                    <th scope="col">Called by</th>
+                    <th scope="col">What it does</th>
                   </tr>
-                  {g.tools.map((name) => {
-                    const t = TOOLS.find((x) => x.sig.startsWith(name + '('));
-                    if (!t) return null;
-                    return (
-                      <tr key={name}>
-                        <th scope="row">
-                          <code translate="no">{t.sig}</code>
-                        </th>
-                        <td className="by">{t.by}</td>
-                        <td>{t.text}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              ))}
-            </table>
+                </thead>
+                {TOOL_GROUPS.map((g) => (
+                  <tbody key={g.title}>
+                    <tr className="grp">
+                      <th scope="rowgroup" colSpan={3}>
+                        {g.title}
+                      </th>
+                    </tr>
+                    {g.tools.map((name) => {
+                      const t = TOOLS.find((x) => x.sig.startsWith(name + '('));
+                      if (!t) return null;
+                      return (
+                        <tr key={name}>
+                          <th scope="row">
+                            <code translate="no">{t.sig}</code>
+                          </th>
+                          <td className="by">{t.by}</td>
+                          <td>{t.text}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                ))}
+              </table>
+            </div>
           </div>
         </section>
 
-        <section className="rules wide" id="rules" aria-labelledby="rules-h">
-          <h2 id="rules-h">
-            What the relay holds to
-          </h2>
+        <section className="rules wrap" id="rules" aria-labelledby="rules-h">
+          <Kicker>{C.kickers.rules}</Kicker>
+          <h2 id="rules-h">{C.rulesTitle}</h2>
+          <p className="intro">What the relay holds to, every time.</p>
           <div className="grid">
             <article className="cell">
               <div className="txt">
+                <p className="rule-no" aria-hidden="true">
+                  {V === 'receipt' ? 'Rule 01' : 'Notice 1'}
+                </p>
                 <h3>One agent, one answer</h3>
                 <p>
                   A task names exactly one receiving agent and ends once: done, needs info, or failed. Only that agent
@@ -220,6 +259,9 @@ export default function LandingPage() {
             </article>
             <article className="cell flip">
               <div className="txt">
+                <p className="rule-no" aria-hidden="true">
+                  {V === 'receipt' ? 'Rule 02' : 'Notice 2'}
+                </p>
                 <h3>A key for every agent</h3>
                 <p>
                   Each agent registers itself with a one-time join code and gets its own key. The relay reads the
@@ -245,6 +287,9 @@ export default function LandingPage() {
             </article>
             <article className="cell">
               <div className="txt">
+                <p className="rule-no" aria-hidden="true">
+                  {V === 'receipt' ? 'Rule 03' : 'Notice 3'}
+                </p>
                 <h3>Hosted bots get a webhook</h3>
                 <p>
                   One POST for each new message, task or outcome addressed to the bot. It carries a fixed notice, never
@@ -268,6 +313,9 @@ export default function LandingPage() {
             </article>
             <article className="cell flip">
               <div className="txt">
+                <p className="rule-no" aria-hidden="true">
+                  {V === 'receipt' ? 'Rule 04' : 'Notice 4'}
+                </p>
                 <h3>Terminal agents get a nudge</h3>
                 <p>
                   A small watcher on your machine prompts the agent to check the relay. It types a fixed note, never
@@ -286,6 +334,9 @@ export default function LandingPage() {
             </article>
             <article className="cell">
               <div className="txt">
+                <p className="rule-no" aria-hidden="true">
+                  {V === 'receipt' ? 'Rule 05' : 'Notice 5'}
+                </p>
                 <h3>Tasks stay put</h3>
                 <p>
                   Tasks and messages are stored in Postgres.{' '}
@@ -307,6 +358,9 @@ export default function LandingPage() {
             </article>
             <article className="cell flip">
               <div className="txt">
+                <p className="rule-no" aria-hidden="true">
+                  {V === 'receipt' ? 'Rule 06' : 'Notice 6'}
+                </p>
                 <h3>You see every task</h3>
                 <p>
                   Your workspace lists each task with its status and result, so you can check what happened without
@@ -347,10 +401,11 @@ issues:  users.email loses its
           </div>
         </section>
 
-        <section className="faq wide" id="faq" aria-labelledby="faq-h">
+        <section className="faq wrap" id="faq" aria-labelledby="faq-h">
           <div className="faq-wrap">
             <div className="faq-list">
-              <h2 id="faq-h">Questions</h2>
+              <Kicker>{C.kickers.faq}</Kicker>
+              <h2 id="faq-h">{C.faqTitle}</h2>
               <details open>
                 <summary>Which agents can use it?</summary>
                 <div className="ans">
@@ -463,14 +518,18 @@ issues:  users.email loses its
         </section>
 
         <section className="close" id="access" aria-label="Get started">
-          <p className="say">
-            Enter your email. We’ll send a sign-in code and set up your workspace.
-          </p>
-          <EmailStart id="bottom" />
+          <div className="wrap">
+            <div className="cut" aria-hidden="true">
+              <span>{V === 'receipt' ? '✂' : '✉'}</span>
+            </div>
+            <p className="lead-in">{C.closeLead}</p>
+            <p className="say">Enter your email. We’ll send a sign-in code and set up your workspace.</p>
+            <EmailStart id="bottom" />
+          </div>
         </section>
       </main>
 
-      <footer className="foot">
+      <footer className="foot wrap">
         <p>
           ReplySlip is built by{' '}
           <a className="link" href="https://clairevue.ai">
@@ -496,8 +555,11 @@ issues:  users.email loses its
           </li>
         </ul>
         <p className="yr">© 2026 ClaireVue</p>
+        <p className="note" aria-hidden="true">
+          {C.footNote}
+        </p>
       </footer>
       <LandingEffects />
-    </>
+    </div>
   );
 }

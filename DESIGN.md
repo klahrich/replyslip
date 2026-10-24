@@ -133,6 +133,15 @@ Art direction comes from taste-skill's "The product performs" deal (seed 8627820
 
 Register: Persuade on the landing page; Operate on the dashboard (light, quieter, same type and accent).
 
+## Landing directions (personality pass, Oct 2026)
+
+Owner feedback on the first landing: too wide, not enough personality. The landing now sits in a centred container (`--wrap: 1080px` of content plus the outer margin; prose `--prose: 680px`) so it stops stretching at 1440 and 1920, and it leans into the slip metaphor. Two directions share one page and one palette (B); `LANDING_VARIANT` in `components/site/landing-variant.ts` picks one (`DEFAULT_VARIANT`, or `NEXT_PUBLIC_LANDING_VARIANT=receipt|dispatch` at build time for a preview). Only the landing reads it; the dashboard, agents and sign-in pages are unchanged.
+
+- **receipt** (default): the slip is a till receipt fed out of a printer slot (a dark bar labelled with the ticket line, "One task · one answer"), with a torn zigzag bottom edge, IBM Plex Mono fields and a dashed scissor line. Sending stamps it with an inked rubber stamp: green **VALIDATED** or red **REJECTED**, real text with a grain mask, multiplied onto the paper. Display face Fraunces (soft, set roman; *exactly* gets a wavy sage underline), paired with Archivo for body. The tools are itemised on a till roll; the footer signs off "Please keep this slip for your records."
+- **dispatch**: a sorting office. The slip is a dispatch form on an airmail-striped edge (sage, paper, deep green) with a perforated postage stamp; a valid answer gets a circular postmark, a wrong one gets **☞ RETURN TO SENDER**. Display face Archivo at a wide stretch (118–125%), bold; airmail stripes top the statement, closing band and code stage; steps run down a dashed route with stops.
+
+Rules for both, superseding the older notes below on the landing only: uppercase monospace labels are allowed for slip fields, ticket numbers, section kickers and stamps (never for body copy); the slip paper is a warm off-white `#f1efe8` (paper only, never a ground); one drop shadow under the hero slip. Motion: the receipt feeds out in 900ms (dispatch slides in 560ms), the stamp lands at scale 1.9→1 in 380ms; under `prefers-reduced-motion` both become a short fade. Copy stays dry and literal: no customers, stats, pricing or named agents.
+
 ## Colors
 
 Colour lives only in the palette blocks at the top of `app/globals.css`. `<html data-palette>` in `app/layout.tsx` (the `PALETTE` constant) chooses one; nothing else in the CSS or components carries a hex value except the always-dark terminal fragment and the dashboard's own light ground. Role tokens: `--bg`, `--surface`, `--surface-2`, `--ink`, `--muted`, `--accent`, `--accent-strong` (hover), `--accent-ink`, `--focus`, `--stage`, `--perf`, `--paper*`, `--paper-edge`, `--well`, `--field*`, `--close-bg`, `--close-ink`, `--input-*`, `--ok`, `--info`, `--err`, `--ok-on-bg`, `--err-on-bg`, `--code-k`, `--code-s`, `--select-*`, `--dash-accent*`.

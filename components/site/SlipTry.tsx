@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import type { LandingVariant } from './landing-variant';
 
 const START = '{\n  "verdict": "looks fine",\n  "notes": "one nit in the index name"\n}';
 const VALID = '{\n  "verdict": "request_changes",\n  "issues": ["users.email loses its NOT NULL constraint"]\n}';
@@ -37,7 +38,7 @@ function check(txt: string): string[] {
  * the relay checks complete_task. Rendered on the server, so it reads as a slip
  * without JavaScript; sending needs JavaScript.
  */
-export function SlipTry() {
+export function SlipTry({ variant = 'receipt' }: { variant?: LandingVariant }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState(START);
   const [out, setOut] = useState<null | string[]>(null);
@@ -47,10 +48,24 @@ export function SlipTry() {
 
   return (
     <div className="slip" id="try" data-ui data-state={state}>
-      <div className="slip-head">
-        <span className="slip-name">Reply slip</span>
-        <span>task_7Kq2 · example</span>
-      </div>
+      {variant === 'dispatch' ? (
+        <div className="slip-head">
+          <span className="slip-name">Dispatch form</span>
+          <span>docket task_7Kq2 · example</span>
+          <span className="postage" aria-hidden="true">
+            <span>MCP</span>
+            <span>relay</span>
+          </span>
+        </div>
+      ) : (
+        <div className="slip-head">
+          <span className="slip-org" aria-hidden="true">
+            ReplySlip relay
+          </span>
+          <span className="slip-name">Reply slip</span>
+          <span className="slip-no">Nº task_7Kq2 · example</span>
+        </div>
+      )}
       <dl className="slip-task">
         <div>
           <dt>From</dt>
@@ -116,18 +131,21 @@ export function SlipTry() {
         {out === null ? (
           <p className="wait">Not sent yet. The first answer breaks the schema in three places.</p>
         ) : out.length ? (
-          <pre translate="no" key={sends}>
-            <code translate="no">
-              <span className="e">
-                {'error: result does not match result_schema\n' + out.map((e) => '  ' + e).join('\n')}
-              </span>
-              {'\n'}
-              <span className="c">{'  Nothing saved. builder not woken. Fix it and send again.'}</span>
-            </code>
-          </pre>
+          <div className="fail" key={sends}>
+            <Stamp variant={variant} ok={false} />
+            <pre translate="no">
+              <code translate="no">
+                <span className="e">
+                  {'error: result does not match result_schema\n' + out.map((e) => '  ' + e).join('\n')}
+                </span>
+                {'\n'}
+                <span className="c">{'  Nothing saved. builder not woken. Fix it and send again.'}</span>
+              </code>
+            </pre>
+          </div>
         ) : (
           <div className="pass" key={sends}>
-            <span className="stamp">Valid · saved</span>
+            <Stamp variant={variant} ok />
             <pre translate="no">
               <code translate="no">
                 <span className="ok">{'→ { id: "task_7Kq2", status: "done" }'}</span>
@@ -139,5 +157,42 @@ export function SlipTry() {
         )}
       </div>
     </div>
+  );
+}
+
+/** The clerk's mark on a sent answer. Text stays real text; the ring is decoration. */
+function Stamp({ variant, ok }: { variant: LandingVariant; ok: boolean }) {
+  if (variant === 'dispatch' && ok)
+    return (
+      <span className="stamp ok postmark">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <defs>
+            <path id="pm-ring" d="M60 60m-44 0a44 44 0 1 1 88 0a44 44 0 1 1-88 0" />
+          </defs>
+          <circle cx="60" cy="60" r="56" />
+          <circle cx="60" cy="60" r="34" />
+          <text>
+            <textPath href="#pm-ring">REPLYSLIP RELAY ✶ SCHEMA CHECKED ✶</textPath>
+          </text>
+        </svg>
+        <span className="pm-mid">Valid</span>
+        <span className="vh">: saved</span>
+      </span>
+    );
+  if (variant === 'dispatch')
+    return (
+      <span className="stamp bad">
+        <span aria-hidden="true">☞ </span>Return to sender
+        <small>does not match result_schema</small>
+      </span>
+    );
+  return ok ? (
+    <span className="stamp ok">
+      Validated<small>saved · builder woken</small>
+    </span>
+  ) : (
+    <span className="stamp bad">
+      Rejected<small>schema · nothing saved</small>
+    </span>
   );
 }
