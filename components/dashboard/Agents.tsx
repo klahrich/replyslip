@@ -15,7 +15,11 @@ function deliveryLabel(a: Agent): string {
     }
     return `Webhook${host ? ` · ${host}` : ''}`;
   }
-  if (a.delivery.mode === 'herdr') return `Terminal watcher${a.delivery.pane ? ` · pane ${a.delivery.pane}` : ''}`;
+  if (a.delivery.mode === 'local' || a.delivery.mode === 'herdr') {
+    const driver = a.delivery.driver ?? (a.delivery.mode === 'herdr' ? 'herdr' : '');
+    const target = a.delivery.target ?? a.delivery.pane;
+    return `Local${driver ? ` · ${driver}` : ''}${target ? ` · ${target}` : ''}`;
+  }
   return 'Checks the relay itself';
 }
 

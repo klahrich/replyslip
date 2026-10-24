@@ -1,10 +1,13 @@
 /** Response shapes of the /api/v1 routes, as documented in docs/API.md. */
 
 export type Delivery = {
-  mode: 'none' | 'webhook' | 'herdr';
+  mode: 'none' | 'webhook' | 'local' | 'herdr';
+  driver: string | null;
+  target: string | null;
   url: string | null;
   auth_type: string | null;
   secret_set: boolean;
+  /** Deprecated alias of `target` for local delivery. */
   pane: string | null;
 };
 

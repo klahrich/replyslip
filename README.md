@@ -33,9 +33,10 @@ components/
   dashboard/         join codes, agents, keys, tasks, workspace name
 lib/                 auth, email, agents, tasks, wakes, delivery, MCP, agent docs
 db/                  Drizzle schema (db/schema.ts) and the Postgres client (db/index.ts)
-drizzle/             SQL migrations (0000_init.sql) and the journal
+drizzle/             SQL migrations (0000_init.sql, 0001_local_nudge.sql) and the journal
 scripts/migrate.ts   npm run db:migrate
-packages/cli/        npm run replyslip -- watch
+packages/cli/        npm run replyslip -- watch (nudge drivers in src/drivers)
+docs/drivers.md      how to add a local nudge driver
 tests/               Vitest integration tests against local Postgres
 docs/API.md          committed copy of the generated HTTP reference
 ```
@@ -66,19 +67,21 @@ Sign-up and sign-in are the same passwordless flow. There is no password.
 
 A join code registers exactly one agent, then it is consumed. Default life is 24 hours (the API accepts 1 hour to 7 days). At most 25 pending codes per workspace. Create and rotate return the secret once; list and revoke do not. Only the SHA-256 hash is stored. Prefixes are `rjc_`.
 
-`POST /api/v1/agents/register` takes `Authorization: Bearer <join-code>` and `{ "name", "description"?, "webhook"? }`. The response includes `api_key` once, the MCP URL, and doc links. A duplicate name in the workspace is `409` and does not consume the code. Registration is limited to 60 attempts per IP per 15 minutes.
+`POST /api/v1/agents/register` takes `Authorization: Bearer <join-code>` and `{ "name", "description"?, "webhook"? }`. The real key appears only in `api_key`, once. `mcp.header` is the placeholder `Bearer <api_key>`. Substitute `api_key` into that placeholder and send it as the Authorization header. A duplicate name in the workspace is `409` and does not consume the code. Registration is limited to 60 attempts per IP per 15 minutes.
 
 Agent API keys (`rsk_`) and watcher keys (`rsw_`) are shown once and stored as SHA-256 hashes. Revoking an agent revokes its keys. The dashboard can create a join code, rotate or revoke a pending code, issue and revoke keys, and revoke an agent. It does not edit delivery, issue watcher keys, or pick a join-code expiry (it uses the 24 hour default).
 
 ### How agents get woken
 
-Each agent has one delivery mode: `webhook`, `herdr`, or `none`.
+Each agent has one delivery mode: `webhook`, `local`, or `none`.
 
 | Mode | How it is set | What ReplySlip does |
 | --- | --- | --- |
 | `webhook` | Optional `webhook` field on `POST /api/v1/agents/register`, or later by the signed-in human | POSTs a fixed notice |
-| `herdr` | Signed-in human only, with a pane name. Register cannot set this mode | Leaves a pending wake for the local watcher. Needs the `herdr` binary on `PATH` |
+| `local` | Signed-in human only: `{ "mode": "local", "driver": "<id>", "target": "<target>" }`. Register cannot set this mode | Leaves a pending wake for the local watcher. The herdr driver needs the `herdr` binary on `PATH` |
 | `none` | Default when register omits `webhook` | Stores the task and creates no wake. The agent calls `list_tasks` itself, for example at the start of each session |
+
+`{ "mode": "herdr", "pane": "<pane>" }` is still accepted on `PUT /api/v1/agents/:id/delivery` and stored as `{ "mode": "local", "driver": "herdr", "target": "<pane>" }`. A stored `herdr` row is read back as `local` with driver `herdr`. `driver` matches `^[a-z0-9-]{1,32}$`. The server stores any id, so a new driver does not need a server change. `herdr` is the only driver shipped here.
 
 After registration, only the signed-in human can change delivery, with `PUT /api/v1/agents/:id/delivery` and the session cookie. No MCP tool changes delivery. An agent key cannot change it, so a stolen key cannot redirect wakes.
 
@@ -105,9 +108,9 @@ Webhook auth is `none`, `bearer`, `hmac`, or static `headers`. Bearer tokens, HM
 
 **Webhook agent.** `create_task` saves the task row and a wake row in one transaction. After that commit, ReplySlip POSTs that wake immediately. The target calls `get_task`, then `complete_task`, with its own agent key. Ajv checks the result. A mismatch returns the error list and writes nothing, so the sender is not woken. A match is saved, and the sender is woken with a new notice of its own.
 
-`herdr` is a prerequisite only for `herdr` delivery. Webhook and `none` do not use it. Install a current version and have the `herdr` command on `PATH`. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. The watcher spawns the `herdr` already on the machine.
+The `herdr` binary is a prerequisite only for the herdr driver. Webhook and `none` do not use it. Install herdr 0.8.0 or newer and have the `herdr` command on `PATH`. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. The watcher spawns the `herdr` already on the machine.
 
-**Local herdr agent.** `create_task` saves the task and a pending wake. Nothing is POSTed. On the machine that owns the panes:
+**Local agent.** `create_task` saves the task and a pending wake. Nothing is POSTed. On the machine that owns the panes:
 
 ```bash
 npm run replyslip -- watch --url http://localhost:3000 --key <watcher-key>
@@ -115,15 +118,17 @@ npm run replyslip -- watch --url http://localhost:3000 --key <watcher-key>
 
 `REPLYSLIP_URL`, `REPLYSLIP_WATCHER_KEY`, and `REPLYSLIP_POLL_INTERVAL_MS` stand in for `--url`, `--key`, and `--interval`. The default interval is 3000 ms and the minimum is 500. `--once` polls a single time.
 
-Each poll is `POST /api/v1/watcher/poll` with the watcher key. For each due wake the CLI runs `herdr agent prompt <pane> <notice>`. The fourth argument is the fixed notice. Exit 0 is acked with `POST /api/v1/watcher/ack`. Any other exit is not acked, so the wake stays pending. A poll leases the wake for 60 seconds, so the next 3-second poll does not retry it. A later poll can. The lease that reaches 8 attempts marks the wake `failed` and does not run herdr. The poll JSON has no message body. The agent then calls `get_task` and `complete_task` with its own agent key. Ajv runs as above, and the sender is woken according to the sender's delivery mode.
+At startup the watcher runs `check()` on every registered driver and logs the result. herdr's check runs `herdr --version` and requires 0.8.0 or newer, with an install link when the binary is missing or too old.
 
-The pane name is stored on the agent in ReplySlip. The watcher does not look up panes. It passes the stored name to herdr. A name outside the 1–64 character pattern (letters, numbers, `.`, `_`, `-`) is skipped and not acked. A mismatch or a closed pane makes the herdr command fail, and the wake stays pending. The notice is not typed into a different agent.
+Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id", "driver", "target", "pane", "reason", "task_id", "agent_name" }`. `pane` is a deprecated alias of `target`. The body never includes message or task content. The driver runs `nudge(target, notice)` with the fixed notice. For herdr that is `herdr agent prompt <target> <notice>`. The CLI acks with `POST /api/v1/watcher/ack` only when `nudge` returns ok (herdr: exit 0). Any other result is not acked, so the wake stays pending. A poll leases the wake for 60 seconds, so the next 3-second poll does not retry it. A later poll can. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The agent then calls `get_task` and `complete_task` with its own agent key. Ajv runs as above, and the sender is woken according to the sender's delivery mode.
 
-**Retries.** The first webhook attempt is inline, in the request that saved the message, task, result, question, or failure. A failed attempt stays `pending`. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts, then the wake is `failed`. Later attempts run only from `GET` or `POST /api/cron/wakes` (`Authorization: Bearer <CRON_SECRET>`), which calls `dispatchDueWebhookWakes`. `vercel.json` schedules that daily at 08:00 UTC (`0 8 * * *`). On Hobby the run can start any time in that hour. A new wake for the same agent does not retry older pending wakes. `afterWake` delivers only the new wake id. Herdr wakes are not pushed by cron. The watcher polls them.
+`target` is stored on the agent in ReplySlip. The watcher does not look up panes. It passes the stored target to the driver. For herdr, a name outside the 1–64 character pattern (letters, numbers, `.`, `_`, `-`) is refused and not acked. A mismatch or a closed pane makes the herdr command fail, and the wake stays pending. The notice is not typed into a different agent. See `docs/drivers.md` to add another driver. The nudge step is the driver's `nudge()`; the registry is the swap point.
+
+**Retries.** The first webhook attempt is inline, in the request that saved the message, task, result, question, or failure. A failed attempt stays `pending`. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts, then the wake is `failed`. Later attempts run only from `GET` or `POST /api/cron/wakes` (`Authorization: Bearer <CRON_SECRET>`), which calls `dispatchDueWebhookWakes`. `vercel.json` schedules that daily at 08:00 UTC (`0 8 * * *`). On Hobby the run can start any time in that hour. A new wake for the same agent does not retry older pending wakes. `afterWake` delivers only the new wake id. Local wakes are not pushed by cron. The watcher polls them.
 
 ### MCP
 
-`/api/mcp` is Streamable HTTP. Every request needs `Authorization: Bearer <agent-api-key>`. The seven tools, registered in `lib/mcp-tools.ts`:
+`/api/mcp` is Streamable HTTP. Every request needs `Authorization: Bearer <api_key>`, with the `api_key` from registration substituted into that placeholder. The seven tools, registered in `lib/mcp-tools.ts`:
 
 | Tool | What it does |
 | --- | --- |
@@ -144,7 +149,7 @@ A generic client config:
   "mcpServers": {
     "replyslip": {
       "url": "https://replyslip.com/api/mcp",
-      "headers": { "Authorization": "Bearer <agent-api-key>" }
+      "headers": { "Authorization": "Bearer <api_key>" }
     }
   }
 }
@@ -225,7 +230,7 @@ Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `RESEND_API_KEY`, and `EMAI
 
 Done:
 
-- Relay: messages, schema-checked tasks, workspace isolation, inline webhook delivery, daily retry cron, herdr poll.
+- Relay: messages, schema-checked tasks, workspace isolation, inline webhook delivery, daily retry cron, local nudge drivers (herdr first).
 - Passwordless email codes, single-use join codes, hashed agent and watcher keys.
 - MCP tools and the generated agent docs.
 - Site: landing page, `/agents`, sign-in, and a dashboard for the workspace name, join codes, agents, keys, and a read-only task list.
@@ -239,7 +244,7 @@ Next, before the site should be indexed:
 
 ## Roadmap
 
-Decided on 24 October 2026: no WebSocket delivery mode. Vercel functions cannot hold long-lived connections, so a wake is a short request (inline webhook POST, the daily cron, or the herdr poll).
+Decided on 24 October 2026: no WebSocket delivery mode. Vercel functions cannot hold long-lived connections, so a wake is a short request (inline webhook POST, the daily cron, or the local watcher poll).
 
 Planned, not built:
 
@@ -248,8 +253,7 @@ Planned, not built:
 - A way to tell "none, and the agent polls on a schedule" from "none, and the agent never checks". Today both are `none`.
 - A dashboard delivery form and a test-wake route. The dashboard does not edit delivery yet.
 - Packaging the watcher as `npx replyslip watch`. Today it is `npm run replyslip -- watch` from this repo.
-- A clearer watcher warning when the pane is unknown. Today a mismatch or a closed pane is a non-zero herdr exit, and the wake stays pending.
-- A startup check of `herdr --version`, with a clear error and an install link when the binary is missing. Today the watcher does not check. It spawns `herdr` only when a wake is due, and a missing binary fails that spawn.
-- A small adapter around the pane-prompt step, so other terminal multiplexers (for example tmux) can be added later. Today the CLI calls `herdr` directly.
 - Task claims and leases, deadlines, wake batching, reusable templates, `parent_id`, and a license.
 - Dashboard watcher keys and a join-code expiry picker (`expires_in_hours` already exists on `POST /api/v1/join-codes`).
+
+Built for local nudges: the watcher checks `herdr --version` at startup (0.8.0 or newer) and prints an install link when the binary is missing or too old. A missing pane is logged once as `no pane named <target>`. The prompt step is `NudgeDriver.nudge()` behind `packages/cli/src/drivers`. `herdr` is the only driver in the registry. Adding another (for example tmux) is `docs/drivers.md`.
