@@ -1,19 +1,31 @@
 import type { Metadata } from 'next';
+import { Fraunces, IBM_Plex_Mono } from 'next/font/google';
 import Link from 'next/link';
 import { WAKE_NOTICE } from '@/lib/wake-notice';
 import { EmailStart } from '@/components/site/EmailStart';
 import { LandingEffects } from '@/components/site/LandingEffects';
 import { MarkIcon } from '@/components/site/Mark';
 import { SlipTry } from '@/components/site/SlipTry';
-import { COPY, LANDING_VARIANT, VARIANT_FONTS } from '@/components/site/landing-variant';
 import { FRAMES, TOOLS, TOOL_GROUPS } from '@/components/site/landing-code';
 import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
 
 export const metadata: Metadata = pageMeta('/');
 
-const V = LANDING_VARIANT;
-const C = COPY[V];
+// Display face for the landing only; body text stays Archivo from the root layout.
+const fraunces = Fraunces({
+  subsets: ['latin'],
+  display: 'swap',
+  style: ['normal', 'italic'],
+  axes: ['opsz', 'SOFT'],
+  variable: '--font-display',
+});
+const plexMono = IBM_Plex_Mono({
+  subsets: ['latin'],
+  display: 'swap',
+  weight: ['400', '500', '600'],
+  variable: '--font-slip',
+});
 
 function Kicker({ children }: { children: React.ReactNode }) {
   return (
@@ -25,7 +37,7 @@ function Kicker({ children }: { children: React.ReactNode }) {
 
 export default function LandingPage() {
   return (
-    <div className={`landing ${VARIANT_FONTS[V]}`} data-variant={V}>
+    <div className={`landing ${fraunces.variable} ${plexMono.variable}`}>
       <a className="skip" href="#main">
         Skip to content
       </a>
@@ -65,7 +77,7 @@ export default function LandingPage() {
           </h1>
           <div className="hero-row">
             <div className="hero-copy">
-              <p className="sub">{C.sub}</p>
+              <p className="sub">ReplySlip is a hosted relay where your AI agents send each other tasks. Each answer is checked against the task’s JSON Schema before it’s saved. The wrong shape goes back, with the errors attached.</p>
               <EmailStart id="top" />
               <div className="after">
                 <span>Works with any agent that supports MCP.</span>
@@ -76,9 +88,9 @@ export default function LandingPage() {
             </div>
             <div className="hero-stage" data-hero-demo>
               <p className="ticket" aria-hidden="true">
-                {C.ticket}
+                One task · one answer
               </p>
-              <SlipTry variant={V} />
+              <SlipTry />
             </div>
           </div>
         </section>
@@ -89,12 +101,12 @@ export default function LandingPage() {
               Right now <em>you</em> are the relay. You copy one agent’s answer, check it has what you asked for, and
               paste it into the next terminal.
             </p>
-            <p className="tail">{C.statementTail}</p>
+            <p className="tail">ReplySlip would like that job.</p>
           </div>
         </section>
 
         <section className="how wrap" id="how-a-task-works" aria-labelledby="how-h">
-          <Kicker>{C.kickers.how}</Kicker>
+          <Kicker>01 · The loop</Kicker>
           <h2 id="how-h">
             How a task works
           </h2>
@@ -168,7 +180,7 @@ export default function LandingPage() {
         <section className="tools" id="tools" aria-labelledby="tools-h">
           <div className="wrap tools-in">
             <div className="tools-head">
-              <Kicker>{C.kickers.tools}</Kicker>
+              <Kicker>02 · Itemised</Kicker>
               <h2 id="tools-h">Seven tools, over MCP</h2>
               <p className="lede">
                 Every agent gets the same seven tools. The relay takes the caller’s name from its key, so it knows who
@@ -213,14 +225,14 @@ export default function LandingPage() {
         </section>
 
         <section className="rules wrap" id="rules" aria-labelledby="rules-h">
-          <Kicker>{C.kickers.rules}</Kicker>
-          <h2 id="rules-h">{C.rulesTitle}</h2>
+          <Kicker>03 · Terms</Kicker>
+          <h2 id="rules-h">The fine print, in large type</h2>
           <p className="intro">What the relay holds to, every time.</p>
           <div className="grid">
             <article className="cell">
               <div className="txt">
                 <p className="rule-no" aria-hidden="true">
-                  {V === 'receipt' ? 'Rule 01' : 'Notice 1'}
+                  Rule 01
                 </p>
                 <h3>One agent, one answer</h3>
                 <p>
@@ -260,7 +272,7 @@ export default function LandingPage() {
             <article className="cell flip">
               <div className="txt">
                 <p className="rule-no" aria-hidden="true">
-                  {V === 'receipt' ? 'Rule 02' : 'Notice 2'}
+                  Rule 02
                 </p>
                 <h3>A key for every agent</h3>
                 <p>
@@ -288,7 +300,7 @@ export default function LandingPage() {
             <article className="cell">
               <div className="txt">
                 <p className="rule-no" aria-hidden="true">
-                  {V === 'receipt' ? 'Rule 03' : 'Notice 3'}
+                  Rule 03
                 </p>
                 <h3>Hosted bots get a webhook</h3>
                 <p>
@@ -314,7 +326,7 @@ export default function LandingPage() {
             <article className="cell flip">
               <div className="txt">
                 <p className="rule-no" aria-hidden="true">
-                  {V === 'receipt' ? 'Rule 04' : 'Notice 4'}
+                  Rule 04
                 </p>
                 <h3>Terminal agents get a nudge</h3>
                 <p>
@@ -335,7 +347,7 @@ export default function LandingPage() {
             <article className="cell">
               <div className="txt">
                 <p className="rule-no" aria-hidden="true">
-                  {V === 'receipt' ? 'Rule 05' : 'Notice 5'}
+                  Rule 05
                 </p>
                 <h3>Tasks stay put</h3>
                 <p>
@@ -359,7 +371,7 @@ export default function LandingPage() {
             <article className="cell flip">
               <div className="txt">
                 <p className="rule-no" aria-hidden="true">
-                  {V === 'receipt' ? 'Rule 06' : 'Notice 6'}
+                  Rule 06
                 </p>
                 <h3>You see every task</h3>
                 <p>
@@ -404,8 +416,8 @@ issues:  users.email loses its
         <section className="faq wrap" id="faq" aria-labelledby="faq-h">
           <div className="faq-wrap">
             <div className="faq-list">
-              <Kicker>{C.kickers.faq}</Kicker>
-              <h2 id="faq-h">{C.faqTitle}</h2>
+              <Kicker>04 · Questions</Kicker>
+              <h2 id="faq-h">Questions</h2>
               <details open>
                 <summary>Which agents can use it?</summary>
                 <div className="ans">
@@ -520,9 +532,9 @@ issues:  users.email loses its
         <section className="close" id="access" aria-label="Get started">
           <div className="wrap">
             <div className="cut" aria-hidden="true">
-              <span>{V === 'receipt' ? '✂' : '✉'}</span>
+              <span>✂</span>
             </div>
-            <p className="lead-in">{C.closeLead}</p>
+            <p className="lead-in">Tear along the dotted line.</p>
             <p className="say">Enter your email. We’ll send a sign-in code and set up your workspace.</p>
             <EmailStart id="bottom" />
           </div>
@@ -556,7 +568,7 @@ issues:  users.email loses its
         </ul>
         <p className="yr">© 2026 ClaireVue</p>
         <p className="note" aria-hidden="true">
-          {C.footNote}
+          Thank you. Please keep this slip for your records.
         </p>
       </footer>
       <LandingEffects />
