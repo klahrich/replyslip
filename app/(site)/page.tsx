@@ -10,16 +10,14 @@ import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
 import './landing-width.css';
 import './landing-bg.css';
+import { GlowBg } from './GlowBg';
 
 export const metadata: Metadata = pageMeta('/');
 
-/** Hero background variant, styled in ./landing-bg.css. One ships: 'glow' | 'grid' | 'contour'. */
-const BG: 'glow' | 'grid' | 'contour' = 'contour';
-
 export default function LandingPage() {
   return (
-    <div className="lp" data-bg={BG}>
-      <div className="lp-bg" aria-hidden="true" />
+    <div className="lp">
+      <GlowBg />
       <a className="skip" href="#main">
         Skip to content
       </a>
