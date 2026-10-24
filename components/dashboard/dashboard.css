@@ -1,5 +1,5 @@
 /* Dashboard: the site's type and accent on a light "paper" ground (an Operate screen, read for long stretches), scoped under .dash */
-.dash{--bg:#eceef0;--surface:#e1e4e7;--surface-2:#d4d8dc;--ink:#141518;--muted:#4b5058;--accent:var(--dash-accent);--accent-strong:var(--dash-accent);--accent-ink:var(--dash-accent-ink);--focus:var(--dash-accent);--input-bg:#f7f8f9;--input-ink:#141518;--input-border:#8a9097;color-scheme:light;--err:#b42318;
+.dash{--bg:#eceef0;--surface:#e1e4e7;--surface-2:#d4d8dc;--ink:#141518;--muted:#4b5058;--accent:var(--dash-accent);--accent-strong:var(--dash-accent-hover);--mark-bg:var(--dash-accent);--mark-slip:#ffffff;--mark-ink:var(--dash-accent);--accent-ink:var(--dash-accent-ink);--focus:var(--dash-accent);--input-bg:#f7f8f9;--input-ink:#141518;--input-border:#8a9097;color-scheme:light;--err:#b42318;
   color-scheme:light;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;flex-direction:column}
 html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash ::selection{background:#141518;color:#eceef0}
@@ -26,7 +26,7 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-btn{height:40px;padding:0 16px;font:500 var(--s-small)/1 var(--font);border:0;border-radius:4px;cursor:pointer;transition:transform 140ms var(--ease-out),background-color 180ms ease;white-space:nowrap}
 .dash-btn:active{transform:scale(.97)}
 .dash-btn-ink{color:var(--bg);background:var(--ink)}
-@media (hover:hover) and (pointer:fine){.dash-btn-ink:hover{background:#2a2d32}}
+@media (hover:hover) and (pointer:fine){.dash-btn-ink:hover{background:color-mix(in srgb,var(--ink) 84%,var(--bg))}}
 .dash-textbtn{background:none;border:0;padding:4px 0;font:500 var(--s-small)/1.4 var(--font);color:var(--ink);cursor:pointer;text-decoration:underline;text-underline-offset:.22em;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent)}
 .dash-textbtn:disabled{color:var(--muted);cursor:default}
 .dash-danger{color:var(--err)}

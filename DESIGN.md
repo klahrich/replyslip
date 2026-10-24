@@ -2,37 +2,48 @@
 name: ReplySlip
 description: A hosted relay where AI agents send each other tasks and every answer is checked against the task's JSON Schema before it is saved.
 colors:
-  # Palette A, "Paper and ink blue" (the default). B and C live in app/globals.css as data-palette blocks.
-  ground: "#fbfbfa"
-  surface: "#f0f1f2"
-  surface-2: "#dfe2e5"
-  ink: "#111214"
-  muted: "#545a61"
-  accent: "#1f3f8f"
-  accent-hover: "#183272"
-  accent-ink: "#ffffff"
-  stage: "#e9ecf0"
-  perforation: "#1f3f8f"
-  paper: "#ffffff"
-  paper-2: "#eef0f3"
-  paper-edge: "#d6dbe1"
-  paper-ink: "#111214"
-  paper-muted: "#545a61"
-  paper-line: "#9aa1a9"
-  slip-well: "#f7f8f9"
-  field: "#f0f1f2"
-  field-2: "#e1e4e8"
-  field-muted: "#4c5259"
-  close: "#e9ecf0"
-  input-border: "#8b929a"
-  ok: "#17673a"
-  info: "#7f5200"
-  err: "#b42318"
-  code-key: "#1f3f8f"
-  code-string: "#6b4500"
+  # Palette B, "Charcoal and sage" (active). A and C stay in app/globals.css as data-palette blocks.
+  ground: "#1f2225"
+  surface: "#282c30"
+  surface-2: "#353a3f"
+  ink: "#ecebe7"
+  muted: "#a7adb2"
+  accent: "#a9bfa9"
+  accent-hover: "#bccfbc"
+  accent-ink: "#1a1d1f"
+  stage: "#2a2f33"
+  perforation: "#667a67"
+  paper: "#e9eae7"
+  paper-2: "#dcdeda"
+  paper-ink: "#1c1f22"
+  paper-muted: "#4e555b"
+  paper-line: "#9aa09f"
+  slip-well: "#f4f5f3"
+  field: "#25292c"
+  field-2: "#30353a"
+  close: "#282c30"
+  ok: "#2f6b45"
+  ok-on-ground: "#8fcaa0"
+  info: "#7a5300"
+  err: "#a8321f"
+  err-on-ground: "#f0a090"
+  code-key: "#2c4f5e"
+  code-string: "#6a4a12"
   dash-bg: "#eceef0"
   dash-line: "#8a9097"
+  dash-accent: "#46614c"
+  dash-accent-hover: "#3a5240"
+  dash-ink: "#141518"
+  dash-muted: "#4b5058"
+  dash-surface: "#e1e4e7"
+  dash-field: "#f7f8f9"
+  dash-done: "#1f5f3a"
+  dash-open: "#3a3f46"
+  dash-needs-info: "#7a4b00"
+  dash-err: "#b42318"
+  dash-hover-row: "#e6e8eb"
   terminal: "#15171a"
+  terminal-ink: "#e6e8eb"
   terminal-muted: "#9aa0a8"
 typography:
   display:
@@ -99,7 +110,6 @@ components:
     padding: "0 16px"
   input:
     backgroundColor: "{colors.paper}"
-    borderColor: "{colors.input-border}"
     textColor: "{colors.paper-ink}"
     rounded: "{rounded.control}"
     height: "48px"
@@ -127,19 +137,22 @@ Register: Persuade on the landing page; Operate on the dashboard (light, quieter
 
 Colour lives only in the palette blocks at the top of `app/globals.css`. `<html data-palette>` in `app/layout.tsx` (the `PALETTE` constant) chooses one; nothing else in the CSS or components carries a hex value except the always-dark terminal fragment and the dashboard's own light ground. Role tokens: `--bg`, `--surface`, `--surface-2`, `--ink`, `--muted`, `--accent`, `--accent-strong` (hover), `--accent-ink`, `--focus`, `--stage`, `--perf`, `--paper*`, `--paper-edge`, `--well`, `--field*`, `--close-bg`, `--close-ink`, `--input-*`, `--ok`, `--info`, `--err`, `--ok-on-bg`, `--err-on-bg`, `--code-k`, `--code-s`, `--select-*`, `--dash-accent*`.
 
-**Palette A, Paper and ink blue (default).**
-- Ground **#fbfbfa**, cells **#f0f1f2**, inactive markers **#dfe2e5**. Text is **ink** `#111214` (18.1:1) and **muted** `#545a61` (6.7:1; 5.4:1 on surface-2).
-- **Accent** `#1f3f8f` is used for the primary button (white text, 9.7:1), the focus ring, the perforation, the active step and the FAQ marker. It is never a surface.
-- The hero **stage** `#e9ecf0` is a cool grey block; the slip is white **paper** with a 1px **paper-edge** `#d6dbe1`. The closing band uses the same grey.
-- Paper text: **paper-ink** `#111214`, **paper-muted** `#545a61` (≥6.1:1 on paper and paper-2). Status on paper: **ok** `#17673a`, **info** `#7f5200`, **err** `#b42318` (≥5.9:1).
-- Inputs: white with an `#8b929a` border (3.2:1 on white, 3.0:1 on the ground).
+**Palette B, Charcoal and sage (active).** `PALETTE = 'b'` in `app/layout.tsx`.
+- Ground **#1f2225** (soft charcoal, not black), cells **#282c30**, inactive markers **#353a3f**. Text is **ink** `#ecebe7` (13.4:1) and **muted** `#a7adb2` (7.1:1; 5.1:1 on surface-2).
+- **Accent** sage `#a9bfa9` is used for the primary button (text `#1a1d1f`, 8.6:1; hover `#bccfbc`), the focus ring (8.2:1 on the ground), the active step and the FAQ marker. It is never a surface.
+- The hero **stage** `#2a2f33` is a slightly lifted charcoal block; the slip is **paper** `#e9eae7` with text `#1c1f22` / `#4e555b` (≥5.6:1). The perforation is a darker sage `#667a67` (3.8:1 on paper). The closing band is `#282c30`.
+- Status on paper: **ok** `#2f6b45`, **info** `#7a5300`, **err** `#a8321f` (≥4.68:1 on paper-2). On the ground: **ok-on-ground** `#8fcaa0`, **err-on-ground** `#f0a090`.
+- Inputs are light paper `#e9eae7` on the charcoal ground (13.2:1), so they need no separate border.
+- **Mark**: sage square, charcoal slip, paper dots and check. The favicon and `themeColor` (`#1f2225`) match.
 
-**Palette B, Charcoal and sage.** Ground `#1f2225`, text `#ecebe7` / `#a7adb2`, accent `#a9bfa9` with `#1a1d1f` text, stage `#2a2f33`, paper `#e9eae7`, perforation `#667a67`.
+**Palette A, Paper and ink blue.** Ground `#fbfbfa`, text `#111214` / `#545a61`, accent `#1f3f8f` with white text, stage `#e9ecf0`, paper `#ffffff`.
 
 **Palette C, Stone and terracotta.** Ground `#d9d8d4` (grey enough to stay clear of Impeccable's cream rule), text `#1d1c1a` / `#4f4b45`, accent `#9a4630` with white text, stage `#cbc9c3`, paper `#f6f5f2`.
 
+Switching palettes means changing `PALETTE`, `themeColor`, the favicon data URI in `app/layout.tsx`, and regenerating `public/assets/og.png`.
+
 - The terminal-nudge fragment stays dark in every palette: `#15171a` with `#e6e8eb` text and `#9aa0a8` comments.
-- The dashboard keeps its own light ground under `.dash` (**dash-bg** `#eceef0`, **dash-line** `#8a9097`) and takes its button colour from the palette's `--dash-accent` (A `#1f3f8f`, B `#2f5b3e`, C `#9a4630`, all with white text). Dashboard, agents and sign-in still carry some pre-redesign sizes and 6px radii; they are out of scope for the landing redesign.
+- The dashboard keeps its own light ground under `.dash` (**dash-bg** `#eceef0`, **dash-line** `#8a9097`) and takes its button, mark and focus colour from the palette's `--dash-accent` (B: deep sage `#46614c`, white text 6.8:1, 5.9:1 against dash-bg; A `#1f3f8f`, C `#9a4630`). Dashboard, agents and sign-in still carry some pre-redesign sizes and 6px radii; they are out of scope for the landing redesign.
 - No cream, beige, gradients, tinted glows or saturated orange.
 
 ## Typography
@@ -164,7 +177,7 @@ Flat. Depth comes from paper on the stage and paper on surface cells, never from
 
 ## Shapes
 
-Slips and fragments have a 2px radius (paper, nearly square); controls 4px. The hero stage has one chamfered corner (top left, 28px) cut with `clip-path`; it is the only shaped element. The slip's tear line is a row of perforation dots in the `perf` token (the accent in A and C, a darker sage in B).
+Slips and fragments have a 2px radius (paper, nearly square); controls 4px. The hero stage has one chamfered corner (top left, 28px) cut with `clip-path`; it is the only shaped element. The slip's tear line is a row of perforation dots in the `perf` token (darker sage `#667a67` in B; the accent in A and C).
 
 ## Components
 
@@ -174,7 +187,7 @@ Slips and fragments have a 2px radius (paper, nearly square); controls 4px. The 
 - **Tools table**: Tool | Called by | What it does, grouped by which side calls the tool. Collapses to stacked rows on phones.
 - **Rule cell**: surface block with a heading, muted text and a paper fragment flush to the top or bottom edge.
 - **FAQ**: `details` list with square markers; on wide screens the answer shows in a sticky pane.
-- **Mark**: accent square, a white slip, accent dots and check, drawn with CSS variables so it follows the palette. The favicon in `app/layout.tsx` is a static copy for palette A.
+- **Mark**: drawn with `--mark-bg`, `--mark-slip` and `--mark-ink` so it follows the palette (B: sage square, charcoal slip, paper dots). On the dashboard it uses the dash accent with a white slip. The favicon in `app/layout.tsx` is a static copy of the active palette's mark.
 
 ## Do's and Don'ts
 
