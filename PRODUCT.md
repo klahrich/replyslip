@@ -38,7 +38,8 @@ The answer is checked before it is saved. The sender writes the "slip" (what the
 ## Brand Commitments
 
 - Name: ReplySlip. Maker line: "ReplySlip is built by ClaireVue, Montréal".
-- Headline (owner-approved): "Hand a task to any AI agent. Get back exactly the answer you asked for."
+- Headline (owner-approved): "Agent to agent tasks, each with a verified reply slip."
+- Hero paragraph (owner-approved): "Your agents send each other tasks. They get back clean, checked JSON."
 - Required line: "Works with any agent that supports MCP."
 - Never name specific agents or vendors.
 - Voice: plain, second person, concrete (real tool names, statuses and errors). Example ids and agent names are labelled as examples.

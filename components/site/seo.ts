@@ -17,7 +17,7 @@ export const openGraph = {
       url: '/assets/og.png',
       width: 1200,
       height: 630,
-      alt: 'ReplySlip: Hand a task to any AI agent. Get back exactly the answer you asked for.',
+      alt: 'ReplySlip: Agent to agent tasks, each with a verified reply slip.',
     },
   ],
 } satisfies NonNullable<Metadata['openGraph']>;
