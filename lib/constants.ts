@@ -1,5 +1,7 @@
 export const AGENT_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 export const PANE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+/** Short id for a local nudge driver. The server accepts any id that matches; herdr is the built-in one. */
+export const DRIVER_ID_PATTERN = /^[a-z0-9-]{1,32}$/;
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const LOGIN_CODE_TTL_MS = 10 * 60 * 1000;

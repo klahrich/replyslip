@@ -4,7 +4,7 @@ import { agents, wakes } from '@/db/schema';
 import { WAKE_MAX_ATTEMPTS, WEBHOOK_TIMEOUT_MS } from './constants';
 import { HttpError } from './errors';
 import { safeEqualString } from './crypto';
-import { buildWebhookCall } from './delivery';
+import { buildWebhookCall, localNudgeOf } from './delivery';
 import { WAKE_NOTICE } from './wake-notice';
 
 export type WakeReason = 'message' | 'task' | 'result' | 'question' | 'failure';
@@ -174,9 +174,18 @@ export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
         and w.status = 'pending'
         and w.next_attempt_at <= now()
         and w.attempts < ${WAKE_MAX_ATTEMPTS}
-        and a.delivery_mode = 'herdr'
         and a.revoked_at is null
-        and a.herdr_pane is not null
+        and (
+          (
+            a.delivery_mode = 'local'
+            and a.local_driver is not null
+            and coalesce(nullif(a.local_target, ''), a.herdr_pane) is not null
+          )
+          or (
+            a.delivery_mode = 'herdr'
+            and coalesce(nullif(a.local_target, ''), a.herdr_pane) is not null
+          )
+        )
       order by w.created_at
       limit ${limit}
       for update of w skip locked
@@ -196,7 +205,10 @@ export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
         reason: wakes.reason,
         taskId: wakes.taskId,
         agentName: agents.name,
-        pane: agents.herdrPane,
+        deliveryMode: agents.deliveryMode,
+        localDriver: agents.localDriver,
+        localTarget: agents.localTarget,
+        herdrPane: agents.herdrPane,
         attempts: wakes.attempts,
       })
       .from(wakes)
@@ -209,15 +221,22 @@ export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
         .set({ status: 'failed', lastError: 'Herdr watcher did not acknowledge the wake.' })
         .where(inArray(wakes.id, exhausted));
     }
-    return rows
-      .filter((row) => row.pane && !exhausted.includes(row.id))
-      .map((row) => ({
-        id: row.id,
-        pane: row.pane as string,
-        reason: row.reason,
-        task_id: row.taskId,
-        agent_name: row.agentName,
-      }));
+    return rows.flatMap((row) => {
+      if (exhausted.includes(row.id)) return [];
+      const nudge = localNudgeOf(row);
+      if (!nudge) return [];
+      return [
+        {
+          id: row.id,
+          driver: nudge.driver,
+          target: nudge.target,
+          pane: nudge.target,
+          reason: row.reason,
+          task_id: row.taskId,
+          agent_name: row.agentName,
+        },
+      ];
+    });
   });
 }
 

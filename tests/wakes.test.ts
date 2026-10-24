@@ -72,8 +72,16 @@ describe('wakes', () => {
     expect(polled.status).toBe(200);
     expect(polled.text).not.toContain('CANARY-HERDR-body');
     expect(polled.data.wakes).toEqual([
-      expect.objectContaining({ pane: 'local-to', reason: 'message', agent_name: 'LocalTo' }),
+      expect.objectContaining({
+        driver: 'herdr',
+        target: 'local-to',
+        pane: 'local-to',
+        reason: 'message',
+        agent_name: 'LocalTo',
+      }),
     ]);
+    expect(polled.data.wakes[0].notice).toBeUndefined();
+    expect(polled.data.wakes[0].body).toBeUndefined();
     const acked = await call(ack, 'http://localhost/api/v1/watcher/ack', {
       bearer: secret,
       body: { wake_ids: [polled.data.wakes[0].id] },

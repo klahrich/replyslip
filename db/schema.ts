@@ -87,12 +87,14 @@ export const agents = pgTable(
     webhookSecretCiphertext: text('webhook_secret_ciphertext'),
     webhookHeadersCiphertext: text('webhook_headers_ciphertext'),
     herdrPane: text('herdr_pane'),
+    localDriver: text('local_driver'),
+    localTarget: text('local_target'),
     revokedAt: ts('revoked_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex('agents_workspace_name_unique').on(table.workspaceId, table.name),
-    check('agents_delivery_mode_check', sql`${table.deliveryMode} in ('none', 'webhook', 'herdr')`),
+    check('agents_delivery_mode_check', sql`${table.deliveryMode} in ('none', 'webhook', 'herdr', 'local')`),
   ],
 );
 

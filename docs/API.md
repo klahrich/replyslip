@@ -108,7 +108,7 @@ Session cookie required, except register.
 
 `201` `{ "agent": { "id", "name", "description", "created_at", "revoked_at", "delivery" } }`.
 
-`delivery` is `{ "mode": "none"|"webhook"|"herdr", "url", "auth_type", "secret_set", "pane" }`. Secrets are never returned.
+`delivery` is `{ "mode": "none"|"webhook"|"local", "driver", "target", "url", "auth_type", "secret_set", "pane" }`. `driver` and `target` are set for `local`. `pane` repeats `target` and is deprecated. A legacy row with mode `herdr` is read back as `local` with driver `herdr`. Secrets are never returned.
 
 `409` `name_taken` when the name exists in this workspace.
 
@@ -149,6 +149,14 @@ One of:
 ```
 
 ```json
+{ "mode": "local", "driver": "herdr", "target": "red" }
+```
+
+`driver` matches `^[a-z0-9-]{1,32}$`. The server accepts any id. `herdr` is the driver this repo runs. `target` is a single line, 1–200 characters. The driver interprets it (a herdr pane name, for example).
+
+Deprecated, still accepted, and stored as the object above:
+
+```json
 { "mode": "herdr", "pane": "red" }
 ```
 
@@ -168,9 +176,11 @@ One of:
 { "mode": "webhook", "url": "https://example.com/hook", "auth": { "type": "headers", "headers": { "X-Api-Key": "secret" } } }
 ```
 
-`200` `{ "agent" }`. Tokens, HMAC secrets, and header values are encrypted at rest with `ENCRYPTION_KEY` and are not readable again. Webhook URLs must be public http(s) unless `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1`.
+`200` `{ "agent" }`. The response delivery uses `mode: "local"` with `driver` and `target` even when the request used the deprecated `herdr` shape. `pane` in that object repeats `target`. Session cookie only. An agent key cannot call this route.
 
-Pane names are 1–64 characters: letters, numbers, `.`, `_`, `-`.
+Tokens, HMAC secrets, and header values are encrypted at rest with `ENCRYPTION_KEY` and are not readable again. Webhook URLs must be public http(s) unless `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1`.
+
+A deprecated `herdr` pane is 1–64 characters: letters, numbers, `.`, `_`, `-`. The herdr driver refuses any other target.
 
 ## Join codes
 
@@ -314,10 +324,10 @@ Session cookie.
 `200`:
 
 ```json
-{ "wakes": [ { "id": "uuid", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ] }
+{ "wakes": [ { "id": "uuid", "driver": "herdr", "target": "red", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ] }
 ```
 
-There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, or `failure`. Due wakes are leased for 60 seconds so a crashed watcher retries. The CLI must not print anything except the fixed note.
+There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, or `failure`. `driver` and `target` say which local nudge to run. `pane` is a deprecated alias of `target`. Due wakes are leased for 60 seconds so a crashed watcher retries. The CLI acks a wake only when the driver's nudge returns ok. The notice it passes is fixed and is not taken from this payload.
 
 ### POST `/api/v1/watcher/ack`
 

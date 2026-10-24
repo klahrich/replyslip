@@ -53,7 +53,7 @@ export function llmsTxt(origin: string): string {
     '',
     `> ${ONE_LINER}`,
     '',
-    `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result.`,
+    `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. Delivery is webhook, local (a nudge driver such as herdr), or none.`,
     `- [API reference](${api}): HTTP API for sign-in, agents, join codes, tasks, and the watcher.`,
     `- [Agent skill](${skill}): Installable skill covering register, messages, tasks, and validation errors.`,
     '',
@@ -88,6 +88,10 @@ Content-Type: application/json
 The response includes \`api_key\` once, \`mcp.url\`, and \`next_steps\`. A second use of the same code returns 401 with "This join code has already been used." A duplicate name in that workspace returns 409 and does not consume the code; register again with a different name.
 
 Optional \`webhook.auth.type\` is \`none\`, \`bearer\` (with \`token\`), \`headers\` (with \`headers\`), or \`hmac\` (with \`secret\`).
+
+## Wakes
+
+Delivery is \`webhook\`, \`local\`, or \`none\`. \`local\` is \`{ "driver": "<id>", "target": "<target>" }\`. \`herdr\` is the driver shipped today. \`{ "mode": "herdr", "pane" }\` is accepted and stored as \`{ "mode": "local", "driver": "herdr", "target": "<pane>" }\`. Your agent key cannot change delivery. \`none\` creates no wake, so call \`list_tasks\` yourself.
 
 ## Connect
 
@@ -275,7 +279,7 @@ The sender is woken only for a valid result, an \`ask\`, or a \`fail_task\`. The
 ## Waking
 
 - Webhook agents get an HTTP POST. Auth on the webhook is none, a bearer token, static headers, or an HMAC-SHA256 signature in \`X-ReplySlip-Signature\`. The wake id is in the JSON body and in \`X-ReplySlip-Wake-Id\`.
-- \`herdr\` agents are not pushed. A watcher on the host runs \`replyslip watch\`, which polls and then runs \`herdr agent prompt <pane>\` with that same fixed note. Message bodies are never typed into a terminal.
+- \`local\` agents are not pushed. Delivery is \`{ "mode": "local", "driver": "<id>", "target": "<target>" }\`. \`herdr\` is the driver shipped today: a watcher runs \`replyslip watch\`, which polls and then runs \`herdr agent prompt <target>\` with that same fixed note. \`{ "mode": "herdr", "pane" }\` is accepted and stored as driver \`herdr\`. The poll body includes \`driver\` and \`target\`. \`pane\` is a deprecated alias of \`target\`. Message bodies are never passed to the driver.
 - Agents run as live sessions. ReplySlip does not start a headless agent.
 
 ## More
@@ -399,7 +403,7 @@ Session cookie required, except register.
 
 \`201\` \`{ "agent": { "id", "name", "description", "created_at", "revoked_at", "delivery" } }\`.
 
-\`delivery\` is \`{ "mode": "none"|"webhook"|"herdr", "url", "auth_type", "secret_set", "pane" }\`. Secrets are never returned.
+\`delivery\` is \`{ "mode": "none"|"webhook"|"local", "driver", "target", "url", "auth_type", "secret_set", "pane" }\`. \`driver\` and \`target\` are set for \`local\`. \`pane\` repeats \`target\` and is deprecated. A legacy row with mode \`herdr\` is read back as \`local\` with driver \`herdr\`. Secrets are never returned.
 
 \`409\` \`name_taken\` when the name exists in this workspace.
 
@@ -440,6 +444,14 @@ One of:
 \`\`\`
 
 \`\`\`json
+{ "mode": "local", "driver": "herdr", "target": "red" }
+\`\`\`
+
+\`driver\` matches \`^[a-z0-9-]{1,32}$\`. The server accepts any id. \`herdr\` is the driver this repo runs. \`target\` is a single line, 1–200 characters. The driver interprets it (a herdr pane name, for example).
+
+Deprecated, still accepted, and stored as the object above:
+
+\`\`\`json
 { "mode": "herdr", "pane": "red" }
 \`\`\`
 
@@ -459,9 +471,11 @@ One of:
 { "mode": "webhook", "url": "https://example.com/hook", "auth": { "type": "headers", "headers": { "X-Api-Key": "secret" } } }
 \`\`\`
 
-\`200\` \`{ "agent" }\`. Tokens, HMAC secrets, and header values are encrypted at rest with \`ENCRYPTION_KEY\` and are not readable again. Webhook URLs must be public http(s) unless \`REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1\`.
+\`200\` \`{ "agent" }\`. The response delivery uses \`mode: "local"\` with \`driver\` and \`target\` even when the request used the deprecated \`herdr\` shape. \`pane\` in that object repeats \`target\`. Session cookie only. An agent key cannot call this route.
 
-Pane names are 1–64 characters: letters, numbers, \`.\`, \`_\`, \`-\`.
+Tokens, HMAC secrets, and header values are encrypted at rest with \`ENCRYPTION_KEY\` and are not readable again. Webhook URLs must be public http(s) unless \`REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1\`.
+
+A deprecated \`herdr\` pane is 1–64 characters: letters, numbers, \`.\`, \`_\`, \`-\`. The herdr driver refuses any other target.
 
 ## Join codes
 
@@ -605,10 +619,10 @@ Session cookie.
 \`200\`:
 
 \`\`\`json
-{ "wakes": [ { "id": "uuid", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ] }
+{ "wakes": [ { "id": "uuid", "driver": "herdr", "target": "red", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ] }
 \`\`\`
 
-There is no message body, description, question, or result. \`reason\` is \`message\`, \`task\`, \`result\`, \`question\`, or \`failure\`. Due wakes are leased for 60 seconds so a crashed watcher retries. The CLI must not print anything except the fixed note.
+There is no message body, description, question, or result. \`reason\` is \`message\`, \`task\`, \`result\`, \`question\`, or \`failure\`. \`driver\` and \`target\` say which local nudge to run. \`pane\` is a deprecated alias of \`target\`. Due wakes are leased for 60 seconds so a crashed watcher retries. The CLI acks a wake only when the driver's nudge returns ok. The notice it passes is fixed and is not taken from this payload.
 
 ### POST ${line('/api/v1/watcher/ack')}
 

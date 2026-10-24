@@ -33,9 +33,10 @@ components/
   dashboard/         join codes, agents, keys, tasks, workspace name
 lib/                 auth, email, agents, tasks, wakes, delivery, MCP, agent docs
 db/                  Drizzle schema (db/schema.ts) and the Postgres client (db/index.ts)
-drizzle/             SQL migrations (0000_init.sql) and the journal
+drizzle/             SQL migrations (0000_init.sql, 0001_local_nudge.sql) and the journal
 scripts/migrate.ts   npm run db:migrate
-packages/cli/        npm run replyslip -- watch
+packages/cli/        npm run replyslip -- watch (nudge drivers in src/drivers)
+docs/drivers.md      how to add a local nudge driver
 tests/               Vitest integration tests against local Postgres
 docs/API.md          committed copy of the generated HTTP reference
 ```
@@ -103,7 +104,9 @@ Locally the URL is `http://localhost:3000/api/mcp`.
 
 ### Webhooks and wakes
 
-Each agent’s delivery is `none`, `webhook`, or `herdr`. `none` stores the work and does not push. Webhook auth is `none`, `bearer`, `hmac`, or static `headers`. Bearer tokens, HMAC secrets, and header values are encrypted at rest with AES-256-GCM. Webhook URLs must be public `http` or `https` unless `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1`.
+Each agent’s delivery is `none`, `webhook`, or `local`. `none` stores the work and does not push. `local` is `{ "mode": "local", "driver": "<id>", "target": "<target>" }`. `driver` is a short id (`^[a-z0-9-]{1,32}$`). The server stores any id, so a new driver does not need a server change. `herdr` is the only driver shipped here. `{ "mode": "herdr", "pane": "<pane>" }` is still accepted and stored as `{ "mode": "local", "driver": "herdr", "target": "<pane>" }`.
+
+Webhook auth is `none`, `bearer`, `hmac`, or static `headers`. Bearer tokens, HMAC secrets, and header values are encrypted at rest with AES-256-GCM. Webhook URLs must be public `http` or `https` unless `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1`.
 
 The POST body is a short notice. It never includes message text, the task description, the question, the failure reason, or the result. `lib/wakes.ts` sends:
 
@@ -121,19 +124,25 @@ The POST body is a short notice. It never includes message text, the task descri
 
 The `notice` string is `WAKE_NOTICE` in `lib/wake-notice.ts`. The agent reads the content with `get_task` or `list_tasks`.
 
-Failed webhook attempts stay `pending` and back off (30 seconds, doubling, capped at one hour, 8 attempts, then `failed`). `GET` or `POST /api/cron/wakes` with `Authorization: Bearer <CRON_SECRET>` retries due webhook wakes. Herdr wakes are not pushed; the watcher polls them.
+Failed webhook attempts stay `pending` and back off (30 seconds, doubling, capped at one hour, 8 attempts, then `failed`). `GET` or `POST /api/cron/wakes` with `Authorization: Bearer <CRON_SECRET>` retries due webhook wakes. Local wakes are not pushed; the watcher polls them. A new wake does not retry older pending wakes.
 
 A later message or task creates a new wake and posts that wake immediately. It does not replay older pending wakes.
 
 ### Local watcher
 
-For an agent whose delivery is `{ "mode": "herdr", "pane": "<pane>" }`, create a watcher key and on the machine that owns the panes:
+For an agent whose delivery is `{ "mode": "local", "driver": "herdr", "target": "<pane>" }`, create a watcher key and on the machine that owns the panes. `herdr` is required only for that driver. Install herdr 0.8.0 or newer (Apache 2.0 since 22 July 2026; earlier releases were AGPL) and put `herdr` on `PATH`. ReplySlip does not bundle it, modify it, or depend on it.
 
 ```bash
 npm run replyslip -- watch --url http://localhost:3000 --key <watcher-key>
 ```
 
-`REPLYSLIP_URL`, `REPLYSLIP_WATCHER_KEY`, and `REPLYSLIP_POLL_INTERVAL_MS` stand in for `--url`, `--key`, and `--interval` (default 3000, minimum 500). `--once` polls a single time. For each due wake the CLI runs `herdr agent prompt <pane>` with the fixed notice only, then acks wakes whose prompt exited 0. The poll response has no message body.
+`REPLYSLIP_URL`, `REPLYSLIP_WATCHER_KEY`, and `REPLYSLIP_POLL_INTERVAL_MS` stand in for `--url`, `--key`, and `--interval` (default 3000, minimum 500). `--once` polls a single time.
+
+At startup the watcher runs `check()` on every registered driver and logs the result. herdr's check runs `herdr --version` and requires 0.8.0 or newer. Each poll is `POST /api/v1/watcher/poll`. A wake is `{ "id", "driver", "target", "pane", "reason", "task_id", "agent_name" }`. `pane` is a deprecated alias of `target`. The body never includes message or task content.
+
+The herdr driver runs `herdr agent prompt <target> <notice>` with the fixed notice. Exit 0 is acked with `POST /api/v1/watcher/ack`. Any other result is not acked, so the wake stays pending and the server can hand it out again after the 60-second lease. A missing pane is logged once as `no pane named <target>`. An unknown driver, or one whose check failed, is not acked, and that warning is logged once per wake and driver.
+
+See `docs/drivers.md` to add another driver (for example tmux). The pane-prompt step is the driver's `nudge()`; the registry is the swap point.
 
 ## HTTP API
 
@@ -208,7 +217,7 @@ Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `RESEND_API_KEY`, and `EMAI
 
 Done:
 
-- Relay: messages, schema-checked tasks, workspace isolation, inline webhook delivery, daily retry cron, herdr poll.
+- Relay: messages, schema-checked tasks, workspace isolation, inline webhook delivery, daily retry cron, local nudge drivers (herdr first).
 - Passwordless email codes, single-use join codes, hashed agent and watcher keys.
 - MCP tools and the generated agent docs.
 - Site: landing page, `/agents`, sign-in, and a dashboard for the workspace name, join codes, agents, keys, and a read-only task list.

@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { z } from 'zod';
 import type { AgentRow } from '@/db/schema';
-import { PANE_NAME_PATTERN } from './constants';
+import { DRIVER_ID_PATTERN, PANE_NAME_PATTERN } from './constants';
 import { decryptSecret, encryptSecret } from './crypto';
 import { HttpError } from './errors';
 import { assertPublicWebhookUrl } from './webhook-url';
@@ -31,12 +31,35 @@ export const webhookAuthSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
-export const deliveryInputSchema = z.discriminatedUnion('mode', [
-  z.object({ mode: z.literal('none') }),
-  z.object({
+const localTargetSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine((value) => !/[\u0000-\u001f]/.test(value), 'Target must be a single line.');
+
+const localDeliverySchema = z.object({
+  mode: z.literal('local'),
+  driver: z
+    .string()
+    .regex(DRIVER_ID_PATTERN, 'Driver id must be 1-32 lowercase letters, numbers, or hyphens.'),
+  target: localTargetSchema,
+});
+
+const legacyHerdrSchema = z
+  .object({
     mode: z.literal('herdr'),
     pane: z.string().regex(PANE_NAME_PATTERN, 'Pane name must be 1-64 letters, numbers, dots, underscores, or hyphens.'),
-  }),
+  })
+  .transform((value) => ({
+    mode: 'local' as const,
+    driver: 'herdr',
+    target: value.pane,
+  }));
+
+export const deliveryInputSchema = z.union([
+  z.object({ mode: z.literal('none') }),
+  localDeliverySchema,
+  legacyHerdrSchema,
   z.object({
     mode: z.literal('webhook'),
     url: z.string().min(1).max(2000),
@@ -47,13 +70,17 @@ export const deliveryInputSchema = z.discriminatedUnion('mode', [
 export type DeliveryInput = z.infer<typeof deliveryInputSchema>;
 
 export type StoredDelivery = {
-  deliveryMode: 'none' | 'webhook' | 'herdr';
+  deliveryMode: 'none' | 'webhook' | 'local';
   webhookUrl: string | null;
   webhookAuthMode: string | null;
   webhookSecretCiphertext: string | null;
   webhookHeadersCiphertext: string | null;
   herdrPane: string | null;
+  localDriver: string | null;
+  localTarget: string | null;
 };
+
+const emptyLocal = { localDriver: null, localTarget: null, herdrPane: null };
 
 export function deliveryColumns(input: DeliveryInput): StoredDelivery {
   if (input.mode === 'none') {
@@ -63,17 +90,19 @@ export function deliveryColumns(input: DeliveryInput): StoredDelivery {
       webhookAuthMode: null,
       webhookSecretCiphertext: null,
       webhookHeadersCiphertext: null,
-      herdrPane: null,
+      ...emptyLocal,
     };
   }
-  if (input.mode === 'herdr') {
+  if (input.mode === 'local') {
     return {
-      deliveryMode: 'herdr',
+      deliveryMode: 'local',
       webhookUrl: null,
       webhookAuthMode: null,
       webhookSecretCiphertext: null,
       webhookHeadersCiphertext: null,
-      herdrPane: input.pane,
+      localDriver: input.driver,
+      localTarget: input.target,
+      herdrPane: input.driver === 'herdr' && PANE_NAME_PATTERN.test(input.target) ? input.target : null,
     };
   }
 
@@ -84,7 +113,7 @@ export function deliveryColumns(input: DeliveryInput): StoredDelivery {
     webhookAuthMode: input.auth.type,
     webhookSecretCiphertext: null,
     webhookHeadersCiphertext: null,
-    herdrPane: null,
+    ...emptyLocal,
   };
   if (input.auth.type === 'bearer') {
     base.webhookSecretCiphertext = encryptSecret(input.auth.token);
@@ -112,7 +141,9 @@ function assertHeaderMap(headers: Record<string, string>): void {
   }
 }
 
-export function publicDelivery(agent: Pick<
+export type LocalNudge = { driver: string; target: string };
+
+type DeliveryRow = Pick<
   AgentRow,
   | 'deliveryMode'
   | 'webhookUrl'
@@ -120,13 +151,53 @@ export function publicDelivery(agent: Pick<
   | 'webhookSecretCiphertext'
   | 'webhookHeadersCiphertext'
   | 'herdrPane'
->) {
+  | 'localDriver'
+  | 'localTarget'
+>;
+
+/** Resolve a local nudge from the new columns or a legacy herdr row. */
+export function localNudgeOf(agent: {
+  deliveryMode: string;
+  localDriver?: string | null;
+  localTarget?: string | null;
+  herdrPane?: string | null;
+}): LocalNudge | null {
+  if (agent.deliveryMode === 'local') {
+    const driver = agent.localDriver?.trim() ?? '';
+    const storedTarget = agent.localTarget?.trim() ?? '';
+    const target = storedTarget || (driver === 'herdr' ? (agent.herdrPane ?? '') : '');
+    if (!driver || !target) return null;
+    return { driver, target };
+  }
+  if (agent.deliveryMode === 'herdr') {
+    const target = agent.localTarget?.trim() || agent.herdrPane || '';
+    if (!target) return null;
+    return { driver: 'herdr', target };
+  }
+  return null;
+}
+
+export function publicDelivery(agent: DeliveryRow) {
+  const nudge = localNudgeOf(agent);
+  if (nudge || agent.deliveryMode === 'local' || agent.deliveryMode === 'herdr') {
+    return {
+      mode: 'local' as const,
+      driver: nudge?.driver ?? (agent.deliveryMode === 'herdr' ? 'herdr' : agent.localDriver),
+      target: nudge?.target ?? null,
+      url: null,
+      auth_type: null,
+      secret_set: false,
+      pane: nudge?.target ?? null,
+    };
+  }
   return {
     mode: agent.deliveryMode,
+    driver: null,
+    target: null,
     url: agent.webhookUrl,
     auth_type: agent.webhookAuthMode,
     secret_set: Boolean(agent.webhookSecretCiphertext || agent.webhookHeadersCiphertext),
-    pane: agent.herdrPane,
+    pane: null,
   };
 }
 
