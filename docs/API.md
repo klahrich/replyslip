@@ -323,7 +323,7 @@ See https://<host>/docs/getting-started.md for arguments and the task rules.
 
 ### GET or POST `/api/cron/wakes`
 
-`Authorization: Bearer <CRON_SECRET>`. Vercel Cron calls GET once a minute. Retries webhook wakes that are still pending, with exponential backoff, up to 8 attempts. Herdr wakes are left for the watcher.
+`Authorization: Bearer <CRON_SECRET>`. The first webhook POST runs in the request that saved the message, task, result, question, or failure. This route only retries webhook wakes that are still pending, with exponential backoff, up to 8 attempts. `vercel.json` schedules GET once a day (`0 8 * * *`) for Vercel Hobby. On Pro, the same route can be scheduled every minute. Herdr wakes are left for the watcher.
 
 `200` `{ "ok": true, "attempted": 0, "delivered": 0 }`. `401` when the secret is missing or wrong.
 
