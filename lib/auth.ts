@@ -18,6 +18,7 @@ import {
 import { getEmailSender } from './email';
 import { HttpError } from './errors';
 import { readCookie } from './http';
+import { recordMarketingOptIn } from './marketing';
 import { clientIp } from './origin';
 import { consumeRateLimit } from './rate-limit';
 
@@ -28,9 +29,12 @@ export type SessionUser = {
   id: string;
   email: string;
   emailVerifiedAt: Date | null;
+  marketingOptIn: boolean;
   createdAt: Date;
   workspace: { id: string; name: string; createdAt: Date } | null;
 };
+
+export type MarketingOptIn = { consentText: string };
 
 function normalizeEmail(email: string): string {
   const normalized = email.trim().toLowerCase();
@@ -101,6 +105,7 @@ export async function renameWorkspace(workspaceId: string, name: string): Promis
 export async function verifyLoginCode(
   emailInput: string,
   codeInput: string,
+  marketing?: MarketingOptIn,
 ): Promise<{ token: string; user: SessionUser }> {
   const email = normalizeEmail(emailInput);
   if (!/^\d{6}$/.test(codeInput)) {
@@ -205,6 +210,7 @@ export async function verifyLoginCode(
       }
     }
 
+    if (marketing) await recordMarketingOptIn(tx, row.id, marketing.consentText);
     await tx.insert(sessions).values({ userId: row.id, tokenHash, expiresAt });
     const [fresh] = await tx.select().from(users).where(eq(users.id, row.id)).limit(1);
     if (!fresh || !workspace) throw new HttpError(500, 'internal_error', 'Something went wrong.');
@@ -212,6 +218,7 @@ export async function verifyLoginCode(
       id: fresh.id,
       email: fresh.email,
       emailVerifiedAt: fresh.emailVerifiedAt,
+      marketingOptIn: fresh.marketingOptIn,
       createdAt: fresh.createdAt,
       workspace,
     } satisfies SessionUser;
@@ -250,6 +257,7 @@ export async function sessionUser(req: Request): Promise<SessionUser | null> {
     id: user.id,
     email: user.email,
     emailVerifiedAt: user.emailVerifiedAt,
+    marketingOptIn: user.marketingOptIn,
     createdAt: user.createdAt,
     workspace,
   };
@@ -261,6 +269,7 @@ export function serializeUser(user: SessionUser) {
       id: user.id,
       email: user.email,
       email_verified_at: user.emailVerifiedAt?.toISOString() ?? null,
+      marketing_opt_in: user.marketingOptIn,
       created_at: user.createdAt.toISOString(),
     },
     workspace: user.workspace

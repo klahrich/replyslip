@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   index,
   integer,
@@ -32,6 +33,14 @@ export const users = pgTable(
     workspaceId: uuid('workspace_id').references(() => workspaces.id),
     email: text('email').notNull(),
     emailVerifiedAt: ts('email_verified_at'),
+    /** Explicit marketing consent. Stays false until a person opts in; nothing pre-checks it. */
+    marketingOptIn: boolean('marketing_opt_in').notNull().default(false),
+    /** When the current consent was given. Kept after unsubscribe as proof. */
+    marketingConsentAt: ts('marketing_consent_at'),
+    /** Exact checkbox wording the person agreed to. */
+    marketingConsentText: text('marketing_consent_text'),
+    /** When they withdrew consent. Null while they are opted in. */
+    marketingUnsubscribedAt: ts('marketing_unsubscribed_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (table) => [uniqueIndex('users_email_unique').on(table.email)],
