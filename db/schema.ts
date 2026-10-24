@@ -13,11 +13,17 @@ import {
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
-export const workspaces = pgTable('workspaces', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  createdAt: ts('created_at').notNull().defaultNow(),
-});
+export const workspaces = pgTable(
+  'workspaces',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    /** free or unlimited. A person sets unlimited with one UPDATE; the app does not name that workspace. */
+    plan: text('plan').notNull().default('free'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [check('workspaces_plan_check', sql`${table.plan} in ('free', 'unlimited')`)],
+);
 
 export const users = pgTable(
   'users',

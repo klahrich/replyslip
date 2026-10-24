@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS } from './constants';
 import { HttpError } from './errors';
+import { PlanLimitError } from './plans';
 
 export function json(body: unknown, status = 200, extraHeaders?: HeadersInit): Response {
   const headers = new Headers(extraHeaders);
@@ -27,6 +28,7 @@ export async function handle(fn: () => Promise<Response>): Promise<Response> {
   try {
     return await fn();
   } catch (err) {
+    if (err instanceof PlanLimitError) return json(err.body, err.status);
     if (err instanceof HttpError) return jsonError(err);
     console.error(err);
     return jsonError(new HttpError(500, 'internal_error', 'Something went wrong.'));

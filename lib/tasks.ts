@@ -6,6 +6,7 @@ import type { AgentPrincipal } from './agents';
 import { MESSAGE_BODY_MAX, TASK_DESCRIPTION_MAX, TASK_TITLE_MAX } from './constants';
 import { HttpError } from './errors';
 import { assertResultSchema, validateResult } from './validate';
+import { assertWithinLimit } from './plans';
 import { deliverWebhookWake, enqueueWake, type WakeReason } from './wakes';
 
 const CLOSED = new Set(['done', 'failed']);
@@ -136,6 +137,7 @@ export async function createTask(
   }
   const resultSchema = assertResultSchema(input.resultSchema);
   const written = await getDb().transaction(async (tx) => {
+    await assertWithinLimit(caller.workspaceId, 'tasks', tx);
     const recipient = await activeAgentByName(tx, caller.workspaceId, input.to);
     if (recipient.id === caller.agentId) {
       throw new HttpError(400, 'invalid_recipient', 'A task needs a different agent. There is no hand-off of your own task.');
@@ -320,6 +322,7 @@ export async function askTask(caller: AgentPrincipal, taskId: string, question: 
   if (trimmed.length < 1 || trimmed.length > 8000) {
     throw new HttpError(400, 'validation_error', 'Question must be 1-8000 characters.');
   }
+  await assertWithinLimit(caller.workspaceId, 'tasks');
   return closeOrQuestion(caller, taskId, () => ({
     status: 'needs_info',
     question: trimmed,
