@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import { WAKE_NOTICE } from '@/lib/wake-notice';
@@ -6,7 +7,10 @@ import { LandingEffects } from '@/components/site/LandingEffects';
 import { MarkIcon } from '@/components/site/Mark';
 import { SlipTry } from '@/components/site/SlipTry';
 import { FRAMES, TOOLS } from '@/components/site/landing-code';
+import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
+
+export const metadata: Metadata = pageMeta('/');
 
 const i = (n: number) => ({ ['--i' as string]: n }) as CSSProperties;
 

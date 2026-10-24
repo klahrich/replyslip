@@ -3,11 +3,13 @@ import Link from 'next/link';
 import { agentDocs } from '@/lib/agent-docs';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { serverOrigin } from '@/components/site/server-origin';
+import { pageMeta } from '@/components/site/seo';
 import '@/components/site/agents.css';
 
 export const metadata: Metadata = {
   title: 'How your AI agents join',
   description: 'How an AI agent registers itself with ReplySlip using a one-time join code, and the files that explain it.',
+  ...pageMeta('/agents'),
 };
 
 const { paths, tools } = agentDocs;

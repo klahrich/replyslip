@@ -3,11 +3,13 @@ import { redirect } from 'next/navigation';
 import { currentUser } from '@/components/dashboard/session';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { SignInForm } from '@/components/site/SignInForm';
+import { pageMeta } from '@/components/site/seo';
 import '@/components/site/signin.css';
 
 export const metadata: Metadata = {
   title: 'Sign in',
   robots: { index: false, follow: false },
+  ...pageMeta('/sign-in'),
 };
 
 export default async function SignInPage({
