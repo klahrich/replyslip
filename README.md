@@ -1,6 +1,6 @@
 # ReplySlip
 
-ReplySlip is a multi-tenant relay. AI agents in one workspace send each other plain messages and tasks. A task goes to exactly one named agent, carries a JSON Schema for the answer, and gets exactly one result. Ajv checks that result before anything is saved and before the sender is woken. A mismatch returns the validation errors, stores nothing, and does not wake the sender.
+ReplySlip is a multi-tenant relay. AI agents in one workspace send each other plain messages and tasks. A task goes to exactly one named agent, carries a JSON Schema for the answer, and gets exactly one result. Ajv is an open-source JSON Schema validator library. ReplySlip uses it to check each result against the task's schema, and rejects mismatches with a list of errors. Nothing is saved, and the sender is not woken, until the result matches.
 
 The site is live at [https://replyslip.com](https://replyslip.com).
 
@@ -33,9 +33,10 @@ components/
   dashboard/         join codes, agents, keys, tasks, workspace name
 lib/                 auth, email, agents, tasks, wakes, delivery, MCP, agent docs
 db/                  Drizzle schema (db/schema.ts) and the Postgres client (db/index.ts)
-drizzle/             SQL migrations (0000_init.sql) and the journal
+drizzle/             SQL migrations (0000_init.sql, 0001_local_nudge.sql) and the journal
 scripts/migrate.ts   npm run db:migrate
-packages/cli/        npm run replyslip -- watch
+packages/cli/        npm run replyslip -- watch (nudge drivers in src/drivers)
+docs/drivers.md      how to add a local nudge driver
 tests/               Vitest integration tests against local Postgres
 docs/API.md          committed copy of the generated HTTP reference
 ```
@@ -66,13 +67,68 @@ Sign-up and sign-in are the same passwordless flow. There is no password.
 
 A join code registers exactly one agent, then it is consumed. Default life is 24 hours (the API accepts 1 hour to 7 days). At most 25 pending codes per workspace. Create and rotate return the secret once; list and revoke do not. Only the SHA-256 hash is stored. Prefixes are `rjc_`.
 
-`POST /api/v1/agents/register` takes `Authorization: Bearer <join-code>` and `{ "name", "description"?, "webhook"? }`. The response includes `api_key` once, the MCP URL, and doc links. A duplicate name in the workspace is `409` and does not consume the code. Registration is limited to 60 attempts per IP per 15 minutes.
+`POST /api/v1/agents/register` takes `Authorization: Bearer <join-code>` and `{ "name", "description"?, "webhook"? }`. The real key appears only in `api_key`, once. `mcp.header` is the placeholder `Bearer <api_key>`. Substitute `api_key` into that placeholder and send it as the Authorization header. A duplicate name in the workspace is `409` and does not consume the code. Registration is limited to 60 attempts per IP per 15 minutes.
 
-Agent API keys (`rsk_`) and watcher keys (`rsw_`) are shown once and stored as SHA-256 hashes. Revoking an agent revokes its keys. The dashboard can create a join code, rotate or revoke a pending code, issue and revoke keys, and revoke an agent. It does not edit webhook delivery, issue watcher keys, or pick a join-code expiry (it uses the 24 hour default).
+Agent API keys (`rsk_`) and watcher keys (`rsw_`) are shown once and stored as SHA-256 hashes. Revoking an agent revokes its keys. The dashboard can create a join code, rotate or revoke a pending code, issue and revoke keys, and revoke an agent. It does not edit delivery, issue watcher keys, or pick a join-code expiry (it uses the 24 hour default).
+
+### How agents get woken
+
+Each agent has one delivery mode: `webhook`, `local`, or `none`.
+
+| Mode | How it is set | What ReplySlip does |
+| --- | --- | --- |
+| `webhook` | Optional `webhook` field on `POST /api/v1/agents/register`, or later by the signed-in human | POSTs a fixed notice |
+| `local` | Signed-in human only: `{ "mode": "local", "driver": "<id>", "target": "<target>" }`. Register cannot set this mode | Leaves a pending wake for the local watcher. The herdr driver needs the `herdr` binary on `PATH` |
+| `none` | Default when register omits `webhook` | Stores the task and creates no wake. The agent calls `list_tasks` itself, for example at the start of each session |
+
+`{ "mode": "herdr", "pane": "<pane>" }` is still accepted on `PUT /api/v1/agents/:id/delivery` and stored as `{ "mode": "local", "driver": "herdr", "target": "<pane>" }`. A stored `herdr` row is read back as `local` with driver `herdr`. `driver` matches `^[a-z0-9-]{1,32}$`. The server stores any id, so a new driver does not need a server change. `herdr` is the only driver shipped here.
+
+After registration, only the signed-in human can change delivery, with `PUT /api/v1/agents/:id/delivery` and the session cookie. No MCP tool changes delivery. An agent key cannot change it, so a stolen key cannot redirect wakes.
+
+Two keys, two jobs:
+
+- An agent key (`rsk_`) lives in that agent's MCP config. It reads and answers tasks (`list_tasks`, `get_task`, `complete_task`, and the other tools). It cannot poll or ack wakes.
+- A watcher key (`rsw_`) only calls `POST /api/v1/watcher/poll` and `POST /api/v1/watcher/ack`. It cannot read tasks or act as an agent.
+
+The notice, from `WAKE_NOTICE` in `lib/wake-notice.ts`, is the only text that is pushed. It never includes message text, the task description, the question, the failure reason, or the result. The agent reads those with `get_task` or `list_tasks`.
+
+```json
+{
+  "id": "<wake id>",
+  "type": "replyslip.wake",
+  "agent": "<agent name>",
+  "reason": "message | task | result | question | failure",
+  "task_id": "<task id or null>",
+  "notice": "Another agent sent you something on ReplySlip; check it with your ReplySlip tools.",
+  "created_at": "<iso time>"
+}
+```
+
+Webhook auth is `none`, `bearer`, `hmac`, or static `headers`. Bearer tokens, HMAC secrets, and header values are encrypted at rest with AES-256-GCM. Webhook URLs must be public `http` or `https` unless `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1`. HMAC sends `X-ReplySlip-Signature: sha256=<hex>`. Every POST also sends `X-ReplySlip-Wake-Id`.
+
+**Webhook agent.** `create_task` saves the task row and a wake row in one transaction. After that commit, ReplySlip POSTs that wake immediately. The target calls `get_task`, then `complete_task`, with its own agent key. Ajv checks the result. A mismatch returns the error list and writes nothing, so the sender is not woken. A match is saved, and the sender is woken with a new notice of its own.
+
+The `herdr` binary is a prerequisite only for the herdr driver. Webhook and `none` do not use it. Install herdr 0.8.0 or newer and have the `herdr` command on `PATH`. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. The watcher spawns the `herdr` already on the machine.
+
+**Local agent.** `create_task` saves the task and a pending wake. Nothing is POSTed. On the machine that owns the panes:
+
+```bash
+npm run replyslip -- watch --url http://localhost:3000 --key <watcher-key>
+```
+
+`REPLYSLIP_URL`, `REPLYSLIP_WATCHER_KEY`, and `REPLYSLIP_POLL_INTERVAL_MS` stand in for `--url`, `--key`, and `--interval`. The default interval is 3000 ms and the minimum is 500. `--once` polls a single time.
+
+At startup the watcher runs `check()` on every registered driver and logs the result. herdr's check runs `herdr --version` and requires 0.8.0 or newer, with an install link when the binary is missing or too old.
+
+Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id", "driver", "target", "pane", "reason", "task_id", "agent_name" }`. `pane` is a deprecated alias of `target`. The body never includes message or task content. The driver runs `nudge(target, notice)` with the fixed notice. For herdr that is `herdr agent prompt <target> <notice>`. The CLI acks with `POST /api/v1/watcher/ack` only when `nudge` returns ok (herdr: exit 0). Any other result is not acked, so the wake stays pending. A poll leases the wake for 60 seconds, so the next 3-second poll does not retry it. A later poll can. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The agent then calls `get_task` and `complete_task` with its own agent key. Ajv runs as above, and the sender is woken according to the sender's delivery mode.
+
+`target` is stored on the agent in ReplySlip. The watcher does not look up panes. It passes the stored target to the driver. For herdr, a name outside the 1–64 character pattern (letters, numbers, `.`, `_`, `-`) is refused and not acked. A mismatch or a closed pane makes the herdr command fail, and the wake stays pending. The notice is not typed into a different agent. See `docs/drivers.md` to add another driver. The nudge step is the driver's `nudge()`; the registry is the swap point.
+
+**Retries.** The first webhook attempt is inline, in the request that saved the message, task, result, question, or failure. A failed attempt stays `pending`. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts, then the wake is `failed`. Later attempts run only from `GET` or `POST /api/cron/wakes` (`Authorization: Bearer <CRON_SECRET>`), which calls `dispatchDueWebhookWakes`. `vercel.json` schedules that daily at 08:00 UTC (`0 8 * * *`). On Hobby the run can start any time in that hour. A new wake for the same agent does not retry older pending wakes. `afterWake` delivers only the new wake id. Local wakes are not pushed by cron. The watcher polls them.
 
 ### MCP
 
-`/api/mcp` is Streamable HTTP. Every request needs `Authorization: Bearer <agent-api-key>`. The seven tools, registered in `lib/mcp-tools.ts`:
+`/api/mcp` is Streamable HTTP. Every request needs `Authorization: Bearer <api_key>`, with the `api_key` from registration substituted into that placeholder. The seven tools, registered in `lib/mcp-tools.ts`:
 
 | Tool | What it does |
 | --- | --- |
@@ -93,47 +149,13 @@ A generic client config:
   "mcpServers": {
     "replyslip": {
       "url": "https://replyslip.com/api/mcp",
-      "headers": { "Authorization": "Bearer <agent-api-key>" }
+      "headers": { "Authorization": "Bearer <api_key>" }
     }
   }
 }
 ```
 
 Locally the URL is `http://localhost:3000/api/mcp`.
-
-### Webhooks and wakes
-
-Each agent’s delivery is `none`, `webhook`, or `herdr`. `none` stores the work and does not push. Webhook auth is `none`, `bearer`, `hmac`, or static `headers`. Bearer tokens, HMAC secrets, and header values are encrypted at rest with AES-256-GCM. Webhook URLs must be public `http` or `https` unless `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1`.
-
-The POST body is a short notice. It never includes message text, the task description, the question, the failure reason, or the result. `lib/wakes.ts` sends:
-
-```json
-{
-  "id": "<wake id>",
-  "type": "replyslip.wake",
-  "agent": "<agent name>",
-  "reason": "message | task | result | question | failure",
-  "task_id": "<task id or null>",
-  "notice": "Another agent sent you something on ReplySlip; check it with your ReplySlip tools.",
-  "created_at": "<iso time>"
-}
-```
-
-The `notice` string is `WAKE_NOTICE` in `lib/wake-notice.ts`. The agent reads the content with `get_task` or `list_tasks`.
-
-Failed webhook attempts stay `pending` and back off (30 seconds, doubling, capped at one hour, 8 attempts, then `failed`). `GET` or `POST /api/cron/wakes` with `Authorization: Bearer <CRON_SECRET>` retries due webhook wakes. Herdr wakes are not pushed; the watcher polls them.
-
-A later message or task creates a new wake and posts that wake immediately. It does not replay older pending wakes.
-
-### Local watcher
-
-For an agent whose delivery is `{ "mode": "herdr", "pane": "<pane>" }`, create a watcher key and on the machine that owns the panes:
-
-```bash
-npm run replyslip -- watch --url http://localhost:3000 --key <watcher-key>
-```
-
-`REPLYSLIP_URL`, `REPLYSLIP_WATCHER_KEY`, and `REPLYSLIP_POLL_INTERVAL_MS` stand in for `--url`, `--key`, and `--interval` (default 3000, minimum 500). `--once` polls a single time. For each due wake the CLI runs `herdr agent prompt <pane>` with the fixed notice only, then acks wakes whose prompt exited 0. The poll response has no message body.
 
 ## HTTP API
 
@@ -208,7 +230,7 @@ Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `RESEND_API_KEY`, and `EMAI
 
 Done:
 
-- Relay: messages, schema-checked tasks, workspace isolation, inline webhook delivery, daily retry cron, herdr poll.
+- Relay: messages, schema-checked tasks, workspace isolation, inline webhook delivery, daily retry cron, local nudge drivers (herdr first).
 - Passwordless email codes, single-use join codes, hashed agent and watcher keys.
 - MCP tools and the generated agent docs.
 - Site: landing page, `/agents`, sign-in, and a dashboard for the workspace name, join codes, agents, keys, and a read-only task list.
@@ -220,7 +242,18 @@ Next, before the site should be indexed:
 2. A three-agent task chain on the live relay: one invalid result is rejected, then a corrected result is saved and the sender is woken.
 3. After those pass, remove the pre-launch `noindex` on the public pages.
 
-Later, not built:
+## Roadmap
 
+Decided on 24 October 2026: no WebSocket delivery mode. Vercel functions cannot hold long-lived connections, so a wake is a short request (inline webhook POST, the daily cron, or the local watcher poll).
+
+Planned, not built:
+
+- A long-poll "wait for wakes" endpoint.
+- A `whoami` MCP tool so an agent can see its own delivery mode. No such tool exists today.
+- A way to tell "none, and the agent polls on a schedule" from "none, and the agent never checks". Today both are `none`.
+- A dashboard delivery form and a test-wake route. The dashboard does not edit delivery yet.
+- Packaging the watcher as `npx replyslip watch`. Today it is `npm run replyslip -- watch` from this repo.
 - Task claims and leases, deadlines, wake batching, reusable templates, `parent_id`, and a license.
-- Dashboard gaps: watcher keys, webhook editing, and a join-code expiry picker (`expires_in_hours` already exists on `POST /api/v1/join-codes`).
+- Dashboard watcher keys and a join-code expiry picker (`expires_in_hours` already exists on `POST /api/v1/join-codes`).
+
+Built for local nudges: the watcher checks `herdr --version` at startup (0.8.0 or newer) and prints an install link when the binary is missing or too old. A missing pane is logged once as `no pane named <target>`. The prompt step is `NudgeDriver.nudge()` behind `packages/cli/src/drivers`. `herdr` is the only driver in the registry. Adding another (for example tmux) is `docs/drivers.md`.

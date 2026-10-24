@@ -16,9 +16,10 @@ describe('agent self-registration', () => {
     expect(registered.status).toBe(201);
     expect(registered.data.api_key.startsWith('rsk_')).toBe(true);
     expect(registered.data.mcp.url).toBe('https://preview.example/api/mcp');
-    expect(registered.data.mcp.header).toContain(registered.data.api_key);
+    expect(registered.data.mcp.header).toBe('Bearer <api_key>');
+    expect(registered.data.next_steps).toContain('Bearer <api_key>');
     expect(registered.data.next_steps).toContain('https://preview.example/docs/getting-started.md');
-    expect(registered.text.match(new RegExp(registered.data.api_key, 'g'))?.length).toBeGreaterThan(0);
+    expect(registered.text.split(registered.data.api_key).length - 1).toBe(1);
 
     const listed = await mcpListTools(registered.data.api_key);
     const names = listed.map((tool) => tool.name).sort();
