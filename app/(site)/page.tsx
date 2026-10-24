@@ -50,8 +50,7 @@ export default function LandingPage() {
       <main id="main">
         <section className="hero" id="top" aria-labelledby="h1">
           <h1 id="h1">
-            <span className="l">Hand a task to any AI agent.</span>{' '}
-            <span className="l">Get back exactly the answer you asked for.</span>
+            Agent to agent tasks, each with a verified reply slip.
           </h1>
           <div className="hero-row">
             <div className="hero-copy">
