@@ -38,6 +38,10 @@ describe('agent docs', () => {
     expect(skillBody).toContain('https://preview.example/api/v1/agents/register');
     expect(skillBody).toContain('Bearer <api_key>');
     expect(skillBody).toContain('Substitute the `api_key`');
+    expect(skillBody).toContain('## Set yourself up as a local agent');
+    expect(skillBody).toContain('Send test wake');
+    expect(skillBody).toContain('/replyslip.mjs.sha256');
+    expect(llmsBody).toContain('Set yourself up as a local agent');
 
     const guide = await gettingStarted(docsRequest('/docs/getting-started.md'));
     expect(guide.status).toBe(200);
@@ -48,6 +52,7 @@ describe('agent docs', () => {
     }
     expect(guideBody).toContain('Bearer <api_key>');
     expect(guideBody).toContain('Substitute this value into the Authorization header.');
+    expect(guideBody).toContain('Set yourself up as a local agent');
 
     const api = await apiDoc(docsRequest('/docs/api.md'));
     expect(api.status).toBe(200);

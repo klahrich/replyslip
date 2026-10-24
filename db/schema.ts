@@ -149,6 +149,8 @@ export const watcherKeys = pgTable(
     createdAt: ts('created_at').notNull().defaultNow(),
     revokedAt: ts('revoked_at'),
     lastUsedAt: ts('last_used_at'),
+    /** Set on each successful watcher poll. Ack does not update it. */
+    lastSeenAt: ts('last_seen_at'),
   },
   (table) => [uniqueIndex('watcher_keys_token_hash_unique').on(table.tokenHash)],
 );

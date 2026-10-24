@@ -29,6 +29,9 @@ export type Agent = {
   last_delivered_at?: string | null;
   last_failed_at?: string | null;
   last_error?: string | null;
+  /** Local agents only. Null for webhook and none. */
+  watcher_last_seen_at?: string | null;
+  watcher_online?: boolean;
 };
 
 export type AgentKey = {
@@ -110,6 +113,7 @@ export type WatcherKey = {
   created_at: string;
   revoked_at: string | null;
   last_used_at: string | null;
+  last_seen_at?: string | null;
 };
 
 export type NewWatcherKey = { id: string; name: string; prefix: string; created_at: string; secret: string };

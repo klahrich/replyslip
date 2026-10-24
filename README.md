@@ -24,6 +24,7 @@ app/
   api/cron/wakes/    webhook retry cron
   llms.txt/          GET /llms.txt
   skill.md/          GET /skill.md
+  replyslip.mjs/     GET /replyslip.mjs and /replyslip.mjs.sha256
   docs/              GET /docs/getting-started.md and /docs/api.md
   robots.ts          crawler rules and sitemap URL
   sitemap.ts         public URLs only
@@ -33,9 +34,10 @@ components/
   dashboard/         join codes, agents, keys, tasks, workspace name
 lib/                 auth, email, agents, tasks, wakes, delivery, MCP, agent docs
 db/                  Drizzle schema (db/schema.ts) and the Postgres client (db/index.ts)
-drizzle/             SQL migrations (0000_init.sql, 0001_local_nudge.sql, 0002_wake_reason_test.sql) and the journal
+drizzle/             SQL migrations (0000_init.sql, 0001_local_nudge.sql, 0002_wake_reason_test.sql, 0003_watcher_last_seen.sql) and the journal
 scripts/migrate.ts   npm run db:migrate
-packages/cli/        npm run replyslip -- watch | register | key-path (nudge drivers in src/drivers)
+scripts/bundle-replyslip.mjs   rebuild packages/cli/replyslip.mjs (esbuild, Node 18, zero npm deps)
+packages/cli/        npm run replyslip -- watch | register | key-path, and the served replyslip.mjs bundle (nudge drivers in src/drivers)
 docs/drivers.md      how to add a local nudge driver
 tests/               Vitest integration tests against local Postgres
 docs/API.md          committed copy of the generated HTTP reference
@@ -123,9 +125,14 @@ The `herdr` binary is a prerequisite only for the herdr driver. Webhook and `non
 
 ```bash
 npm run replyslip -- watch --url http://localhost:3000 --key <watcher-key>
+node replyslip.mjs watch --url https://replyslip.com --key-file ~/.replyslip/watcher-<machine>.key
 ```
 
-`REPLYSLIP_URL`, `REPLYSLIP_WATCHER_KEY`, and `REPLYSLIP_POLL_INTERVAL_MS` stand in for `--url`, `--key`, and `--interval`. The default interval is 3000 ms and the minimum is 500. `--once` polls a single time.
+`GET /replyslip.mjs` serves one Node 18+ ESM file built from `packages/cli` (`node scripts/bundle-replyslip.mjs`; `node scripts/bundle-replyslip.mjs --check` fails when the committed file is stale). `GET /replyslip.mjs.sha256` is a `sha256sum -c` line for those bytes. The file has no npm dependencies. `register` on that file writes `~/.replyslip/agents/<name>.json` and does not set delivery. There is no `--local` flag.
+
+`REPLYSLIP_URL` stands in for `--url`. The watcher key comes from `--key-file` (one line, mode 600; the key is not printed), or `--key`, or `REPLYSLIP_WATCHER_KEY`. `--key-file` wins when it is set. `REPLYSLIP_POLL_INTERVAL_MS` stands in for `--interval`. The default interval is 3000 ms and the minimum is 500. `--once` polls a single time. Each successful poll sets `last_seen_at` on that watcher key. Ack does not. Only `rsw_` watcher keys are accepted.
+
+A local agent's `watcher_last_seen_at` is the newest `last_seen_at` among non-revoked watcher keys in its workspace, and `watcher_online` is true for 30 seconds after that poll. Webhook and `none` agents return null and false. `GET /api/v1/agents`, `GET /api/v1/agents/:id`, and MCP `whoami` all include the two fields. `GET /api/v1/watcher-keys` includes `last_seen_at`.
 
 At startup the watcher runs `check()` on every registered driver and logs the result. herdr's check runs `herdr --version` and requires 0.8.0 or newer, with an install link when the binary is missing or too old.
 
@@ -148,7 +155,7 @@ Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id"
 | `ask` | Target moves the task to `needs_info` and wakes the sender. |
 | `fail_task` | Target closes the task as `failed` and wakes the sender. |
 | `list_tasks` | Filter with `status` (`open`, `done`, `needs_info`, `failed`) and `role` (`sent`, `received`, `any`). |
-| `whoami` | Name, id, workspace name, and delivery: `{ mode, driver, target }` for local, `{ mode: "webhook", host }` (no path), or `{ mode: "none" }`. No secrets. |
+| `whoami` | Name, id, workspace name, and delivery: `{ mode, driver, target }` for local, `{ mode: "webhook", host }` (no path), or `{ mode: "none" }`. Local agents also return `watcher_last_seen_at` and `watcher_online`. No secrets. |
 
 Only the target can complete, ask, or fail. There is no hand-off. Status values are `open`, `needs_info`, `done`, and `failed`.
 
@@ -226,7 +233,7 @@ Names only. Real values stay in `.env` or the host. `.env.example` lists the sam
 | `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhook URLs on loopback and private networks. Leave unset in production. |
 | `REPLYSLIP_URL` | Default origin for the watcher CLI and for `replyslip register` when `--url` is omitted. |
 | `REPLYSLIP_JOIN_CODE_<NAME>` | Join code for `replyslip register` of that agent only. Not a server variable. There is no shared `REPLYSLIP_JOIN_CODE`. |
-| `REPLYSLIP_WATCHER_KEY` | Default watcher key for the CLI. |
+| `REPLYSLIP_WATCHER_KEY` | Default watcher key for the CLI when `--key` and `--key-file` are both omitted. The local setup in `/skill.md` stores the key in `~/.replyslip/watcher-<machine>.key` instead. |
 | `REPLYSLIP_POLL_INTERVAL_MS` | Default poll interval for the CLI. |
 
 ## Deployment
@@ -251,7 +258,7 @@ Done:
 
 Next, before the site should be indexed:
 
-1. An external agent self-registers using only [https://replyslip.com](https://replyslip.com) (join code, `/llms.txt` or `/skill.md`, then MCP).
+1. An external agent self-registers using only [https://replyslip.com](https://replyslip.com) (join code, `/llms.txt` or `/skill.md`, then MCP). Local agents follow "Set yourself up as a local agent" in `/skill.md`: register does not set delivery, the human sets Local / herdr / the pane and creates the watcher key, and the agent runs the script from `/replyslip.mjs`.
 2. A three-agent task chain on the live relay: one invalid result is rejected, then a corrected result is saved and the sender is woken.
 3. After those pass, remove the pre-launch `noindex` on the public pages.
 
@@ -264,7 +271,7 @@ Planned, not built:
 - A long-poll "wait for wakes" endpoint.
 - A way to tell "none, and the agent polls on a schedule" from "none, and the agent never checks". Today both are `none`.
 - The dashboard delivery form is in progress (LandingBot). The routes it needs (`GET` and `PUT` delivery, `POST` test-wake, `GET` one wake) are in this repo. The form is not.
-- Packaging the watcher as `npx replyslip watch`. Today it is `npm run replyslip -- watch` from this repo.
+- Packaging the watcher as `npx replyslip watch`. Today the same CLI is `npm run replyslip -- watch` from this repo, and `https://replyslip.com/replyslip.mjs` for a machine that does not have the repo.
 - Task claims and leases, deadlines, wake batching, reusable templates, `parent_id`, and a license.
 - Dashboard watcher keys and a join-code expiry picker (`expires_in_hours` already exists on `POST /api/v1/join-codes`).
 

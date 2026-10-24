@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, max, sql } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { agentKeys, agents, joinCodes, watcherKeys, type AgentRow, type JoinCodeRow } from '@/db/schema';
 import type { SessionUser } from './auth';
@@ -8,6 +8,7 @@ import {
   JOIN_CODE_MAX_PENDING,
   JOIN_CODE_MAX_TTL_MS,
   JOIN_CODE_MIN_TTL_MS,
+  WATCHER_ONLINE_MS,
 } from './constants';
 import { randomToken, sha256, tokenPrefix } from './crypto';
 import { applyDeliveryUpdate, deliveryColumns, publicDelivery, type DeliveryInput, type DeliveryUpdate } from './delivery';
@@ -408,20 +409,71 @@ export async function issueWatcherKey(workspaceId: string, name: string) {
   return { key, secret };
 }
 
-export async function listWatcherKeys(workspaceId: string) {
-  const rows = await getDb()
-    .select()
-    .from(watcherKeys)
-    .where(eq(watcherKeys.workspaceId, workspaceId))
-    .orderBy(desc(watcherKeys.createdAt));
-  return rows.map((key) => ({
+type WatcherKeyRow = typeof watcherKeys.$inferSelect;
+
+export function serializeWatcherKey(key: WatcherKeyRow) {
+  return {
     id: key.id,
     name: key.name,
     prefix: key.tokenPrefix,
     created_at: key.createdAt.toISOString(),
     revoked_at: key.revokedAt?.toISOString() ?? null,
     last_used_at: key.lastUsedAt?.toISOString() ?? null,
-  }));
+    last_seen_at: key.lastSeenAt?.toISOString() ?? null,
+  };
+}
+
+export async function listWatcherKeys(workspaceId: string) {
+  const rows = await getDb()
+    .select()
+    .from(watcherKeys)
+    .where(eq(watcherKeys.workspaceId, workspaceId))
+    .orderBy(desc(watcherKeys.createdAt));
+  return rows.map(serializeWatcherKey);
+}
+
+/** Poll only. Ack updates last_used_at through authenticateWatcherKey and leaves last_seen_at alone. */
+export async function recordWatcherSeen(keyId: string, at = new Date()): Promise<void> {
+  await getDb().update(watcherKeys).set({ lastSeenAt: at }).where(eq(watcherKeys.id, keyId));
+}
+
+function asDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/** Newest poll time among watcher keys that can still deliver this workspace. Revoked keys do not count. */
+export async function workspaceWatcherLastSeen(workspaceId: string): Promise<Date | null> {
+  const [row] = await getDb()
+    .select({ seen: max(watcherKeys.lastSeenAt) })
+    .from(watcherKeys)
+    .where(and(eq(watcherKeys.workspaceId, workspaceId), isNull(watcherKeys.revokedAt)));
+  return asDate(row?.seen);
+}
+
+export function isLocalDelivery(agent: { deliveryMode: string }): boolean {
+  return agent.deliveryMode === 'local' || agent.deliveryMode === 'herdr';
+}
+
+export type WatcherPresence = {
+  watcher_last_seen_at: string | null;
+  watcher_online: boolean;
+};
+
+/**
+ * One workspace watcher delivers every local agent, so they share the newest poll.
+ * Webhook and none agents are not delivered that way.
+ */
+export function watcherPresence(agent: { deliveryMode: string }, lastSeen: Date | null, now = Date.now()): WatcherPresence {
+  if (!isLocalDelivery(agent) || !lastSeen) {
+    return { watcher_last_seen_at: null, watcher_online: false };
+  }
+  return {
+    watcher_last_seen_at: lastSeen.toISOString(),
+    watcher_online: now - lastSeen.getTime() <= WATCHER_ONLINE_MS,
+  };
 }
 
 export async function revokeWatcherKey(workspaceId: string, keyId: string) {

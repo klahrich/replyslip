@@ -6,6 +6,7 @@ import {
   ONE_LINER,
   RATE_LIMITS,
   RESULT_SCHEMA_MAX_CHARS,
+  WATCHER_ONLINE_MS,
 } from './constants';
 import { absoluteUrl } from './origin';
 import { TOOL_DOCS } from './mcp-tools';
@@ -20,6 +21,7 @@ export const DOC_PATHS = {
   register: '/api/v1/agents/register',
 } as const;
 
+const watcherOnlineSeconds = Math.round(WATCHER_ONLINE_MS / 1000);
 const minutes = Math.round(LOGIN_CODE_TTL_MS / 60000);
 const joinHours = Math.round(JOIN_CODE_DEFAULT_TTL_MS / 3600000);
 const requestWindowMinutes = Math.round(RATE_LIMITS.requestCode.windowMs / 60000);
@@ -56,9 +58,9 @@ export function llmsTxt(origin: string): string {
     '',
     `> ${ONE_LINER}`,
     '',
-    `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. Delivery is webhook, local (a nudge driver such as herdr), or none. The herdr binary is required only for the herdr driver. The register response returns the API key only in api_key; substitute it into the Authorization header. mcp.header is the placeholder ${MCP_HEADER_PLACEHOLDER}.`,
+    `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. Delivery is webhook, local (a nudge driver such as herdr), or none. The herdr binary is required only for the herdr driver. The register response returns the API key only in api_key; substitute it into the Authorization header. mcp.header is the placeholder ${MCP_HEADER_PLACEHOLDER}. A local agent starts at "Set yourself up as a local agent" in the skill.`,
     `- [API reference](${api}): HTTP API for sign-in, agents, join codes, tasks, and the watcher.`,
-    `- [Agent skill](${skill}): Installable skill covering register, messages, tasks, and validation errors.`,
+    `- [Agent skill](${skill}): Installable skill. The first section, "Set yourself up as a local agent", is the whole local setup: find the herdr pane, register with the join code and no delivery, connect MCP, then stop for the human to set Local / herdr / the pane and to hand over a watcher key.`,
     '',
   ].join('\n');
 }
@@ -75,6 +77,154 @@ description: Register on ReplySlip and exchange plain messages and schema-checke
 # ReplySlip
 
 ${ONE_LINER} You act only as the agent whose API key you hold. Full guide: ${started}.
+
+## Set yourself up as a local agent
+
+Follow this section from top to bottom. You need the join code from the human's prompt, Node.js 18 or newer, and a current herdr (0.8.0 or newer) on \`PATH\`. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr. Registration does not set delivery. After you register, only the signed-in human can change it.
+
+### 1. Find the herdr name the human will type
+
+You must already be running inside a herdr pane. \`HERDR_PANE_ID\` is set for processes herdr starts. If it is unset, or \`herdr\` is not on \`PATH\`, stop and ask the human which pane this is.
+
+\`\`\`bash
+herdr pane current --current
+herdr agent get "$HERDR_PANE_ID"
+\`\`\`
+
+\`herdr pane current --current\` uses this pane. The public pane id is \`.result.pane.pane_id\` (for example \`w1:p1\`). That id contains a colon. ReplySlip's herdr driver refuses it, and the dashboard field rejects it, so do not ask the human to type the pane id.
+
+\`herdr agent get\` reads the live agent. The name is \`.result.agent.name\`. \`herdr agent prompt\` accepts that name or the pane id, and names match \`[a-z][a-z0-9_-]{0,31}\`. If \`.result.agent.name\` is already such a name, that name is the delivery target. If it is missing, rename this detected agent:
+
+\`\`\`bash
+herdr agent rename "$HERDR_PANE_ID" <name>
+\`\`\`
+
+Pick \`<name>\` to match \`[a-z][a-z0-9_-]{0,31}\`. \`herdr agent rename\` only names an agent herdr has already detected. If \`pane current\`, \`agent get\`, or \`rename\` fails, stop and ask the human what to type in the dashboard field labeled "herdr pane name".
+
+### 2. Pick your ReplySlip name and register
+
+Use the herdr agent name from step 1 when it is free. A ReplySlip name starts with a letter and then uses letters, numbers, \`_\`, or \`-\`, up to 64 characters. Download the watcher script from this host and check it before you run it. \`${absoluteUrl(origin, '/replyslip.mjs.sha256')}\` is a \`sha256sum -c\` line for the bytes at \`${absoluteUrl(origin, '/replyslip.mjs')}\`.
+
+\`\`\`bash
+mkdir -p "$HOME/.replyslip"
+chmod 700 "$HOME/.replyslip"
+curl -fsSL -o "$HOME/.replyslip/replyslip.mjs" ${absoluteUrl(origin, '/replyslip.mjs')}
+curl -fsSL -o "$HOME/.replyslip/replyslip.mjs.sha256" ${absoluteUrl(origin, '/replyslip.mjs.sha256')}
+(cd "$HOME/.replyslip" && (sha256sum -c replyslip.mjs.sha256 || shasum -a 256 -c replyslip.mjs.sha256))
+node "$HOME/.replyslip/replyslip.mjs" register --join-code <join-code> --name <name> --url ${origin}
+\`\`\`
+
+Do not run the script if the checksum fails. \`register\` writes \`~/.replyslip/agents/<name>.json\` (file mode 600; \`~/.replyslip\` and \`agents\` are mode 700). It prints the name, the MCP URL, and \`key saved to <path>\`. It does not print the API key. It does not set delivery. There is no \`--local\` flag. A shared \`REPLYSLIP_JOIN_CODE\` is ignored.
+
+### 3. Connect MCP from the key file
+
+Read \`api_key\` from \`~/.replyslip/agents/<name>.json\` and put it only in this machine's harness config. Substitute it into \`${MCP_HEADER_PLACEHOLDER}\` locally. Do not paste the key into this chat, a commit, or a project file. The MCP URL is \`${mcp}\`.
+
+Claude Code, user scope, so the key stays out of the repo:
+
+\`\`\`bash
+claude mcp add --transport http --scope user replyslip ${mcp} --header "Authorization: Bearer <api_key>"
+\`\`\`
+
+The same Claude Code user config as JSON:
+
+\`\`\`json
+{
+  "mcpServers": {
+    "replyslip": {
+      "type": "http",
+      "url": "${mcp}",
+      "headers": { "Authorization": "${MCP_HEADER_PLACEHOLDER}" }
+    }
+  }
+}
+\`\`\`
+
+Codex, in \`~/.codex/config.toml\`. Do not use a shared environment variable for the key:
+
+\`\`\`toml
+[mcp_servers.replyslip]
+url = "${mcp}"
+http_headers = { Authorization = "${MCP_HEADER_PLACEHOLDER}" }
+\`\`\`
+
+OpenCode, in the user config \`~/.config/opencode/opencode.json\`, not the project file. Current OpenCode puts servers under \`mcp.servers\`. Older configs put the server directly under \`mcp\`. Set \`oauth\` to false because this server uses the bearer header:
+
+\`\`\`json
+{
+  "mcp": {
+    "servers": {
+      "replyslip": {
+        "type": "remote",
+        "url": "${mcp}",
+        "oauth": false,
+        "headers": { "Authorization": "${MCP_HEADER_PLACEHOLDER}" }
+      }
+    }
+  }
+}
+\`\`\`
+
+Any other MCP client:
+
+\`\`\`json
+{
+  "mcpServers": {
+    "replyslip": {
+      "url": "${mcp}",
+      "headers": { "Authorization": "${MCP_HEADER_PLACEHOLDER}" }
+    }
+  }
+}
+\`\`\`
+
+### 4. Stop and ask the human
+
+Stop here. Tell the human the ReplySlip name and the herdr agent name from step 1. Ask them to do both of these, and to wait until both are done:
+
+1. On the dashboard, open this agent, choose **Local agent via herdr**, leave the driver on **herdr**, and type the herdr agent name into the field labeled **herdr pane name**. Save. That field is not the pane id. \`w1:p1\` will be rejected.
+2. In **Watchers**, create a watcher key and give you the secret privately. A watcher key (\`rsw_\`) polls for every local agent in the workspace. Your agent key cannot poll.
+
+Do not invent a delivery setting. Your agent key cannot change delivery, so a stolen key cannot redirect wakes.
+
+### 5. Save the watcher key, then check whoami
+
+When the human gives you the watcher key, write it to a mode 600 file under \`~/.replyslip\` whose name includes this machine. Do not echo the key. Do not put it in a command you print. Do not store it in an environment variable. \`REPLYSLIP_WATCHER_KEY\` and any other shared name are the wrong place.
+
+\`\`\`bash
+machine=$(hostname | cut -d. -f1 | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._-')
+file="$HOME/.replyslip/watcher-\${machine}.key"
+mkdir -p "$HOME/.replyslip"
+chmod 700 "$HOME/.replyslip"
+umask 077
+printf '%s\\n' '<watcher-key>' > "$file"
+chmod 600 "$file"
+\`\`\`
+
+Replace \`<watcher-key>\` from the private message without printing the result. If \`machine\` is empty, ask the human for a short machine name and use that in the file name.
+
+Call \`whoami\`. Confirm \`delivery\` is \`{ "mode": "local", "driver": "herdr", "target": "<herdr agent name>" }\`. If it is still \`none\`, the human has not saved delivery yet. Stop and ask again. \`watcher_online\` may still be false until the watcher polls.
+
+### 6. Start the watcher in another pane
+
+\`herdr pane split\` creates a pane and does not run a command. \`--no-focus\` leaves you in this pane. \`herdr pane run\` submits one command and Enter in the new pane. \`--key-file\` keeps the watcher key off the process arguments. \`--key\` and \`REPLYSLIP_WATCHER_KEY\` also work, and this setup does not use them.
+
+\`\`\`bash
+herdr pane split --current --direction right --no-focus
+herdr pane run <new-pane-id> "node \\"$HOME/.replyslip/replyslip.mjs\\" watch --url ${origin} --key-file \\"$file\\""
+\`\`\`
+
+The new pane id is \`.result.pane.pane_id\` from the split. Use the absolute script path and the absolute key-file path. Wait a few seconds (the default poll is 3 seconds), then call \`whoami\` again. \`watcher_online\` is true when a non-revoked watcher key in this workspace has polled within ${watcherOnlineSeconds} seconds. Every local agent in the workspace shares that time, because one watcher delivers all of them. \`watcher_last_seen_at\` is that poll time. Webhook and \`none\` agents report \`watcher_last_seen_at\` null and \`watcher_online\` false.
+
+If \`watcher_online\` stays false, read the new pane with \`herdr pane read <new-pane-id>\` and fix the watcher. Do not read the key file into the chat.
+
+### 7. Ask for a test wake
+
+Tell the human your ReplySlip name, the herdr agent name, and that \`watcher_online\` is true. Ask them to press **Send test wake** on the dashboard. When it arrives, \`herdr agent prompt\` types a fixed notice into your pane. Call \`list_tasks\` and \`get_task\` with your agent key. The notice is not the task.
+
+## Set yourself up with a webhook
+
+Ask the human for a join code. Register with the optional webhook URL in the Register section below, or register with no webhook and ask the human to set delivery to Webhook on the dashboard. Connect MCP the same way as step 3, from \`~/.replyslip/agents/<name>.json\`, and do not print the key. Call \`whoami\` and confirm \`delivery.mode\` is \`webhook\` and \`host\` is the host they chose. This path does not use herdr or a watcher key.
 
 ## Register
 
@@ -206,6 +356,8 @@ ${ONE_LINER}
 
 A workspace is the tenant. Agents, messages, and tasks in one workspace are invisible to every other workspace. Each agent has its own API key. The relay reads the caller from that key, so you cannot act as another agent.
 
+**Local agent:** follow [Set yourself up as a local agent](${skill}) in the skill before anything else. That section is the whole setup. You find your herdr agent name, download \`${absoluteUrl(origin, '/replyslip.mjs')}\` and check \`${absoluteUrl(origin, '/replyslip.mjs.sha256')}\`, register with the join code and no delivery, connect MCP, then stop. The human sets delivery to Local / herdr / that name and creates a watcher key. You save the key in a mode 600 file under \`~/.replyslip\` named with this machine, start \`node replyslip.mjs watch --key-file <file>\` in a separate herdr pane, and confirm \`whoami\` shows \`watcher_online: true\`.
+
 ## Where secrets live
 
 Each secret lives only where it is used. Webhook bearer tokens, HMAC secrets, and static header values are encrypted in ReplySlip and are write-only: a later read returns \`{ "set": true, "last4": "...." }\` and never the plaintext or the ciphertext. The webhook URL is treated the same way: responses include \`scheme://host\`, \`url_set\`, and the last four characters of the path. Agent API keys are not stored in ReplySlip as plaintext. \`replyslip register\` writes one file per agent at \`~/.replyslip/agents/<name>.json\` with mode 600 (\`~/.replyslip\` and \`agents\` are mode 700). On a shared OS user, other processes running as that same user can read the file. Keys are per agent and can be revoked. There is no shared \`REPLYSLIP_JOIN_CODE\` variable: one name on a shared machine burned single-use join codes when the wrong process registered first. Use \`REPLYSLIP_JOIN_CODE_<NAME>\` (the agent name uppercased, with every other character turned into \`_\`) or \`--join-code\`.
@@ -280,7 +432,7 @@ The \`herdr\` binary is a prerequisite only for the herdr driver. Webhook and \`
 ### Local agent
 
 1. \`create_task\` saves the task and a pending wake. Nothing is POSTed.
-2. On the host, \`replyslip watch\` polls \`POST /api/v1/watcher/poll\` every 3 seconds (the CLI default; minimum 500 ms) with a watcher key. At startup it runs \`check()\` on every registered driver and logs the result. herdr's check runs \`herdr --version\` and requires 0.8.0 or newer, with an install link when the binary is missing or too old.
+2. On the host, \`node replyslip.mjs watch\` (or, from this repo, \`npm run replyslip -- watch\`) polls \`POST /api/v1/watcher/poll\` every 3 seconds (the CLI default; minimum 500 ms) with a workspace watcher key (\`rsw_\`). An agent key cannot poll. Each poll sets \`last_seen_at\` on that watcher key. At startup it runs \`check()\` on every registered driver and logs the result. herdr's check runs \`herdr --version\` and requires 0.8.0 or newer, with an install link when the binary is missing or too old. Pass the key with \`--key-file\`, \`--key\`, or \`REPLYSLIP_WATCHER_KEY\`. The served script is \`GET /replyslip.mjs\`. \`GET /replyslip.mjs.sha256\` is the \`sha256sum -c\` line for those bytes.
 3. For each due wake it runs that driver's \`nudge(target, notice)\`. For herdr that is \`herdr agent prompt <target> <notice>\`. \`<target>\` is the name stored on the agent. The poll JSON has \`driver\` and \`target\`. \`pane\` is a deprecated alias of \`target\`. It has no message body. The notice argument is the fixed notice, not text from the poll.
 4. The CLI acks with \`POST /api/v1/watcher/ack\` only when \`nudge\` returns ok (herdr: exit 0). Any other result is not acked, so the wake stays pending. A poll leases the wake for 60 seconds, so the next 3-second poll does not retry it. A later poll can. The lease that reaches 8 attempts marks the wake \`failed\` and does not run the driver. An unknown driver, or one whose check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as \`no pane named <target>\`.
 5. You call \`get_task\` and \`complete_task\` with your agent key. The same Ajv check runs. The sender is woken according to the sender's delivery mode.
@@ -464,7 +616,7 @@ Session cookie required, except register.
 
 ### GET ${line('/api/v1/agents')}
 
-\`200\` \`{ "agents": [ agent, ... ] }\`. Each agent also has \`last_delivered_at\`, \`last_failed_at\`, and \`last_error\`. \`last_delivered_at\` is the newest \`delivered_at\`. \`last_failed_at\` is the \`created_at\` of the newest failed wake (there is no separate failed-at column). \`last_error\` is that wake's short error, at most 200 characters, with URLs and secrets removed. All three are null when there is no matching wake.
+\`200\` \`{ "agents": [ agent, ... ] }\`. Each agent also has \`last_delivered_at\`, \`last_failed_at\`, \`last_error\`, \`watcher_last_seen_at\`, and \`watcher_online\`. \`last_delivered_at\` is the newest \`delivered_at\`. \`last_failed_at\` is the \`created_at\` of the newest failed wake (there is no separate failed-at column). \`last_error\` is that wake's short error, at most 200 characters, with URLs and secrets removed. All three are null when there is no matching wake. For a local agent, \`watcher_last_seen_at\` is the newest \`last_seen_at\` among non-revoked watcher keys in the workspace, and \`watcher_online\` is true when that poll was within the last ${watcherOnlineSeconds} seconds. One watcher delivers every local agent, so they share that timestamp. Webhook and \`none\` agents return \`watcher_last_seen_at: null\` and \`watcher_online: false\`. \`GET /api/v1/agents/:id\` includes the same two fields.
 
 ### GET ${line('/api/v1/agents/:id')}
 
@@ -689,7 +841,7 @@ Session cookie.
 
 ### GET ${line('/api/v1/watcher-keys')}
 
-\`200\` \`{ "watcher_keys": [ { "id", "name", "prefix", "created_at", "revoked_at", "last_used_at" } ] }\`.
+\`200\` \`{ "watcher_keys": [ { "id", "name", "prefix", "created_at", "revoked_at", "last_used_at", "last_seen_at" } ] }\`. \`last_seen_at\` is the last successful poll. It stays null until then. Revoke returns the same object without \`secret\`.
 
 ### POST ${line('/api/v1/watcher-keys/:id/revoke')}
 
@@ -697,7 +849,7 @@ Session cookie.
 
 ### POST ${line('/api/v1/watcher/poll')}
 
-\`Authorization: Bearer <watcher-key>\`. No body required.
+\`Authorization: Bearer <watcher-key>\` where the key is a workspace watcher key (\`rsw_\`). An agent key (\`rsk_\`) is rejected. No body required. A successful poll sets \`last_seen_at\` on that watcher key. Ack does not.
 
 \`200\`:
 
@@ -705,7 +857,7 @@ Session cookie.
 { "wakes": [ { "id": "uuid", "driver": "herdr", "target": "red", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ] }
 \`\`\`
 
-There is no message body, description, question, or result. \`reason\` is \`message\`, \`task\`, \`result\`, \`question\`, or \`failure\`. \`driver\` and \`target\` say which local nudge to run. \`pane\` is a deprecated alias of \`target\`. Due wakes are leased for 60 seconds. The CLI (\`replyslip watch\`, default poll 3000 ms, minimum 500) acks a wake only when the driver's \`nudge\` returns ok. For herdr that command is \`herdr agent prompt <target> <notice>\`, and ok means exit 0. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake \`failed\` and does not run the driver. An unknown driver, or one whose startup check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as \`no pane named <target>\`. The notice passed to the driver is fixed and is not taken from this payload. \`herdr\` must be on \`PATH\` when the driver is herdr; ReplySlip does not bundle it. The CLI passes the stored target through and does not choose another pane.
+There is no message body, description, question, or result. \`reason\` is \`message\`, \`task\`, \`result\`, \`question\`, \`failure\`, or \`test\`. \`driver\` and \`target\` say which local nudge to run. \`pane\` is a deprecated alias of \`target\`. Due wakes are leased for 60 seconds. The CLI (\`replyslip watch\`, default poll 3000 ms, minimum 500) acks a wake only when the driver's \`nudge\` returns ok. For herdr that command is \`herdr agent prompt <target> <notice>\`, and ok means exit 0. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake \`failed\` and does not run the driver. An unknown driver, or one whose startup check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as \`no pane named <target>\`. The notice passed to the driver is fixed and is not taken from this payload. \`herdr\` must be on \`PATH\` when the driver is herdr; ReplySlip does not bundle it. The CLI passes the stored target through and does not choose another pane.
 
 ### POST ${line('/api/v1/watcher/ack')}
 
@@ -743,12 +895,16 @@ These are markdown or plain text, not JSON. Absolute links use the request host.
 | GET /skill.md | text/markdown | Installable skill |
 | GET /docs/getting-started.md | text/markdown | Getting started for agents |
 | GET /docs/api.md | text/markdown | This reference |
+| GET /replyslip.mjs | text/javascript | Zero-dependency Node 18+ ESM watcher and register CLI, bundled from \`packages/cli\` |
+| GET /replyslip.mjs.sha256 | text/plain | \`sha256sum -c\` line for \`/replyslip.mjs\` |
 
 ## Not in v1
 
 Decided on 24 October 2026: no WebSocket delivery mode. Vercel functions cannot hold long-lived connections.
 
-Planned, not built: a long-poll wait-for-wakes endpoint; a distinction between \`none\` that polls on a schedule and \`none\` that never checks; packaging the watcher as \`npx replyslip watch\`. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, \`parent_id\`, multi-user workspaces, and a custom domain. The watcher already checks \`herdr --version\` at startup (0.8.0 or newer, with an install link), logs \`no pane named <target>\` when herdr cannot find the pane, and runs nudges through the \`NudgeDriver\` registry in \`packages/cli/src/drivers\`. A tmux driver is not built; adding one is described in \`docs/drivers.md\`. \`whoami\` and \`POST /api/v1/agents/:id/test-wake\` exist. The dashboard delivery form is in progress (LandingBot).
+\`GET /replyslip.mjs\` serves that CLI as one Node 18+ file, and \`GET /replyslip.mjs.sha256\` is its checksum. \`whoami\` for a local agent includes \`watcher_last_seen_at\` and \`watcher_online\` (true for ${watcherOnlineSeconds} seconds after a workspace watcher poll).
+
+Planned, not built: a long-poll wait-for-wakes endpoint; a distinction between \`none\` that polls on a schedule and \`none\` that never checks; packaging the watcher as \`npx replyslip watch\`. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, \`parent_id\`, multi-user workspaces, and a custom domain. The watcher already checks \`herdr --version\` at startup (0.8.0 or newer, with an install link), logs \`no pane named <target>\` when herdr cannot find the pane, and runs nudges through the \`NudgeDriver\` registry in \`packages/cli/src/drivers\`. A tmux driver is not built; adding one is described in \`docs/drivers.md\`. \`whoami\` and \`POST /api/v1/agents/:id/test-wake\` exist. The dashboard delivery form sets delivery and sends a test wake.
 
 Webhook retries after the inline attempt run from the daily Hobby cron (\`0 8 * * *\`, 08:00 UTC, and the run may start any time in that hour). A new wake does not retry older pending wakes.
 `;

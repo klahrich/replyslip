@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createAgent, listAgents, serializeAgent } from '@/lib/agents';
+import { createAgent, listAgents, serializeAgent, watcherPresence, workspaceWatcherLastSeen } from '@/lib/agents';
 import { agentWakeActivity } from '@/lib/wakes';
 import { requireUser } from '@/lib/auth';
 import { handle, json, parseBody, readJson } from '@/lib/http';
@@ -17,6 +17,8 @@ export function GET(req: Request) {
     const user = await requireUser(req);
     const rows = await listAgents(user.workspace.id);
     const activity = await agentWakeActivity(user.workspace.id);
+    const seen = await workspaceWatcherLastSeen(user.workspace.id);
+    const now = Date.now();
     return json({
       agents: rows.map((agent) => {
         const wake = activity.get(agent.id);
@@ -25,6 +27,7 @@ export function GET(req: Request) {
           last_delivered_at: wake?.last_delivered_at ?? null,
           last_failed_at: wake?.last_failed_at ?? null,
           last_error: wake?.last_error ?? null,
+          ...watcherPresence(agent, seen, now),
         };
       }),
     });

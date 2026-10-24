@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -102,5 +102,45 @@ describe('replyslip register', () => {
     expect(fetched).toBe(false);
     expect(shared.err.join('\n')).toMatch(/REPLYSLIP_JOIN_CODE/);
     expect([...shared.out, ...shared.err].join('\n')).not.toContain('rjc_shared_burned');
+  });
+});
+
+describe('replyslip watch --key-file', () => {
+  it('sends the file key, prefers it over --key, and does not print it', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-watch-'));
+    const keyFile = path.join(home, 'watcher-box.key');
+    const secret = 'rsw_CANARY_do_not_print';
+    await writeFile(keyFile, `${secret}\n`, { mode: 0o600 });
+    const seen: string[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push(new Headers(init?.headers).get('authorization') ?? '');
+      if (String(input).endsWith('/ack')) return new Response('{"acked":0}', { status: 200 });
+      return new Response('{"wakes":[]}', { status: 200 });
+    };
+    const io = capture();
+    const code = await runReplyslip(
+      ['watch', '--once', '--url', 'https://replyslip.com', '--key-file', keyFile, '--key', 'rsw_ignored'],
+      {
+        home,
+        env: { REPLYSLIP_WATCHER_KEY: 'rsw_env_ignored' },
+        fetchImpl,
+        stdout: io.stdout,
+        stderr: io.stderr,
+      },
+    );
+    expect(code).toBe(0);
+    expect(seen[0]).toBe(`Bearer ${secret}`);
+    expect([...io.out, ...io.err].join('\n')).not.toContain(secret);
+    expect([...io.out, ...io.err].join('\n')).not.toContain('rsw_ignored');
+
+    const missing = capture();
+    const failed = await runReplyslip(['watch', '--url', 'https://replyslip.com', '--key-file', path.join(home, 'missing.key')], {
+      home,
+      stdout: missing.stdout,
+      stderr: missing.stderr,
+    });
+    expect(failed).toBe(1);
+    expect(missing.err.join('\n')).toMatch(/Could not read watcher key file/);
+    expect(missing.err.join('\n')).not.toContain(secret);
   });
 });
