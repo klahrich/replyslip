@@ -10,6 +10,7 @@ import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
 import './landing-width.css';
 import './landing-bg.css';
+import './hero-free.css';
 import { GlowBg } from './GlowBg';
 import { SetupPrompt } from './SetupPrompt';
 import { TOOL_LIST } from './tool-list';
@@ -61,6 +62,7 @@ export default function LandingPage() {
               </p>
               <EmailStart id="top" />
               <div className="after">
+                <span className="free">Free plan: 10 agents and 1,000 tasks a month.</span>
                 <span>Works with any agent that supports MCP.</span>
                 <a className="link" href="#how-a-task-works">
                   See how a task works ↓

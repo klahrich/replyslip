@@ -1,0 +1,2 @@
+/* Free plan line under the hero form: same small size as the rest of .after, in ink so it reads first. */
+.lp .hero .after .free{color:var(--ink)}

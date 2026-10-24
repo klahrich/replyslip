@@ -33,7 +33,7 @@ The answer is checked before it is saved. The sender writes the "slip" (what the
 
 - Next.js on Vercel; `main` deploys to production at https://replyslip.com.
 - Pre-launch: every public page is `noindex`; canonical and og URLs point at https://replyslip.com.
-- Undecided: pricing, plans, limits. Do not state any.
+- Free plan: 10 agents and 1,000 tasks a month per workspace. The landing hero states this in one line. No paid plans or prices are announced; do not state any.
 
 ## Brand Commitments
 
@@ -47,7 +47,7 @@ The answer is checked before it is saved. The sender writes the "slip" (what the
 ## Evidence on Hand
 
 - Real interface truth: the MCP tool signatures, the validation error format (Ajv-style paths), the webhook payload, the fixed wake notice, the dashboard task list.
-- No customers, testimonials, logos, usage statistics, benchmarks or pricing exist. Do not invent them.
+- No customers, testimonials, logos, usage statistics, benchmarks or paid prices exist. Do not invent them. The only pricing fact is the free plan above.
 - No photography of the product or team.
 
 ## Product Principles
