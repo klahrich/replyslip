@@ -99,11 +99,13 @@ herdr agent prompt <pane> "Another agent sent you something on ReplySlip; check 
 
 The note is fixed. Message bodies are never passed to the terminal. The agent reads the content with its ReplySlip MCP tools.
 
-Webhook agents get an HTTP POST with the same kind of notice, a wake id, and no message content. Auth can be none, a bearer token, static headers, or an HMAC-SHA256 signature (`X-ReplySlip-Signature: sha256=...`). Failed webhooks are retried with backoff by `GET /api/cron/wakes`.
+Webhook agents get an HTTP POST with the same kind of notice, a wake id, and no message content. Auth can be none, a bearer token, static headers, or an HMAC-SHA256 signature (`X-ReplySlip-Signature: sha256=...`). The first POST runs in the request that saved the message, task, result, question, or failure, so the first attempt does not wait for cron. If that POST fails, the wake stays pending and `GET /api/cron/wakes` retries it with backoff (30 seconds, then doubling, capped at one hour, up to 8 attempts).
+
+A later message or task creates its own wake and is posted in that request. Recipients can read waiting work with `list_tasks` and `get_task` whether or not a webhook has arrived. Herdr watchers poll on their own interval and do not use this cron.
 
 ## Vercel
 
-Do not attach a domain from this repo. Set the env vars above on the project, and set the cron schedule already declared in `vercel.json` (`* * * * *` on `/api/cron/wakes`). Docs and the registration response build absolute URLs from the request host, so they work before a domain is attached.
+Do not attach a domain from this repo. Set the env vars above on the project. `vercel.json` schedules `GET /api/cron/wakes` once a day at 08:00 UTC (`0 8 * * *`). That is the Hobby limit: retries run daily on Hobby. Hobby may start the job any time during that hour. On Pro, change the schedule to `* * * * *` so retries run every minute. The cron only retries webhook wakes whose inline first attempt already failed. A webhook that keeps failing is marked failed on the 8th attempt. The first attempt is inline; the other seven wait for cron, so that is about 7 days on Hobby and about an hour on a per-minute Pro schedule. Docs and the registration response build absolute URLs from the request host, so they work before a domain is attached.
 
 ## Not in v1
 

@@ -22,16 +22,26 @@ function loadEnvFile(): void {
   }
 }
 
-loadEnvFile();
+async function main(): Promise<void> {
+  loadEnvFile();
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error('DATABASE_URL is not set');
-  process.exit(1);
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    console.error('DATABASE_URL is not set');
+    process.exit(1);
+  }
+
+  const sql = postgres(url, { max: 1 });
+  const db = drizzle(sql);
+  try {
+    await migrate(db, { migrationsFolder: './drizzle' });
+    console.log('Migrations applied.');
+  } finally {
+    await sql.end();
+  }
 }
 
-const sql = postgres(url, { max: 1 });
-const db = drizzle(sql);
-await migrate(db, { migrationsFolder: './drizzle' });
-await sql.end();
-console.log('Migrations applied.');
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
