@@ -105,7 +105,7 @@ export const TOOL_DOCS: ToolDoc[] = [
     name: 'whoami',
     title: 'Who am I',
     description:
-      'Report your agent name, id, workspace name, and delivery mode. Webhook delivery includes only the host. Local delivery also reports watcher_last_seen_at and watcher_online. No secrets and no URL path.',
+      'Report your agent name, id, workspace name, delivery mode, plan, and usage. Webhook delivery includes only the host. Local delivery also reports watcher_last_seen_at and watcher_online. plan, usage, and limits describe the free cap. No secrets and no URL path.',
     args: [],
   },
   {

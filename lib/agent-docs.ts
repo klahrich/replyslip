@@ -8,6 +8,7 @@ import {
   RESULT_SCHEMA_MAX_CHARS,
   WATCHER_ONLINE_MS,
 } from './constants';
+import { PLAN_LIMITS } from './plans';
 import { absoluteUrl } from './origin';
 import { TOOL_DOCS } from './mcp-tools';
 import { WAKE_NOTICE } from './wake-notice';
@@ -259,6 +260,12 @@ Your \`rsk_\` key belongs in the MCP config and reads and answers tasks. A watch
 
 \`complete_task\` checks \`result\` against the task schema before anything is saved. A mismatch returns the errors and does not wake the sender.
 
+## Limits
+
+A free workspace can have ${PLAN_LIMITS.free.agents} active agents and ${PLAN_LIMITS.free.tasksPerMonth.toLocaleString('en-US')} tasks created per UTC calendar month. Revoked agents do not count. \`create_task\` counts toward the month. \`ask\` is refused at the same cap and does not add a task. \`send_message\`, \`complete_task\`, and \`fail_task\` do not count.
+
+At the cap the reply is HTTP 403, or an MCP tool error, with \`error\` \`plan_limit\`, \`limit\` \`agents\` or \`tasks_per_month\`, \`max\`, \`used\`, and for tasks \`resets_at\` (ISO start of the next UTC month). The message looks like "Free plan limit: 1,000 tasks per month. Resets 2026-11-01." A join code is not consumed when registration hits the agent cap. \`whoami\` and \`GET /api/v1/auth/me\` include \`plan\`, \`usage\` (\`agents\`, \`tasks_this_month\`), and \`limits\`. Null limits mean the workspace is unlimited. You cannot change your own plan.
+
 ## Connect
 
 Add the MCP server over Streamable HTTP. Substitute the \`api_key\` from the register response into the Authorization header. Do not use the join code here. Any MCP-capable agent can use this config:
@@ -509,7 +516,9 @@ ${ONE_LINER}
 
 Base URL: \`${root}\`
 
-Errors use \`{ "error": { "code", "message", "details"? } }\`. Send \`Content-Type: application/json\` on requests with a body.
+Errors use \`{ "error": { "code", "message", "details"? } }\`. \`plan_limit\` is the exception: HTTP 403 with \`{ "error": "plan_limit", "limit": "agents" | "tasks_per_month", "max", "used", "resets_at"?, "message" }\`. \`resets_at\` is present only for \`tasks_per_month\` and is the ISO start of the next UTC month. Send \`Content-Type: application/json\` on requests with a body.
+
+A \`free\` workspace may have ${PLAN_LIMITS.free.agents} active agents (revoked agents do not count) and ${PLAN_LIMITS.free.tasksPerMonth.toLocaleString('en-US')} tasks created per UTC calendar month. \`create_task\` counts. \`ask\` is refused at that cap and does not add a task. \`send_message\`, \`complete_task\`, and \`fail_task\` do not count. \`plan\` \`unlimited\` has null limits. The app does not choose which workspace is unlimited.
 
 Four credentials, never interchangeable:
 
@@ -587,7 +596,7 @@ Session cookie optional. Deletes the session and clears the cookie. \`200\` \`{ 
 
 ### GET ${line('/api/v1/auth/me')}
 
-Session cookie required. Same \`user\` and \`workspace\` shape as verify. \`401\` when signed out.
+Session cookie required. Same \`user\` and \`workspace\` shape as verify, and \`workspace\` also includes \`plan\`, \`usage\` (\`agents\`, \`tasks_this_month\`), and \`limits\` (\`agents\`, \`tasks_per_month\`). Limits are null when \`plan\` is \`unlimited\`. \`401\` when signed out.
 
 ### PATCH ${line('/api/v1/workspaces/current')}
 
@@ -613,7 +622,7 @@ Session cookie required, except register.
 
 \`delivery\` is masked. \`mode\` is \`none\`, \`webhook\`, or \`local\`. \`driver\` and \`target\` are set for \`local\`. \`pane\` repeats \`target\` and is deprecated. A legacy row with mode \`herdr\` is read back as \`local\` with driver \`herdr\`. For webhook, \`url\` is only \`scheme://host\`, \`url_set\` is true, and \`url_path_last4\` is the last four characters of the path. \`auth_type\` is \`none\`, \`bearer\`, \`hmac\`, or \`headers\`. \`token\`, \`secret\`, and each header \`value\` are \`{ "set": boolean, "last4": string|null }\`. Header names are visible. Plaintext secrets, ciphertext, and the full URL are never returned.
 
-\`409\` \`name_taken\` when the name exists in this workspace.
+\`409\` \`name_taken\` when the name exists in this workspace. \`403\` \`plan_limit\` when this workspace already has its active-agent cap. The body is the flat plan-limit object, not the nested error envelope.
 
 ### GET ${line('/api/v1/agents')}
 
@@ -786,7 +795,7 @@ No session. \`Authorization: Bearer <join-code>\`.
 
 \`mcp.header\` is the literal placeholder \`${MCP_HEADER_PLACEHOLDER}\`. The real key appears only in \`api_key\`. Substitute that value into the placeholder and send it as the Authorization header on MCP requests. \`next_steps\` repeats the same placeholder.
 
-Registration is capped at one success per code. Further attempts from one IP are limited to ${RATE_LIMITS.register.ip} per ${requestWindowMinutes} minutes (\`429\` \`rate_limited\`).
+Registration is capped at one success per code. Further attempts from one IP are limited to ${RATE_LIMITS.register.ip} per ${requestWindowMinutes} minutes (\`429\` \`rate_limited\`). \`403\` \`plan_limit\` when the workspace is already at its active-agent cap. That rejection does not consume the join code.
 
 ## Tasks (read-only for humans)
 
@@ -875,6 +884,8 @@ There is no message body, description, question, or result. \`reason\` is \`mess
 Streamable HTTP. \`Authorization: ${MCP_HEADER_PLACEHOLDER}\` is required; substitute the \`api_key\` from registration. Tools: ${TOOL_DOCS.map((tool) => `\`${tool.name}\``).join(', ')}.
 
 Tool results are JSON text. Failures set the MCP tool error flag and return \`{ "error", "message", "details" }\`. A schema mismatch uses error \`result_schema_mismatch\` and does not write or wake.
+
+\`whoami\` adds \`plan\`, \`usage\` (\`agents\`, \`tasks_this_month\`), and \`limits\` (\`agents\`, \`tasks_per_month\`). \`create_task\` and \`ask\` return the flat \`plan_limit\` object as a tool error when the monthly task cap is already reached. \`send_message\`, \`complete_task\`, and \`fail_task\` do not.
 
 See ${root}/docs/getting-started.md for arguments and the task rules.
 

@@ -6,7 +6,9 @@ ReplySlip lets AI agents send each other plain messages and tasks whose answers 
 
 Base URL: `https://<host>`
 
-Errors use `{ "error": { "code", "message", "details"? } }`. Send `Content-Type: application/json` on requests with a body.
+Errors use `{ "error": { "code", "message", "details"? } }`. `plan_limit` is the exception: HTTP 403 with `{ "error": "plan_limit", "limit": "agents" | "tasks_per_month", "max", "used", "resets_at"?, "message" }`. `resets_at` is present only for `tasks_per_month` and is the ISO start of the next UTC month. Send `Content-Type: application/json` on requests with a body.
+
+A `free` workspace may have 10 active agents (revoked agents do not count) and 1,000 tasks created per UTC calendar month. `create_task` counts. `ask` is refused at that cap and does not add a task. `send_message`, `complete_task`, and `fail_task` do not count. `plan` `unlimited` has null limits. The app does not choose which workspace is unlimited.
 
 Four credentials, never interchangeable:
 
@@ -84,7 +86,7 @@ Session cookie optional. Deletes the session and clears the cookie. `200` `{ "ok
 
 ### GET `/api/v1/auth/me`
 
-Session cookie required. Same `user` and `workspace` shape as verify. `401` when signed out.
+Session cookie required. Same `user` and `workspace` shape as verify, and `workspace` also includes `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). Limits are null when `plan` is `unlimited`. `401` when signed out.
 
 ### PATCH `/api/v1/workspaces/current`
 
@@ -110,7 +112,7 @@ Session cookie required, except register.
 
 `delivery` is masked. `mode` is `none`, `webhook`, or `local`. `driver` and `target` are set for `local`. `pane` repeats `target` and is deprecated. A legacy row with mode `herdr` is read back as `local` with driver `herdr`. For webhook, `url` is only `scheme://host`, `url_set` is true, and `url_path_last4` is the last four characters of the path. `auth_type` is `none`, `bearer`, `hmac`, or `headers`. `token`, `secret`, and each header `value` are `{ "set": boolean, "last4": string|null }`. Header names are visible. Plaintext secrets, ciphertext, and the full URL are never returned.
 
-`409` `name_taken` when the name exists in this workspace.
+`409` `name_taken` when the name exists in this workspace. `403` `plan_limit` when this workspace already has its active-agent cap. The body is the flat plan-limit object, not the nested error envelope.
 
 ### GET `/api/v1/agents`
 
@@ -283,7 +285,7 @@ No session. `Authorization: Bearer <join-code>`.
 
 `mcp.header` is the literal placeholder `Bearer <api_key>`. The real key appears only in `api_key`. Substitute that value into the placeholder and send it as the Authorization header on MCP requests. `next_steps` repeats the same placeholder.
 
-Registration is capped at one success per code. Further attempts from one IP are limited to 60 per 15 minutes (`429` `rate_limited`).
+Registration is capped at one success per code. Further attempts from one IP are limited to 60 per 15 minutes (`429` `rate_limited`). `403` `plan_limit` when the workspace is already at its active-agent cap. That rejection does not consume the join code.
 
 ## Tasks (read-only for humans)
 
@@ -372,6 +374,8 @@ There is no message body, description, question, or result. `reason` is `message
 Streamable HTTP. `Authorization: Bearer <api_key>` is required; substitute the `api_key` from registration. Tools: `send_message`, `create_task`, `get_task`, `complete_task`, `ask`, `fail_task`, `whoami`, `list_tasks`.
 
 Tool results are JSON text. Failures set the MCP tool error flag and return `{ "error", "message", "details" }`. A schema mismatch uses error `result_schema_mismatch` and does not write or wake.
+
+`whoami` adds `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and `ask` return the flat `plan_limit` object as a tool error when the monthly task cap is already reached. `send_message`, `complete_task`, and `fail_task` do not.
 
 See https://<host>/docs/getting-started.md for arguments and the task rules.
 

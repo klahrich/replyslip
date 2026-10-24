@@ -6,6 +6,7 @@ import { workspaces } from '@/db/schema';
 import { authenticateAgentKey, getAgent, watcherPresence, workspaceWatcherLastSeen, type AgentPrincipal } from './agents';
 import { whoamiDelivery } from './delivery';
 import { HttpError } from './errors';
+import { PlanLimitError, workspacePlanUsage } from './plans';
 import { TOOL_DOCS, toolInputs } from './mcp-tools';
 import { askTask, completeTask, createTask, failTask, getTask, listTasks, sendMessage } from './tasks';
 
@@ -39,6 +40,12 @@ function ok(payload: unknown) {
 }
 
 function fail(err: unknown) {
+  if (err instanceof PlanLimitError) {
+    return {
+      isError: true as const,
+      content: [{ type: 'text' as const, text: JSON.stringify(err.body) }],
+    };
+  }
   if (err instanceof HttpError) {
     return {
       isError: true as const,
@@ -197,12 +204,16 @@ export const mcpHandler = createMcpHandler(
             .where(eq(workspaces.id, principal.workspaceId))
             .limit(1);
           const seen = await workspaceWatcherLastSeen(principal.workspaceId);
+          const plan = await workspacePlanUsage(principal.workspaceId);
           return ok({
             name: agent.name,
             id: agent.id,
             workspace_name: workspace?.name ?? null,
             delivery: whoamiDelivery(agent),
             ...watcherPresence(agent, seen),
+            plan: plan.plan,
+            usage: plan.usage,
+            limits: plan.limits,
           });
         } catch (err) {
           return fail(err);
