@@ -32,11 +32,19 @@ Request:
 { "email": "owner@example.com" }
 ```
 
-Response `200`, always this body, whether or not the email already exists and whether or not a code was actually sent (rate limits use the same response):
+Response `200` when a code may have been sent. The body is the same whether or not the email already exists:
 
 ```json
 { "ok": true, "message": "If that email can receive mail, we sent a sign-in code. It expires in 10 minutes." }
 ```
+
+`429` when this email or this IP is already at the limit. A blocked request does not send a code and does not count toward the window:
+
+```json
+{ "error": { "code": "rate_limited", "message": "Too many sign-in codes were requested. Try again later.", "retry_after_seconds": 900 } }
+```
+
+The response also sets `Retry-After` to that number of seconds. `retry_after_seconds` is how long until the oldest counted request leaves the window.
 
 A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in 10 minutes. A newer code invalidates older unused codes for that email. Limits: 5 requests per email and 100 per IP per 15 minutes. Mail is sent with Resend when `RESEND_API_KEY` and `EMAIL_FROM` are set; otherwise the code is written to the server log.
 
@@ -77,6 +85,16 @@ Session cookie optional. Deletes the session and clears the cookie. `200` `{ "ok
 ### GET `/api/v1/auth/me`
 
 Session cookie required. Same `user` and `workspace` shape as verify. `401` when signed out.
+
+### PATCH `/api/v1/workspaces/current`
+
+Session cookie required. Renames the signed-in user's workspace.
+
+```json
+{ "name": "Meal planning" }
+```
+
+`name` is trimmed. It must be 1–80 characters after trimming. `200` `{ "workspace": { "id", "name", "created_at" } }`. `400` `validation_error` when the name is missing or the wrong length. `401` when signed out.
 
 ## Agents
 

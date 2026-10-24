@@ -46,14 +46,17 @@ function workspaceNameFromEmail(email: string): string {
   return cleaned ? `${cleaned} workspace` : 'Workspace';
 }
 
-export async function requestLoginCode(emailInput: string, req: Request): Promise<void> {
+export async function requestLoginCode(
+  emailInput: string,
+  req: Request,
+): Promise<{ limited: true; retryAfterSeconds: number } | { limited: false }> {
   const email = normalizeEmail(emailInput);
   const limit = await consumeRateLimit({
     kind: 'requestCode',
     email,
     ip: clientIp(req),
   });
-  if (limit.limited) return;
+  if (limit.limited) return { limited: true, retryAfterSeconds: limit.retryAfterSeconds };
 
   const db = getDb();
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
@@ -74,6 +77,25 @@ export async function requestLoginCode(emailInput: string, req: Request): Promis
   });
 
   await getEmailSender().sendLoginCode({ to: email, code });
+  return { limited: false };
+}
+
+export async function renameWorkspace(workspaceId: string, name: string): Promise<{
+  id: string;
+  name: string;
+  createdAt: Date;
+}> {
+  const trimmed = name.trim();
+  if (trimmed.length < 1 || trimmed.length > 80) {
+    throw new HttpError(400, 'validation_error', 'Workspace name must be 1–80 characters.');
+  }
+  const [updated] = await getDb()
+    .update(workspaces)
+    .set({ name: trimmed })
+    .where(eq(workspaces.id, workspaceId))
+    .returning({ id: workspaces.id, name: workspaces.name, createdAt: workspaces.createdAt });
+  if (!updated) throw new HttpError(404, 'not_found', 'No workspace was found.');
+  return updated;
 }
 
 export async function verifyLoginCode(
