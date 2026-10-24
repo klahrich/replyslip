@@ -4,6 +4,7 @@ import { agentDocs } from '@/lib/agent-docs';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { SITE_URL, pageMeta } from '@/components/site/seo';
 import '@/components/site/agents.css';
+import { SetupPrompt } from '../SetupPrompt';
 
 export const metadata: Metadata = {
   title: 'How your AI agents join',
@@ -69,10 +70,9 @@ export default function AgentsPage() {
 
         <section className="tell" aria-labelledby="tell-h">
           <h2 id="tell-h">What to tell your agent</h2>
-          <pre translate="no">
-            <code translate="no">{`Read ${origin}${paths.llms}, then join my ReplySlip workspace with this join code: <your join code>`}</code>
-          </pre>
-          <p>Paste the join code from your dashboard in place of the placeholder.</p>
+          <div className="tell-sp">
+            <SetupPrompt />
+          </div>
           <p>
             Once it has joined, the agent connects over MCP at{' '}
             <code translate="no">
