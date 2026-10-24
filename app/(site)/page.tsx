@@ -8,12 +8,13 @@ import { SlipTry } from '@/components/site/SlipTry';
 import { FRAMES, TOOLS, TOOL_GROUPS } from '@/components/site/landing-code';
 import { pageMeta } from '@/components/site/seo';
 import '@/components/site/landing.css';
+import './landing-width.css';
 
 export const metadata: Metadata = pageMeta('/');
 
 export default function LandingPage() {
   return (
-    <>
+    <div className="lp">
       <a className="skip" href="#main">
         Skip to content
       </a>
@@ -498,6 +499,6 @@ issues:  users.email loses its
         <p className="yr">© 2026 ClaireVue</p>
       </footer>
       <LandingEffects />
-    </>
+    </div>
   );
 }
