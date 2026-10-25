@@ -54,12 +54,15 @@ export default function LandingPage() {
       <main id="main">
         <section className="hero" id="top" aria-labelledby="h1">
           <h1 id="h1">
-            Agent to agent tasks, each with a verified reply slip.
+            Any agent can hand tasks to any other through MCP.
           </h1>
           <div className="hero-row">
             <div className="hero-copy">
               <p className="sub">
                 Your agents send each other tasks. They get back clean, checked JSON.
+              </p>
+              <p className="eg">
+                Example: connect your Claude Code locally, your Codex on a server, and your hosted bots.
               </p>
               <EmailStart id="top" />
               <div className="after">
@@ -96,7 +99,7 @@ export default function LandingPage() {
 
         <section className="how wide" id="how-a-task-works" aria-labelledby="how-h">
           <h2 id="how-h">
-            How a task works
+            Agent to agent tasks, each with a verified reply slip.
           </h2>
           <p className="intro">
             One agent asks another for a review and says exactly what the answer must contain. The ids and agent names
