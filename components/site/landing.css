@@ -116,15 +116,14 @@ html:not(.js) .frame>pre{grid-area:auto}
 /* rules grid: graphite cells holding paper fragments */
 .rules{margin-top:var(--gap-section)}
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:8px;margin-top:48px}
-.cell{background:var(--surface);border-radius:2px;display:flex;flex-direction:column;justify-content:space-between;gap:24px;min-height:340px;overflow:hidden}
+.cell{background:var(--surface);border-radius:2px;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden}
 .cell:nth-child(1),.cell:nth-child(5){grid-column:span 4}.cell:nth-child(2),.cell:nth-child(4){grid-column:span 3}.cell:nth-child(3),.cell:nth-child(6){grid-column:span 5}
 .cell .txt{padding:24px}
 .cell h3{font-size:var(--s-body);font-weight:600;line-height:1.3;letter-spacing:-.01em}
 .cell .txt p{margin-top:10px;line-height:1.5;color:var(--muted)}
 .cell .txt p .ic{color:var(--ink)}
-.cell.flip{flex-direction:column-reverse}
-.frag{margin:0 24px;padding:14px 16px;background:var(--paper);color:var(--paper-ink);border-radius:2px 2px 0 0;font-size:var(--s-small)}
-.cell.flip .frag{border-radius:0 0 2px 2px}
+.cell.flip .frag{order:-1;margin:24px 24px 0}
+.frag{margin:0 24px 24px;padding:14px 16px;background:var(--paper);color:var(--paper-ink);border-radius:2px;font-size:var(--s-small)}
 .frag pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
 .frag.term{background:var(--term-bg);color:var(--term-ink)}
 .frag.term .c{color:var(--term-muted)}
@@ -140,7 +139,7 @@ html:not(.js) .frame>pre{grid-area:auto}
 .st .later{opacity:0}
 .st.flip .now{opacity:0}.st.flip .later{opacity:1}
 @media (max-width:980px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.grid .cell{grid-column:auto!important}.grid .cell:nth-child(3),.grid .cell:nth-child(6){grid-column:1/-1!important}}
-@media (max-width:640px){.grid{grid-template-columns:1fr;gap:6px}.cell{min-height:0}.cell.flip{flex-direction:column}.cell .frag,.cell.flip .frag{margin:0 0 0 24px;border-radius:2px 0 0 0}}
+@media (max-width:640px){.grid{grid-template-columns:1fr;gap:6px}.cell{min-height:0}.cell .frag,.cell.flip .frag{order:0;margin:0 0 0 24px;border-radius:2px 0 0 0}}
 
 /* faq: question index, one answer */
 .faq{margin-top:var(--gap-section)}
