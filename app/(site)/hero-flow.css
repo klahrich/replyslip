@@ -4,7 +4,12 @@
    bottom, the reply running back up a lane on the right. */
 .lp .hero-stage{container-type:inline-size}
 .slip.flow{--chip:8.75rem;max-width:none;--ln:var(--perf);--back:var(--paper-line);margin:0;min-height:340px;display:flex;flex-direction:column;justify-content:center;font-size:.9375rem;line-height:1.35;padding:28px 22px 32px}
-@media (min-width:1100px){.lp .hero-stage{padding-right:32px}}
+/* >=1100px: the row always fits, so the stage drops the container (the narrow layout below never applies) and moves
+   off the form: its left edge comes in 20px plus --shift, and the right edge moves out by --shift (up to 40px) where the
+   gutter outside the 1080px column leaves at least 20px to the viewport edge. */
+@media (min-width:1100px){
+  .lp .hero-stage{container-type:normal;padding-right:32px;--shift:clamp(0px,calc(var(--m) - var(--m-edge) - 20px),40px);margin-left:calc(var(--shift) + 20px);margin-right:calc(-1 * var(--m-edge) - var(--shift))}
+}
 
 .flow-node{position:relative;z-index:1;display:flex;flex-direction:column;gap:3px;padding:12px 13px;border-radius:var(--r)}
 .flow-agent{width:var(--chip);flex:0 0 auto;background:var(--well);border:1px solid var(--paper-line)}
