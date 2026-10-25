@@ -722,6 +722,127 @@ async function watch(options) {
   } while (!options.once);
 }
 
+// packages/cli/src/watcher-lock.ts
+import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import path2 from "node:path";
+function watcherLockPath(home = homedir2()) {
+  return path2.join(replyslipHome(home), "watcher.lock");
+}
+function alreadyRunningMessage(pid) {
+  return `A ReplySlip watcher is already running on this machine (pid ${pid}); it delivers every local agent in this workspace.`;
+}
+function runningStatusMessage(pid) {
+  return `A ReplySlip watcher is running on this machine (pid ${pid}); it delivers every local agent in this workspace.`;
+}
+var WATCHER_NOT_RUNNING_MESSAGE = "No ReplySlip watcher is running on this machine.";
+function readWatcherLock(file) {
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed.pid !== "number" || !Number.isInteger(parsed.pid) || parsed.pid <= 0) return null;
+    if (typeof parsed.startedAt !== "string" || parsed.startedAt.trim() === "") return null;
+    return { pid: parsed.pid, startedAt: parsed.startedAt };
+  } catch {
+    return null;
+  }
+}
+function pidIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+function watcherStatus(home = homedir2()) {
+  const lock = readWatcherLock(watcherLockPath(home));
+  if (!lock || !pidIsAlive(lock.pid)) return { running: false, lock };
+  return { running: true, lock };
+}
+function acquireWatcherLock(options) {
+  const home = options?.home ?? homedir2();
+  const file = watcherLockPath(home);
+  const pid = options?.pid ?? process.pid;
+  const startedAt = (options?.now ?? /* @__PURE__ */ new Date()).toISOString();
+  mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  if (options?.force) removeLock(file);
+  if (tryCreate(file, pid, startedAt)) return { ok: true, hold: createHold(file, pid, startedAt) };
+  const existing = readWatcherLock(file);
+  if (existing && pidIsAlive(existing.pid)) {
+    if (!options?.force) return { ok: false, reason: "running", pid: existing.pid };
+    removeLock(file);
+    if (tryCreate(file, pid, startedAt)) return { ok: true, hold: createHold(file, pid, startedAt) };
+    const replaced = readWatcherLock(file);
+    if (replaced && pidIsAlive(replaced.pid)) return { ok: false, reason: "running", pid: replaced.pid };
+    throw new Error("Could not acquire the ReplySlip watcher lock.");
+  }
+  removeLock(file);
+  if (tryCreate(file, pid, startedAt)) return { ok: true, hold: createHold(file, pid, startedAt) };
+  const raced = readWatcherLock(file);
+  if (raced && pidIsAlive(raced.pid)) return { ok: false, reason: "running", pid: raced.pid };
+  throw new Error("Could not acquire the ReplySlip watcher lock.");
+}
+function bindWatcherLockLifecycle(release) {
+  const onSignal = () => {
+    release();
+    process.exit(0);
+  };
+  const onExit = () => release();
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  process.on("exit", onExit);
+  return () => {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    process.off("exit", onExit);
+  };
+}
+function tryCreate(file, pid, startedAt) {
+  let fd;
+  try {
+    fd = openSync(file, "wx", 384);
+  } catch (err) {
+    if (err.code === "EEXIST") return false;
+    throw err;
+  }
+  try {
+    writeSync(fd, `${JSON.stringify({ pid, startedAt })}
+`);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    chmodSync(file, 384);
+  } catch {
+  }
+  return true;
+}
+function removeLock(file) {
+  try {
+    unlinkSync(file);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+}
+function createHold(file, pid, startedAt) {
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    const current = readWatcherLock(file);
+    if (!current || current.pid !== pid || current.startedAt !== startedAt) return;
+    removeLock(file);
+  };
+  return { path: file, pid, startedAt, release };
+}
+
 // packages/cli/src/cli.ts
 function flag(argv, name) {
   const index = argv.indexOf(name);
@@ -797,6 +918,11 @@ async function runReplyslip(argv, io = {}) {
     stderr("Usage: replyslip watch | register | key-path");
     return 1;
   }
+  if (argv.includes("--status")) {
+    const status = watcherStatus(io.home);
+    stdout(status.running && status.lock ? runningStatusMessage(status.lock.pid) : WATCHER_NOT_RUNNING_MESSAGE);
+    return 0;
+  }
   const url = flag(argv, "--url") ?? env.REPLYSLIP_URL;
   const keyFile = flag(argv, "--key-file");
   let key = flag(argv, "--key") ?? env.REPLYSLIP_WATCHER_KEY;
@@ -817,8 +943,19 @@ async function runReplyslip(argv, io = {}) {
     stderr("--interval must be at least 500 milliseconds.");
     return 1;
   }
-  await watch({ url, key, intervalMs, once: argv.includes("--once"), fetchImpl: io.fetchImpl });
-  return 0;
+  const acquired = acquireWatcherLock({ home: io.home, force: argv.includes("--force") });
+  if (!acquired.ok) {
+    stdout(alreadyRunningMessage(acquired.pid));
+    return 0;
+  }
+  const unbind = bindWatcherLockLifecycle(acquired.hold.release);
+  try {
+    await watch({ url, key, intervalMs, once: argv.includes("--once"), fetchImpl: io.fetchImpl });
+    return 0;
+  } finally {
+    unbind();
+    acquired.hold.release();
+  }
 }
 async function readWatcherKeyFile(file, stderr) {
   let text;
