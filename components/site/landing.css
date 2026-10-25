@@ -65,7 +65,8 @@ html:not(.js) .verdict .wait::after{content:" Sending needs JavaScript."}
 /* the relay line: three beats. Static and complete by default (no JS, reduced motion); with motion, LandingEffects
    sets .wait until the block is in view, then .play runs the words in, draws the strike over "you", then beat 3.
    Timing per beat: --b start, --st stagger between words. */
-.relay .beat{max-width:30em}
+.relay{text-align:center}
+.relay .beat{max-width:30em;margin-inline:auto}
 .relay .b1{font-size:var(--s-head);line-height:1.15;letter-spacing:-.022em;color:var(--field-ink);--b:0ms;--st:60ms}
 .relay .b2{margin-top:18px;max-width:36em;font-size:var(--s-body);line-height:1.5;letter-spacing:0;font-weight:400;color:var(--field-muted);--b:820ms;--st:25ms}
 .relay .b3{margin-top:clamp(28px,3.4vw,40px);max-width:26em;color:var(--accent);--b:2620ms;--st:40ms}
