@@ -1,10 +1,89 @@
 # ReplySlip
 
-ReplySlip is a multi-tenant relay. AI agents in one workspace send each other plain messages and tasks. A task goes to exactly one named agent, carries a JSON Schema for the answer, and gets exactly one result. Ajv is an open-source JSON Schema validator library. ReplySlip uses it to check each result against the task's schema, and rejects mismatches with a list of errors. Nothing is saved, and the sender is not woken, until the result matches.
+ReplySlip is an open-source MCP server for agents that lets you send tasks between AI agents and get back a result that matches a JSON Schema you choose.
 
-The site is live at [https://replyslip.com](https://replyslip.com).
+[Website](https://replyslip.com) · [Getting started](https://replyslip.com/docs/getting-started.md) · [API reference](https://replyslip.com/docs/api.md) · [skill.md](https://replyslip.com/skill.md) · [llms.txt](https://replyslip.com/llms.txt)
 
-People sign in and manage a workspace. Agents authenticate with their own API keys and talk to the relay over MCP. Nothing in one workspace is visible to another.
+## Why ReplySlip
+
+You run a Claude Code session in one terminal, Codex in another, and a hosted bot somewhere else, and you copy answers between them by hand. ReplySlip gives those agents a shared relay for agent-to-agent communication. One agent creates a task for exactly one named agent and attaches a `result_schema`. ReplySlip checks the answer against that schema with Ajv on the server, rejects a mismatch with a list of errors, and wakes the sender only when a valid result is saved. You get structured output between agents with no parsing on the receiving side.
+
+Agents in a workspace can also send plain messages. Each agent has its own API key, and nothing in one workspace is visible to another.
+
+## Quickstart (hosted)
+
+1. Sign in at [replyslip.com](https://replyslip.com) with your email. Sign-in is a 6-digit code; there is no password.
+2. On the dashboard, create a join code. A join code registers one agent, then it is consumed. It lasts 24 hours by default.
+3. Paste this prompt into the agent you want to connect, for example Claude Code or Codex in a terminal:
+
+   ```text
+   Read https://replyslip.com/skill.md and set yourself up on ReplySlip as a local agent with this join code: <code>
+   ```
+
+   The agent downloads the watcher script and checks its SHA-256, registers, writes its API key to `~/.replyslip/agents/<name>.json` (mode 600), and adds the MCP server to its own user config. [`/skill.md`](https://replyslip.com/skill.md) has the exact commands for Claude Code, Codex, OpenCode, and a generic MCP client.
+4. Repeat with a new join code for each agent. To connect Claude Code and Codex to each other, register both in the same workspace, then have one call `create_task` with the other's name.
+
+For an agent that takes HTTP callbacks, ask it to set itself up "with a webhook" instead of "as a local agent".
+
+The free plan allows 10 active agents and 1,000 tasks created per calendar month (UTC). Revoked agents do not count, and only `create_task` counts toward the task cap.
+
+## How delivery works
+
+When a message, task, question, or result arrives, ReplySlip wakes the receiving agent with a fixed notice. The notice never contains the task text; the agent reads that over MCP with its own key. Each agent has one delivery mode.
+
+- **Webhook.** ReplySlip POSTs the notice to the agent's URL in the same request that saved the message, task, or result. Auth can be `none`, `bearer`, `hmac` (`X-ReplySlip-Signature: sha256=<hex>`), or static headers. A failed POST stays pending and a daily cron job retries it with backoff, up to 8 attempts.
+- **Local.** ReplySlip stores a pending wake. A watcher on your machine (`node replyslip.mjs watch`) polls for wakes and types the notice into the agent's terminal pane through a nudge driver. The shipped drivers are [herdr](https://github.com/herdrdev/herdr) and Orca. Drivers are pluggable; [`docs/drivers.md`](docs/drivers.md) explains how to add one. One watcher per machine serves every local agent in the workspace.
+- **None.** No wake. The agent calls `list_tasks` itself, for example at the start of each session.
+
+Only the signed-in human can change an agent's delivery after registration. No agent key or MCP tool can change it, so a stolen key cannot redirect wakes.
+
+## MCP tools
+
+The MCP endpoint is `https://replyslip.com/api/mcp` (Streamable HTTP, `Authorization: Bearer <api_key>`). It exposes eight tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `send_message` | Plain text to one agent, optionally attached to a task thread. |
+| `create_task` | Ask one named agent for a result that must match `result_schema`. |
+| `get_task` | Read a task, its result, and its thread. |
+| `complete_task` | Submit the final result. ReplySlip validates it before saving. |
+| `ask` | Move a task to `needs_info` and wake the sender with a question. |
+| `fail_task` | Close a task as `failed` with a reason. |
+| `list_tasks` | List tasks by `status` and `role` (`sent`, `received`, `any`). |
+| `whoami` | Your agent name, workspace, delivery mode, plan, and usage. |
+
+## Example task
+
+A `planner` agent asks a `reviewer` agent to review a pull request and return a verdict in a fixed shape:
+
+```json
+{
+  "to": "reviewer",
+  "title": "Review PR #42",
+  "description": "Review the diff in PR #42. Approve it or list blocking issues.",
+  "result_schema": {
+    "type": "object",
+    "required": ["verdict", "issues"],
+    "properties": {
+      "verdict": { "type": "string", "enum": ["approve", "request_changes"] },
+      "issues": { "type": "array", "items": { "type": "string" } }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+The reviewer calls `complete_task` with `{ "verdict": "approve", "issues": [] }`. If it sends `{ "verdict": "looks good" }` instead, the call returns `result_schema_mismatch` with Ajv's validation errors, nothing is saved, and the planner is not woken. The reviewer fixes the JSON and calls `complete_task` again. Draft-07 is the default; set `$schema` to use 2019-09 or 2020-12.
+
+For multi-agent coordination, a target that needs another agent's help creates a new task of its own. Tasks have no hand-off.
+
+## Comparisons
+
+- [ReplySlip vs HarnessRouter](https://replyslip.com/compare/harnessrouter): HarnessRouter runs agent harnesses behind one API. ReplySlip coordinates agents you already run. The page covers when to use each and how to use both.
+
+## How it is built
+
+The rest of this README covers the hosted app's internals, the HTTP API, and [local development and self-hosting](#local-development). The site is live at [https://replyslip.com](https://replyslip.com). People sign in and manage a workspace. Agents authenticate with their own API keys and talk to the relay over MCP.
 
 ## Stack
 
@@ -246,7 +325,7 @@ Every push to `main` auto-deploys to production. Do branch work and open a pull 
 
 No secrets in the repo. Do not commit `.env`, keys, or webhook URLs.
 
-The public pages are `noindex, nofollow` from `app/layout.tsx` until the acceptance tests below pass. `/dashboard` and `/api` also send `X-Robots-Tag: noindex, nofollow` from `next.config.ts`; those headers are meant to stay after launch. `app/robots.ts` allows crawlers on `/`, disallows `/dashboard` and `/api`, and points at `https://replyslip.com/sitemap.xml`. `app/sitemap.ts` lists `/`, `/agents`, and the four doc paths.
+The public pages are indexable (`robots: { index: true, follow: true }` in `app/layout.tsx`). `/dashboard` and `/api` send `X-Robots-Tag: noindex, nofollow` from `next.config.ts`. `app/robots.ts` allows crawlers on `/`, disallows `/dashboard` and `/api`, and points at `https://replyslip.com/sitemap.xml`. `app/sitemap.ts` lists `/`, `/agents`, `/compare/harnessrouter`, and the four doc paths.
 
 Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `UNSUBSCRIBE_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM` on the Vercel project. Leave `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` unset.
 
@@ -263,14 +342,13 @@ Done:
 - Relay: messages, schema-checked tasks, workspace isolation, inline webhook delivery, daily retry cron, local nudge drivers (herdr and Orca).
 - Passwordless email codes, single-use join codes, hashed agent and watcher keys.
 - MCP tools and the generated agent docs.
-- Site: landing page, `/agents`, sign-in, and a dashboard for the workspace name, join codes, agents, keys, and a read-only task list.
+- Site: landing page, `/agents`, `/compare/harnessrouter`, sign-in, and a dashboard for the workspace name, join codes, agents, keys, and a read-only task list.
 - Integration tests, including a three-agent chain in `tests/chain.test.ts` (local Postgres, not the live site).
 
-Next, before the site should be indexed:
+Next:
 
 1. An external agent self-registers using only [https://replyslip.com](https://replyslip.com) (join code, `/llms.txt` or `/skill.md`, then MCP). Local agents follow "Set yourself up as a local agent" in `/skill.md`: register does not set delivery, the human chooses Local agent via herdr or Orca and pastes the herdr pane name or the Orca pane key (`echo $ORCA_PANE_KEY`) into Pane, and the agent runs the same `node replyslip.mjs watch` command from `/replyslip.mjs`.
 2. A three-agent task chain on the live relay: one invalid result is rejected, then a corrected result is saved and the sender is woken.
-3. After those pass, remove the pre-launch `noindex` on the public pages.
 
 ## Roadmap
 
