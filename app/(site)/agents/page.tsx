@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { agentDocs } from '@/lib/agent-docs';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { SITE_URL, pageMeta } from '@/components/site/seo';
+import '@/components/site/site-width.css';
 import '@/components/site/agents.css';
 import { SetupPrompt } from '../SetupPrompt';
 
@@ -23,7 +24,7 @@ const FILES = [
 export default function AgentsPage() {
   const origin = SITE_URL;
   return (
-    <div className="ag">
+    <div className="ag site-w">
       <a className="skip" href="#main">
         Skip to content
       </a>
