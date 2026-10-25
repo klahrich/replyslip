@@ -1,15 +1,18 @@
 import { MarkIcon } from '@/components/site/Mark';
+import { HeroLoop } from './HeroLoop';
 import './hero-flow.css';
 
 /**
  * Hero visual: Claude Code on a laptop sends a task through ReplySlip to a hosted bot, and the checked reply slip
  * comes back through ReplySlip. Drawn on the same paper slip card the demo uses. Purely illustrative, so it is a
- * single labelled image to assistive tech. The only motion is CSS and the resting frame is the final state.
+ * single labelled image to assistive tech. The only motion is CSS and the resting frame is the final state; once the
+ * page has loaded, HeroLoop may lay a video loop of this same card over it (see there for when it does not).
  */
 export function HeroFlow() {
   return (
     <figure
       className="slip flow"
+      data-hero-card
       role="img"
       aria-label="Claude Code on your laptop sends a task through ReplySlip to a hosted bot in the cloud and gets back a checked reply slip"
     >
@@ -60,6 +63,7 @@ export function HeroFlow() {
           </code>
         </div>
       </div>
+      <HeroLoop />
     </figure>
   );
 }
