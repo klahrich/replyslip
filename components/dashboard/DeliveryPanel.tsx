@@ -12,6 +12,9 @@ type HeaderRow = { key: number; name: string; value: string };
 
 /** Mirrors the server's rules in lib/delivery.ts so most mistakes are caught before a round trip. */
 const PANE_NAME = /^[A-Za-z0-9._-]{1,64}$/;
+const MAX_TARGET = 200;
+/** `$ORCA_PANE_KEY` is `tabId:leafId`: one colon, no whitespace, both sides non-empty (same rule as the CLI's orca driver). */
+const ORCA_PANE_KEY = /^[^\s:]+:[^\s:]+$/;
 const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
 const BLOCKED_HEADERS = new Set(['host', 'content-length', 'transfer-encoding', 'connection', 'cookie', 'content-type', 'authorization']);
 const MAX_HEADERS = 20;
@@ -123,10 +126,15 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
   function validate(): Errors {
     const e: Errors = {};
     if (mode === 'local') {
-      if (driver !== 'herdr') e.driver = 'Choose a driver.';
       const t = target.trim();
-      if (!t) e.target = 'Enter the herdr pane name.';
-      else if (!PANE_NAME.test(t)) e.target = 'Use 1–64 letters, numbers, dots, underscores or hyphens, with no spaces.';
+      if (driver === 'herdr') {
+        if (!t) e.target = 'Enter the herdr pane name.';
+        else if (!PANE_NAME.test(t)) e.target = 'Use 1–64 letters, numbers, dots, underscores or hyphens, with no spaces.';
+      } else if (driver === 'orca') {
+        if (!t || t.length > MAX_TARGET || /[\u0000-\u001f]/.test(t) || !ORCA_PANE_KEY.test(t)) {
+          e.target = 'Enter the Orca pane key (looks like tabId:leafId).';
+        }
+      } else e.driver = 'Choose a driver.';
     }
     if (mode === 'webhook') {
       if (sendUrl) {
@@ -319,7 +327,7 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
             [
               ['none', 'None', 'The agent checks for tasks itself. ReplySlip sends nothing.'],
               ['webhook', 'Webhook', 'ReplySlip sends a POST to a URL you choose each time there is work.'],
-              ['local', 'Local agent via herdr', 'The watcher on your machine (replyslip watch) types a short notice into a herdr pane.'],
+              ['local', 'Local agent via herdr or Orca', 'The watcher on your machine (replyslip watch) types a short notice into a herdr or Orca pane.'],
             ] as const
           ).map(([value, label, help]) => (
             <label key={value} className={mode === value ? 'dash-mode is-on' : 'dash-mode'}>
@@ -534,24 +542,39 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
           <div className="dash-fields">
             <div className="dash-field">
               <label htmlFor={`${uid}-driver`}>Driver</label>
-              <select {...fieldProps('driver')} value={driver} onChange={(e) => setDriver(e.target.value)}>
+              <select
+                {...fieldProps('driver')}
+                value={driver}
+                onChange={(e) => {
+                  setDriver(e.target.value);
+                  setErrors({});
+                }}
+              >
                 <option value="herdr">herdr</option>
+                <option value="orca">Orca</option>
               </select>
               {err('driver')}
             </div>
             <div className="dash-field">
-              <label htmlFor={`${uid}-target`}>herdr pane name</label>
+              <label htmlFor={`${uid}-target`}>Pane</label>
               <input
                 {...fieldProps('target', 'target')}
                 spellCheck={false}
                 autoComplete="off"
-                placeholder="reviewer"
+                placeholder={driver === 'orca' ? 'tabId:leafId' : 'reviewer'}
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
               />
-              <p className="dash-hint" id={`${uid}-target-hint`}>
-                The exact name of the herdr pane where {agent.name} runs. The watcher needs herdr 0.8.0 or newer on its machine and a watcher key from the Watchers section below.
-              </p>
+              {driver === 'orca' ? (
+                <p className="dash-hint" id={`${uid}-target-hint`}>
+                  Your agent shows this during setup (or run <code translate="no">echo $ORCA_PANE_KEY</code> in its terminal). The watcher needs a
+                  watcher key from the Watchers section below.
+                </p>
+              ) : (
+                <p className="dash-hint" id={`${uid}-target-hint`}>
+                  The exact name of the herdr pane where {agent.name} runs. The watcher needs herdr 0.8.0 or newer on its machine and a watcher key from the Watchers section below.
+                </p>
+              )}
               {err('target')}
             </div>
           </div>
@@ -593,7 +616,7 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
 
         <div className="dash-status" role="status" aria-live="polite">
           {saved && wake.kind === 'idle' ? <p className="dash-ok">Saved.</p> : null}
-          <WakeMessage state={wake} target={storedTarget} />
+          <WakeMessage state={wake} target={storedTarget} orca={stored.driver === 'orca'} />
         </div>
       </form>
     </section>
@@ -666,7 +689,7 @@ function SecretField({
   );
 }
 
-function WakeMessage({ state, target }: { state: WakeState; target: string }) {
+function WakeMessage({ state, target, orca }: { state: WakeState; target: string; orca: boolean }) {
   switch (state.kind) {
     case 'idle':
     case 'sending':
@@ -682,13 +705,13 @@ function WakeMessage({ state, target }: { state: WakeState; target: string }) {
     case 'waiting':
       return <p className="dash-pending">Test wake pending. Waiting for the watcher to deliver it…</p>;
     case 'delivered':
-      return <p className="dash-ok">Test wake delivered to the herdr pane.</p>;
+      return <p className="dash-ok">Test wake delivered to the {orca ? 'Orca pane' : 'herdr pane'}.</p>;
     case 'failed':
       return <p className="dash-err">Test wake failed{state.error ? `: ${state.error}` : '.'}</p>;
     case 'timeout':
       return (
         <p className="dash-pending">
-          Still pending after 30 seconds. Is the watcher running (<code translate="no">replyslip watch</code>) and is the herdr pane named{' '}
+          Still pending after 30 seconds. Is the watcher running (<code translate="no">replyslip watch</code>) and is the {orca ? 'Orca pane key' : 'herdr pane named'}{' '}
           <code translate="no">{target || '…'}</code>? The wake stays queued and is delivered when the watcher picks it up.
         </p>
       );

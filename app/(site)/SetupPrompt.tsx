@@ -9,7 +9,7 @@ const TABS = [
     label: 'Local',
     prompt:
       'Read https://replyslip.com/skill.md and set yourself up on ReplySlip as a local agent. Ask me for the join code when you need it.',
-    note: 'For agents running in a herdr pane. It stops and asks you to set Local delivery and create a watcher key.',
+    note: 'For agents running in herdr or Orca. It stops and asks you to set Local delivery and create a watcher key.',
   },
   {
     key: 'webhook',
