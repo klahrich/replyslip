@@ -1,0 +1,9 @@
+/* The interactive reply slip, moved from the hero into How a task works. It keeps the hero's shaped stage and
+   the hero's split (words on the left, the slip in columns 7-12 so it lines up with the example calls below) inside the 1080px column; under 900px it stacks. */
+.lp .how-row{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:clamp(16px,2vw,32px);align-items:start}
+.lp .how-row .intro{grid-column:1/span 5}
+.lp .how-try{grid-column:7/span 6;margin-top:16px;background:var(--stage);padding:clamp(20px,2.4vw,32px);clip-path:polygon(28px 0,100% 0,100% 100%,0 100%,0 28px)}
+@media (max-width:899px){
+  .lp .how-row .intro,.lp .how-try{grid-column:1/-1}
+  .lp .how-try{margin:28px calc(var(--m-edge) * -1) 0;padding:20px var(--m-edge)}
+}

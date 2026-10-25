@@ -10,6 +10,7 @@
 .hero-row{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:clamp(16px,2vw,32px);margin-top:clamp(24px,4vh,40px);align-items:start}
 .hero-copy{grid-column:1/span 5;padding-top:8px}
 .hero .sub{font-size:var(--s-lead);line-height:1.4;color:var(--ink);max-width:30em;letter-spacing:-.005em}
+.hero .eg{margin-top:8px;font-size:var(--s-small);line-height:1.5;color:var(--muted);max-width:34em}
 .hero .signup{margin-top:28px}
 .hero .after{margin-top:16px;display:flex;flex-direction:column;gap:6px;font-size:var(--s-small);color:var(--muted)}
 .hero .after a{color:var(--ink);font-weight:500;align-self:start}
