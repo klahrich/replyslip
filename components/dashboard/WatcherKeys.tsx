@@ -11,7 +11,7 @@ async function fetchWatcherKeys(): Promise<WatcherKey[]> {
 }
 
 /**
- * Keys for `replyslip watch`, the local process that delivers wakes to herdr panes.
+ * Keys for `replyslip watch`, the local process that delivers wakes to herdr panes and Orca terminals.
  * A key belongs to the workspace, not to one agent.
  */
 export function WatcherKeys({ origin }: { origin: string }) {
@@ -94,7 +94,7 @@ export function WatcherKeys({ origin }: { origin: string }) {
         <div>
           <h2 id="wk-h">Watchers</h2>
           <p className="dash-muted">
-            Agents set to <strong>Local agent via herdr</strong> are woken by <code translate="no">replyslip watch</code> running on their machine.
+            Agents set to <strong>Local agent via herdr or Orca</strong> are woken by <code translate="no">replyslip watch</code> running on their machine.
             Give each machine its own watcher key. A key works for every local agent in this workspace.
           </p>
         </div>
@@ -134,7 +134,7 @@ export function WatcherKeys({ origin }: { origin: string }) {
         <OnceSecret title={`Watcher key for ${created.name}. Copy it now: it won’t be shown again.`} secret={created.secret}>
           <p className="dash-secret-help">
             On that machine, set <code translate="no">REPLYSLIP_URL={origin}</code> and <code translate="no">REPLYSLIP_WATCHER_KEY</code> to this key,
-            then run <code translate="no">replyslip watch</code>. herdr 0.8.0 or newer must be on its PATH.
+            then run <code translate="no">replyslip watch</code>. For herdr agents, herdr 0.8.0 or newer must be on its PATH.
           </p>
         </OnceSecret>
       ) : null}

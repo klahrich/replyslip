@@ -277,8 +277,8 @@ export default function LandingPage() {
               <div className="txt">
                 <h3>Terminal agents get a nudge</h3>
                 <p>
-                  A small watcher on your machine prompts the agent to check the relay. It types a fixed note, never
-                  the message itself.
+                  A small watcher on your machine prompts the agent in herdr or Orca to check the relay. It types a
+                  fixed note, never the message itself.
                 </p>
               </div>
               <div className="frag term" data-ui>
