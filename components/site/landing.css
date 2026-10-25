@@ -72,7 +72,7 @@ html:not(.js) .verdict .wait::after{content:" Sending needs JavaScript."}
 .relay .r-big{font-size:clamp(1.875rem,1.3rem + 1.8vw,2.75rem);line-height:1.2;letter-spacing:-.025em;font-weight:600;max-width:20em}
 .relay .r-acc{color:var(--accent)}
 .relay .r-prob{max-width:46em;margin-bottom:clamp(20px,2.4vw,28px);font-size:var(--s-body);line-height:1.5;letter-spacing:0;font-weight:400;color:var(--field-muted)}
-.relay .r-sub,.relay .bs{margin-top:clamp(14px,1.6vw,20px);max-width:32em;font-size:var(--s-body);line-height:1.5;letter-spacing:0;font-weight:400;color:var(--field-muted)}
+.relay .r-sub,.relay .bb,.relay .bs{margin-top:clamp(14px,1.6vw,20px);max-width:32em;font-size:var(--s-body);line-height:1.5;letter-spacing:0;font-weight:400;color:var(--field-muted)}
 .relay-stage{display:none}
 @media (prefers-reduced-motion:no-preference){
   .relay.anim{display:grid}
@@ -80,10 +80,9 @@ html:not(.js) .verdict .wait::after{content:" Sending needs JavaScript."}
   .relay.anim .relay-rest{opacity:0;pointer-events:none;user-select:none}
   .relay.anim .relay-stage{display:flex;flex-direction:column;justify-content:center}
   .relay.anim:not(.play) .relay-stage{visibility:hidden}
-  /* below line 1: the problem, then the subline, stacked in one cell */
+  /* below line 1: the problem, then the subline, stacked in one cell, both in the subline style */
   .relay .r-low{display:grid;align-items:start}
   .relay .r-low>p{grid-area:1/1}
-  .relay .bb{margin-top:clamp(14px,1.6vw,20px);max-width:32em;font-size:clamp(1.25rem,1.05rem + .6vw,1.5rem);line-height:1.35;letter-spacing:-.01em;font-weight:500;color:var(--field-ink)}
   .relay .w{display:inline-block}
   /* the slot: one line tall, as wide as its current words (--w1, --w2 measured by LandingEffects) */
   .relay .slot{overflow:hidden;overflow:visible clip;vertical-align:top;height:1.2em;width:var(--w1,auto)}
