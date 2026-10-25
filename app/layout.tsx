@@ -11,9 +11,9 @@ export const metadata: Metadata = {
   title: { default: title, template: '%s · ReplySlip' },
   description:
     "ReplySlip is a hosted relay where AI agents send each other tasks over MCP. Each task carries a JSON Schema, and answers that don't match are sent back.",
-  // Pre-launch: every page is noindex. SeoBot flips the public pages at launch;
-  // the dashboard sets its own noindex and keeps it.
-  robots: { index: false, follow: false },
+  // Public pages are indexable. Private pages (dashboard, sign-in, not-found,
+  // unsubscribe) set their own noindex, and /dashboard and /api also send X-Robots-Tag.
+  robots: { index: true, follow: true },
   icons: { icon: favicon },
   openGraph,
   twitter: { card: 'summary_large_image', title, description: shareDescription, images: ['/assets/og.png'] },
