@@ -1,66 +1,80 @@
-/* Hero visual (HeroFlow): two agent chips, a task line out along the top and a reply line back along the bottom
-   carrying one paper reply slip. Lines are CSS borders anchored to the chip centres via --chip, so the drawing holds
-   at any width. */
-.flow{--chip:7.75rem;--tap:calc(var(--chip) / 2);--line:color-mix(in srgb,var(--muted) 60%,transparent);width:100%;max-width:520px;margin:0 auto;font-size:var(--s-small);line-height:1.35}
-.flow-agent{position:relative;z-index:1;width:var(--chip);flex:0 0 auto;display:flex;flex-direction:column;gap:2px;padding:10px 12px;background:var(--bg);border:1px solid var(--surface-2);border-radius:var(--r)}
-.flow-name{font-weight:600;color:var(--ink);white-space:nowrap}
-.flow-name::before{content:"";display:inline-block;width:8px;height:8px;margin-right:8px;background:var(--accent);vertical-align:.08em}
-.flow-where{color:var(--muted);padding-left:16px;white-space:nowrap}
-.flow-mid{display:flex;align-items:center}
+/* Hero visual (HeroFlow), drawn on the demo's paper slip card (.slip) inside the shaped hero stage.
+   Wide card: Claude Code -> ReplySlip -> Hosted bot in a row, the reply coming back along a line underneath with the
+   checked slip under ReplySlip. Narrow card (container query, so it also covers 900-1099px): the same chain top to
+   bottom, the reply running back up a lane on the right. */
+.lp .hero-stage{container-type:inline-size}
+.slip.flow{--chip:8.75rem;max-width:none;--ln:var(--perf);--back:var(--paper-line);margin:0;min-height:340px;display:flex;flex-direction:column;justify-content:center;font-size:.9375rem;line-height:1.35;padding:28px 22px 32px}
+@media (min-width:1100px){.lp .hero-stage{padding-right:32px}}
 
-/* the task: label over a sage line with an arrowhead into the hosted bot */
-.flow-task{position:relative;flex:1;min-width:0;align-self:stretch;display:flex;align-items:center;padding:0 12px}
-.flow-label{position:absolute;left:12px;right:12px;bottom:calc(50% + 7px);color:var(--ink);text-align:center;text-wrap:balance}
-.flow-line{position:relative;flex:1;height:1px;background:var(--accent)}
-.flow-head{position:absolute;right:-10px;top:-5px;width:8px;height:10px;fill:var(--accent)}
-.flow-dot{position:absolute;left:0;top:-3px;width:7px;height:7px;border-radius:50%;background:var(--accent);opacity:0}
+.flow-node{position:relative;z-index:1;display:flex;flex-direction:column;gap:3px;padding:12px 13px;border-radius:var(--r)}
+.flow-agent{width:var(--chip);flex:0 0 auto;background:var(--well);border:1px solid var(--paper-line)}
+.flow-name{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--paper-ink);white-space:nowrap}
+.flow-sq{flex:0 0 auto;width:8px;height:8px;background:var(--perf)}
+.flow-where{color:var(--paper-muted);font-size:var(--s-small);padding-left:16px;white-space:nowrap}
+.flow-hub{flex:0 0 auto;background:var(--paper-ink);border:1px solid var(--paper-ink);align-items:center;text-align:center}
+.flow-hub .flow-name{color:var(--paper)}
+.flow-hub .flow-name svg{flex:0 0 auto}
+.flow-hub .flow-where{color:var(--muted);padding-left:0}
 
-/* the reply: down from the hosted bot, back along the bottom, up into Claude Code; the slip rides on it */
-.flow-back{position:relative;display:flex;justify-content:center;padding-top:22px}
-.flow-back::before{content:"";position:absolute;left:var(--tap);right:var(--tap);top:0;bottom:calc(50% - 11px);border:1px solid var(--line);border-top:0}
-.flow-up{position:absolute;left:calc(var(--tap) - 4.5px);top:-1px;width:10px;height:8px;fill:var(--muted)}
-/* the return line runs through the slip's middle, so the left arrowhead rides just outside its left edge */
-.flow-left{position:absolute;right:calc(100% + 6px);top:50%;margin-top:-5px;width:8px;height:10px;fill:var(--muted)}
-.flow-slip{position:relative;background:var(--paper);color:var(--paper-ink);border:1px solid var(--paper-edge);border-radius:2px;padding:10px 14px 12px;box-shadow:0 1px 0 rgba(0,0,0,.18)}
-.flow-slip-head{display:flex;align-items:center;gap:8px;color:var(--paper-muted);white-space:nowrap}
-.flow-slip-head b{color:var(--paper-ink);font-weight:600}
-.flow-check{width:16px;height:16px;flex:0 0 auto}
+/* the task: one label over the whole row, a dark-sage line through ReplySlip with an arrowhead at each hop */
+.flow-row{position:relative;display:flex;align-items:center;padding-top:40px}
+.flow-go{flex:1;min-width:22px;height:2px;margin:0 12px 0 8px;background:var(--ln);position:relative}
+.flow-head{position:absolute;right:-10px;top:-5px;width:9px;height:12px;fill:var(--ln)}
+.flow-label{position:absolute;left:0;right:0;top:0;text-align:center;font-weight:600;color:var(--paper-ink);white-space:nowrap}
+.flow-tag{color:var(--paper-muted);font-weight:400}
+.flow-dot{position:absolute;left:0;top:-3px;width:8px;height:8px;border-radius:50%;background:var(--ln);opacity:0}
+
+/* the reply: down from Hosted bot, back along the bottom, up into Claude Code; the slip rides it under ReplySlip */
+.flow-back{position:relative;display:flex;justify-content:center;padding-top:36px}
+.flow-back::before{content:"";position:absolute;left:calc(var(--chip) / 2);right:calc(var(--chip) / 2);top:0;bottom:calc(50% - 15px);border:1.5px solid var(--back);border-top:0}
+.flow-back::after{content:"";position:absolute;left:50%;top:0;height:36px;border-left:1.5px dashed var(--ln)}
+.flow-up{position:absolute;left:calc(var(--chip) / 2 - 5.25px);top:-1px;width:12px;height:9px;fill:var(--back)}
+.flow-left{position:absolute;right:calc(100% + 8px);top:50%;margin-top:-6px;width:9px;height:12px;fill:var(--back)}
+.flow-reply{position:relative;z-index:1;background:var(--well);color:var(--paper-ink);border:1px solid var(--paper-line);border-radius:2px;padding:12px 16px 14px;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.flow-reply-head{display:flex;align-items:center;gap:9px;color:var(--paper-muted);white-space:nowrap;font-size:var(--s-small)}
+.flow-reply-head b{color:var(--paper-ink);font-weight:600}
+.flow-check{width:18px;height:18px;flex:0 0 auto}
 .flow-check circle{fill:var(--accent)}
 .flow-check path{fill:none;stroke:var(--paper-ink);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-.flow-tear{height:8px;margin:8px -14px 8px;background:radial-gradient(circle at 4px 4px,var(--perf) 2px,transparent 2.5px) 0 0/10px 8px repeat-x}
-.flow-slip code{display:block;white-space:nowrap;font-size:.8125rem}
-.flow-slip .k{color:var(--code-k)}.flow-slip .s{color:var(--code-s)}
+.flow-tear{height:8px;margin:10px -16px 10px;background:radial-gradient(circle at 4px 4px,var(--perf) 2px,transparent 2.5px) 0 0/10px 8px repeat-x}
+.flow-reply code{display:block;white-space:nowrap;font-size:.9375rem}
+.flow-reply .k{color:var(--code-k)}.flow-reply .s{color:var(--code-s)}
 
-@media (max-width:640px){
-  .flow{--chip:6.75rem;--tap:calc(var(--chip) * .3);font-size:.8125rem}
-  .flow-agent{padding:8px 10px}
-  .flow-name::before{margin-right:6px;width:7px;height:7px}
-  .flow-where{padding-left:13px}
-  .flow-task{padding:0 8px}
-  .flow-label{left:2px;right:2px}
-  .flow-slip code{font-size:.75rem}
+/* narrow card: top to bottom. Task goes down the middle, the reply goes back up the lane on the right. */
+@container (max-width:560px){
+  .slip.flow{--chip:auto;min-height:0;display:grid;grid-template-columns:minmax(0,420px) 30px;justify-content:center;font-size:var(--s-body);padding:20px 16px 22px 20px}
+  .flow-row,.flow-back{display:contents}
+  .flow-row::before{content:"";grid-column:2;grid-row:1/7;margin:22px 0 22px;border:1.5px solid var(--back);border-left:0;border-radius:0 2px 2px 0}
+  .flow-node{grid-column:1;flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;height:46px;box-sizing:border-box;padding:0 14px;align-items:center}
+  .flow-agent{width:auto}
+  .flow-where{padding-left:0}
+  .flow-a{grid-row:1}.flow-go-a{grid-row:2}.flow-hub{grid-row:3}.flow-reply{grid-row:4}.flow-go-b{grid-row:4/6}.flow-b{grid-row:6}
+  .flow-label{grid-row:2;grid-column:1;position:static;align-self:center;padding:14px 0 14px 46px;text-align:left;white-space:normal;font-size:var(--s-small)}
+  .flow-go{grid-column:1;justify-self:start;width:2px;min-width:0;height:auto;min-height:34px;margin:0 0 10px 27px}
+  .flow-go-b{margin-top:0}
+  .flow-head{right:auto;left:-5px;top:auto;bottom:-10px;transform:rotate(90deg)}
+  .flow-dot{left:-3px;top:0}
+  .flow-back::before,.flow-back::after,.flow-up{display:none}
+  .flow-reply{grid-column:1;grid-row:4;justify-self:stretch;margin:12px 0 22px 50px;padding:10px 14px 12px}
+  .flow-reply .flow-tear{margin-left:-14px;margin-right:-14px}
+  .flow-reply::after{content:"";position:absolute;left:100%;top:50%;width:30px;border-top:1.5px solid var(--back)}
+  .flow-left{display:none}
+  .flow-row::after{content:"";grid-column:2;grid-row:1;align-self:center;justify-self:start;margin-left:-1px;width:0;height:0;border:6px solid transparent;border-right:9px solid var(--back);border-left:0;transform:translateX(-0px)}
+  .flow-reply code{font-size:.8125rem}
 }
 
-/* motion: the task dot travels now and then; the slip settles once (card stays opaque, only its ink fades up).
-   Resting state is the final frame, which is all reduced motion shows. */
+/* motion: the task dot travels each hop now and then; the slip settles once (card stays opaque, only its ink fades
+   up). Resting state is the final frame, which is all reduced motion shows. */
 @media (prefers-reduced-motion:no-preference){
-  .flow-dot{animation:flow-go 7s cubic-bezier(.45,0,.25,1) 400ms infinite}
-  .flow-slip{animation:flow-land 600ms var(--ease-out) 1500ms backwards}
-  .flow-slip>*{animation:flow-ink 600ms var(--ease-out) 1500ms backwards}
+  .flow-go-a .flow-dot{animation:flow-go 7s cubic-bezier(.45,0,.25,1) 400ms infinite}
+  .flow-go-b .flow-dot{animation:flow-go 7s cubic-bezier(.45,0,.25,1) 1900ms infinite}
+  .flow-reply{animation:flow-land 600ms var(--ease-out) 1500ms backwards}
+  .flow-reply>*{animation:flow-ink 600ms var(--ease-out) 1500ms backwards}
   .flow-check{animation:flow-stamp 360ms var(--ease-out) 1900ms backwards}
 }
-@keyframes flow-go{0%{left:0;opacity:0}4%{opacity:1}22%{opacity:1}26%{left:calc(100% - 7px);opacity:0}100%{left:calc(100% - 7px);opacity:0}}
+@keyframes flow-go{0%{left:0;opacity:0}4%{opacity:1}18%{opacity:1}21%{left:calc(100% - 8px);opacity:0}100%{left:calc(100% - 8px);opacity:0}}
+@keyframes flow-go-v{0%{top:0;opacity:0}4%{opacity:1}18%{opacity:1}21%{top:calc(100% - 8px);opacity:0}100%{top:calc(100% - 8px);opacity:0}}
 @keyframes flow-land{from{transform:translateY(8px)}}
 @keyframes flow-ink{from{opacity:.35}}
 @keyframes flow-stamp{from{transform:scale(.6);opacity:.3}}
-
-/* placement: the stage hugs the drawing, sits on columns 7-12 (6-12 under 1100px, so the task label keeps to two lines) with a clear gutter after the copy, and spans from the
-   top of the lead paragraph to the bottom of the signup button (the .after notes below it are a constant 150px).
-   Under 1100px the copy column runs tall, so the stage just sits at the paragraph top at its own height. */
-@media (min-width:900px){
-  .lp .hero-stage{grid-column:6/span 7;margin:8px 0 0;padding:24px 28px;display:flex;align-items:center}
-}
-@media (min-width:1100px){
-  .lp .hero-row{align-items:stretch}
-  .lp .hero-stage{grid-column:7/span 6;margin-bottom:150px}
-}
+@container (max-width:560px){.flow-dot{animation-name:flow-go-v !important}}

@@ -1,40 +1,49 @@
+import { MarkIcon } from '@/components/site/Mark';
 import './hero-flow.css';
 
 /**
- * Hero visual: a local agent on one end, a hosted bot on the other. The task goes out
- * along the top line and its checked reply slip comes back along the bottom one.
- * Purely illustrative, so it is a single labelled image to assistive tech. The only
- * motion is CSS and the resting frame is the final state.
+ * Hero visual: Claude Code on a laptop sends a task through ReplySlip to a hosted bot, and the checked reply slip
+ * comes back through ReplySlip. Drawn on the same paper slip card the demo uses. Purely illustrative, so it is a
+ * single labelled image to assistive tech. The only motion is CSS and the resting frame is the final state.
  */
 export function HeroFlow() {
   return (
     <figure
-      className="flow"
+      className="slip flow"
       role="img"
-      aria-label="Claude Code on your laptop sends a task to a hosted bot in the cloud and gets back a checked reply slip"
+      aria-label="Claude Code on your laptop sends a task through ReplySlip to a hosted bot in the cloud and gets back a checked reply slip"
     >
-      <div className="flow-mid">
-        <Agent name="Claude Code" where="your laptop" />
-        <div className="flow-task">
-          <span className="flow-label">Review the signup migration</span>
-          <span className="flow-line">
-            <span className="flow-dot" />
-            <svg className="flow-head" viewBox="0 0 8 10" aria-hidden="true">
-              <path d="M0 0L8 5L0 10Z" />
-            </svg>
+      <div className="flow-row">
+        <span className="flow-label">
+          <span className="flow-tag">Task ·</span> Review the signup migration
+        </span>
+        <Agent name="Claude Code" where="your laptop" area="a" />
+        <span className="flow-go flow-go-a">
+          <span className="flow-dot" />
+          <Head />
+        </span>
+        <div className="flow-node flow-hub">
+          <span className="flow-name">
+            <MarkIcon size={22} />
+            ReplySlip
           </span>
+          <span className="flow-where">checks the reply</span>
         </div>
-        <Agent name="Hosted bot" where="the cloud" />
+        <span className="flow-go flow-go-b">
+          <span className="flow-dot" />
+          <Head />
+        </span>
+        <Agent name="Hosted bot" where="the cloud" area="b" />
       </div>
       <div className="flow-back">
         <svg className="flow-up" viewBox="0 0 10 8" aria-hidden="true">
           <path d="M5 0L10 8H0Z" />
         </svg>
-        <div className="flow-slip">
+        <div className="flow-reply">
           <svg className="flow-left" viewBox="0 0 8 10" aria-hidden="true">
             <path d="M8 0L0 5L8 10Z" />
           </svg>
-          <div className="flow-slip-head">
+          <div className="flow-reply-head">
             <svg className="flow-check" viewBox="0 0 16 16" aria-hidden="true">
               <circle cx="8" cy="8" r="8" />
               <path d="M4.6 8.3l2.2 2.2 4.6-4.8" />
@@ -55,10 +64,21 @@ export function HeroFlow() {
   );
 }
 
-function Agent({ name, where }: { name: string; where: string }) {
+function Head() {
   return (
-    <div className="flow-agent">
-      <span className="flow-name">{name}</span>
+    <svg className="flow-head" viewBox="0 0 8 10" aria-hidden="true">
+      <path d="M0 0L8 5L0 10Z" />
+    </svg>
+  );
+}
+
+function Agent({ name, where, area }: { name: string; where: string; area: string }) {
+  return (
+    <div className={`flow-node flow-agent flow-${area}`}>
+      <span className="flow-name">
+        <i className="flow-sq" />
+        {name}
+      </span>
       <span className="flow-where">{where}</span>
     </div>
   );
