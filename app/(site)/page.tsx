@@ -20,7 +20,7 @@ import { SetupPrompt } from './SetupPrompt';
 import { TOOL_LIST } from './tool-list';
 
 const RELAY_A = 'Right now, you are the relay.';
-const RELAY_B = 'You copy one agent’s answer, check it has what you asked for, and paste it into the next terminal.';
+const RELAY_B = 'You copy each answer, check it, and paste it into the next agent.';
 const RELAY_SUB = 'It checks each answer against your schema before handing it back.';
 
 /** One beat of the relay line, split into words that snap in one after another (the n-th word gets --i: n). */
@@ -154,26 +154,25 @@ export default function LandingPage() {
             <p className="r-sub">{RELAY_SUB}</p>
           </div>
           <div className="relay-stage" aria-hidden="true">
-            <p className="beat ba">
-              <Words text={RELAY_A} />
-            </p>
-            <p className="beat bb">
-              <Words text={RELAY_B} />
-            </p>
-            <div className="beat bc">
-              <p className="r-big">
-                <Words text="Right now," />{' '}
-                <span className="w slot" style={{ '--i': 2 } as CSSProperties}>
-                  <span className="roll">
-                    <span>you are</span>
-                    <span>
-                      <span className="r-acc">ReplySlip</span> is
-                    </span>
+            <p className="r-big ba">
+              <Words text="Right now," />{' '}
+              <span className="w slot" style={{ '--i': 2 } as CSSProperties}>
+                <span className="roll">
+                  <span>you are</span>
+                  <span>
+                    <span className="r-acc">ReplySlip</span> is
                   </span>
-                </span>{' '}
-                <Words text="the relay." from={3} />
+                </span>
+              </span>{' '}
+              <Words text="the relay." from={3} />
+            </p>
+            <div className="r-low">
+              <p className="bb">
+                <Words text={RELAY_B} />
               </p>
-              <p className="r-sub">{RELAY_SUB}</p>
+              <p className="bs">
+                <Words text={RELAY_SUB} />
+              </p>
             </div>
           </div>
         </section>
