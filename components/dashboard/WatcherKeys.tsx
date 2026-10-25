@@ -14,7 +14,7 @@ async function fetchWatcherKeys(): Promise<WatcherKey[]> {
  * Keys for `replyslip watch`, the local process that delivers wakes to herdr and Orca panes.
  * A key belongs to the workspace, not to one agent.
  */
-export function WatcherKeys({ origin }: { origin: string }) {
+export function WatcherKeys() {
   const uid = useId();
   const [keys, setKeys] = useState<WatcherKey[] | null>(null);
   const [name, setName] = useState('');
@@ -89,13 +89,12 @@ export function WatcherKeys({ origin }: { origin: string }) {
   }
 
   return (
-    <section className="dash-card" aria-labelledby="wk-h">
+    <section className="dash-card" id="watchers" aria-labelledby="wk-h">
       <div className="dash-card-head">
         <div>
           <h2 id="wk-h">Watchers</h2>
           <p className="dash-muted">
-            Agents set to <strong>Local agent via herdr or Orca</strong> are woken by <code translate="no">replyslip watch</code> running on their machine.
-            Give each machine its own watcher key. A key works for every local agent in this workspace.
+            Local agents need a watcher key. One key per machine covers all its local agents, and it’s shown once.
           </p>
         </div>
       </div>
@@ -133,9 +132,8 @@ export function WatcherKeys({ origin }: { origin: string }) {
       {created ? (
         <OnceSecret title={`Watcher key for ${created.name}. Copy it now: it won’t be shown again.`} secret={created.secret}>
           <p className="dash-secret-help">
-            On that machine, set <code translate="no">REPLYSLIP_URL={origin}</code> and <code translate="no">REPLYSLIP_WATCHER_KEY</code> to this key,
-            then run <code translate="no">replyslip watch</code>. For herdr agents, herdr 0.8.0 or newer must be on its PATH.
-            For Orca agents, Orca 1.4.199+ must be running with its CLI turned on (Settings → Experimental → CLI) and <code translate="no">orca</code> on its PATH.
+            Paste it to your agent; it starts the watcher in another herdr or Orca pane. That machine needs herdr 0.8.0+ or Orca 1.4.199+ with
+            its CLI on (Settings → Experimental → CLI).
           </p>
         </OnceSecret>
       ) : null}

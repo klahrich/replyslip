@@ -540,6 +540,12 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
 
         {mode === 'local' ? (
           <div className="dash-fields">
+            {storedMode === 'local' && agent.watcher_online ? null : (
+              <p className="dash-hint">
+                {storedMode === 'local' ? 'No watcher online. ' : ''}Local agents need a watcher key. Create one under <a href="#watchers">Watchers</a> and
+                paste it to {agent.name}.
+              </p>
+            )}
             <div className="dash-field">
               <label htmlFor={`${uid}-driver`}>Driver</label>
               <select
@@ -567,12 +573,11 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
               />
               {driver === 'orca' ? (
                 <p className="dash-hint" id={`${uid}-target-hint`}>
-                  Your agent shows this during setup (or run <code translate="no">echo $ORCA_PANE_KEY</code> in its terminal). The watcher needs a
-                  watcher key from the Watchers section below.
+                  Your agent shows this during setup (or run <code translate="no">echo $ORCA_PANE_KEY</code> in its Orca pane).
                 </p>
               ) : (
                 <p className="dash-hint" id={`${uid}-target-hint`}>
-                  The exact name of the herdr pane where {agent.name} runs. The watcher needs herdr 0.8.0 or newer on its machine and a watcher key from the Watchers section below.
+                  The exact name of the herdr pane where {agent.name} runs. The watcher needs herdr 0.8.0 or newer on its machine.
                 </p>
               )}
               {err('target')}

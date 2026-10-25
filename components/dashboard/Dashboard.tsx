@@ -111,7 +111,7 @@ export function Dashboard({
       ) : null}
       <JoinCodes codes={codes} agents={agents} origin={origin} paths={paths} onChange={refresh} />
       {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} /> : null}
-      <WatcherKeys origin={origin} />
+      <WatcherKeys />
       <Tasks refreshKey={tick} />
       <EmailPrefs initialOptIn={marketingOptIn} />
     </>
