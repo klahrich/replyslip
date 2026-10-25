@@ -67,26 +67,30 @@ html:not(.js) .verdict .wait::after{content:" Sending needs JavaScript."}
 .how{margin-top:var(--gap-section)}
 .how h2,.tools h2,.rules h2,.faq h2{font-size:var(--s-head);line-height:1.12}
 .how .intro{margin-top:16px;max-width:34em;color:var(--muted)}
-.pin{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:clamp(16px,2vw,32px);margin-top:40px}
-.steps{grid-column:1/span 5;list-style:none;margin:0;padding:0}
-.steps li{min-height:60vh;display:flex;flex-direction:column;justify-content:center}
-.steps li:first-child{min-height:50vh;justify-content:flex-start;padding-top:8vh}
-.steps .say{font-size:var(--s-lead);line-height:1.25;letter-spacing:-.018em;font-weight:500;color:var(--muted);transition:color 240ms ease}
-.steps li.on .say{color:var(--ink)}
-.steps .say::before{content:"";display:inline-block;width:10px;height:10px;background:var(--surface-2);margin-right:12px;vertical-align:.12em;transition:background-color 240ms ease}
-.steps li.on .say::before{background:var(--accent)}
+/* Each scene pairs words with a card: scene 0 is the intro and the live slip, scenes 1-3 are the steps with their call.
+   Stacked by default (no JS, reduced motion, under 900px wide, or a viewport too short to hold the tallest scene). With .fx, set by
+   LandingEffects, the section is a tall track (--track) and .how-pin sticks (--pin-top) showing one scene at a time; scrolling
+   crossfades to the next. Every scene shares one grid cell, so the pinned block keeps one height and the cards keep one top. */
+.scenes{margin-top:16px}
+.steps{list-style:none;margin:0;padding:0}
+.steps .scene{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:clamp(16px,2vw,32px);align-items:center;margin-top:clamp(56px,7vw,88px)}
+.step-txt{grid-column:1/span 5}
+.steps .say{font-size:var(--s-lead);line-height:1.25;letter-spacing:-.018em;font-weight:500;color:var(--ink)}
+.steps .say::before{content:"";display:inline-block;width:10px;height:10px;background:var(--accent);margin-right:12px;vertical-align:.12em}
 .steps .more{margin-top:12px;color:var(--muted)}
-.stage{grid-column:7/span 6;position:sticky;top:12vh;align-self:start;background:var(--paper);color:var(--paper-ink);border-radius:2px;padding:20px;min-height:min(520px,76vh)}
+.stage{grid-column:7/span 6;margin:0;background:var(--paper);color:var(--paper-ink);border-radius:2px;padding:20px}
 .stage .cap{display:flex;justify-content:space-between;gap:16px;font-size:var(--s-small);color:var(--paper-muted);margin-bottom:14px}
-.stage .cap #stage-cap{color:var(--paper-ink);font-weight:600}
-.frame{display:grid}
-.frame>pre{grid-area:1/1;margin:0;white-space:pre;overflow-x:auto;line-height:1.6;transition:opacity 280ms var(--ease-out),filter 280ms var(--ease-out),transform 280ms var(--ease-out)}
-.js .frame>pre{opacity:0;filter:blur(2px);transform:translateY(6px);pointer-events:none}
-.js .frame>pre.cur{opacity:1;filter:none;transform:none;pointer-events:auto}
+.stage .cap .who{color:var(--paper-ink);font-weight:600}
+.stage pre{margin:0;white-space:pre;overflow-x:auto;line-height:1.6}
 pre .k{color:var(--code-k)}pre .s{color:var(--code-s)}pre .c{color:var(--paper-muted)}pre .e{color:var(--err)}pre .ok{color:var(--ok)}
-html:not(.js) .stage{position:static}
-html:not(.js) .frame{gap:28px}
-html:not(.js) .frame>pre{grid-area:auto}
+.how.fx{height:var(--track,auto)}
+.fx .how-pin{position:sticky;top:var(--pin-top,0)}
+.fx .scenes{display:grid}
+.fx .steps{display:contents}
+.fx .scene{grid-area:1/1;margin:0;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity 320ms ease,transform 320ms var(--ease-out)}
+.fx .scene.on{opacity:1;transform:none;pointer-events:auto}
+.fx .steps .scene{align-content:start}
+.fx .stage{margin-top:16px}
 
 /* tools: comparison set as text (light field) */
 .tools{margin-top:var(--gap-section);background:var(--field);color:var(--field-ink);padding:clamp(72px,9vw,120px) 0}
@@ -170,19 +174,18 @@ html:not(.js) .frame>pre{grid-area:auto}
 
 /* phone */
 @media (max-width:640px){
-  .pin{grid-template-columns:1fr;margin-top:32px}
-  .steps,.stage{grid-column:1/-1}
-  .stage{grid-row:1;top:8px;z-index:2;padding:14px;min-height:0;max-height:52svh;overflow:hidden}
-  .frame>pre{font-size:.8125rem;white-space:pre-wrap;overflow-wrap:anywhere}
-  .steps li,.steps li:first-child{min-height:62svh;padding-top:0;justify-content:center}
+  .stage{padding:14px}
+  .stage pre{font-size:.8125rem;white-space:pre-wrap;overflow-wrap:anywhere}
   .steps .say{font-size:1.375rem}
-  html:not(.js) .stage{max-height:none}
   .slip{padding:14px 14px 16px}
   .slip-tear{margin-left:-14px;margin-right:-14px}
   .slip-task .w{flex-direction:column;gap:0}
   .slip-task .w dt{flex-basis:auto}
 }
-@media (max-width:899px){.how .pin{grid-template-columns:1fr}.how .steps,.how .stage{grid-column:1/-1}}
+@media (max-width:899px){
+  .steps .scene{grid-template-columns:1fr;row-gap:20px}
+  .step-txt,.stage{grid-column:1/-1}
+}
 
 /* motion: one authored moment (the verdict), small supporting transitions, nothing gates visibility */
 @media (prefers-reduced-motion:no-preference){
@@ -193,8 +196,7 @@ html:not(.js) .frame>pre{grid-area:auto}
 }
 @media (prefers-reduced-motion:reduce){
   .verdict pre,.verdict .pass{animation:fade 160ms ease}
-  .st span,.frame>pre,.pane,.btn,.btn-ink{transition-property:opacity,color,background-color}
-  .js .frame>pre{transform:none;filter:none}
+  .st span,.pane,.btn,.btn-ink{transition-property:opacity,color,background-color}
 }
 @keyframes settle{from{transform:translateY(10px)}}
 @keyframes print{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0 0 0 0)}}

@@ -18,6 +18,40 @@ import { HeroFlow } from './HeroFlow';
 import { SetupPrompt } from './SetupPrompt';
 import { TOOL_LIST } from './tool-list';
 
+/** How a task works: each step pairs its words with the example call in FRAMES at the same index. */
+const STEPS = [
+  {
+    say: 'First, the sender writes the slip.',
+    more: (
+      <>
+        <code translate="no" className="ic">
+          create_task
+        </code>{' '}
+        names one agent, says what to do, and attaches a JSON Schema for the answer.
+      </>
+    ),
+    cap: 'builder → relay',
+  },
+  {
+    say: 'Then a wrong answer goes back.',
+    more: (
+      <>
+        <code translate="no" className="ic">
+          complete_task
+        </code>{' '}
+        fails with the validation errors. Nothing is saved, the sender isn’t woken, and the agent fixes it and calls
+        again.
+      </>
+    ),
+    cap: 'reviewer → relay',
+  },
+  {
+    say: 'When it fits, the sender is woken.',
+    more: <>The result is saved on the task, and the sender reads it as JSON with the fields it asked for.</>,
+    cap: 'reviewer → relay',
+  },
+];
+
 export const metadata: Metadata = pageMeta('/');
 
 export default function LandingPage() {
@@ -99,64 +133,39 @@ export default function LandingPage() {
           </p>
         </section>
 
-        <section className="how wide" id="how-a-task-works" aria-labelledby="how-h">
-          <h2 id="how-h">
-            Agent to agent tasks, each with a verified reply slip.
-          </h2>
-          <div className="how-row">
-            <p className="intro">
-              One agent asks another for a review and says exactly what the answer must contain. The ids and agent names
-              below are examples.
-            </p>
-            <div className="how-try">
-              <SlipTry />
-            </div>
-          </div>
-          <div className="pin">
-            <ol className="steps">
-              <li className="on" data-step="0">
-                <p className="say">First, the sender writes the slip.</p>
-                <p className="more">
-                  <code translate="no" className="ic">
-                    create_task
-                  </code>{' '}
-                  names one agent, says what to do, and attaches a JSON Schema for the answer.
+        <section className="how wide" id="how-a-task-works" aria-labelledby="how-h" data-how>
+          <div className="how-pin">
+            <h2 id="how-h">
+              Agent to agent tasks, each with a verified reply slip.
+            </h2>
+            <div className="scenes">
+              <div className="scene how-row on" data-scene="0">
+                <p className="intro">
+                  One agent asks another for a review and says exactly what the answer must contain. The ids and agent
+                  names below are examples.
                 </p>
-              </li>
-              <li data-step="1">
-                <p className="say">Then a wrong answer goes back.</p>
-                <p className="more">
-                  <code translate="no" className="ic">
-                    complete_task
-                  </code>{' '}
-                  fails with the validation errors. Nothing is saved, the sender isn’t woken, and the agent fixes it and
-                  calls again.
-                </p>
-              </li>
-              <li data-step="2">
-                <p className="say">When it fits, the sender is woken.</p>
-                <p className="more">
-                  The result is saved on the task, and the sender reads it as JSON with the fields it asked for.
-                </p>
-              </li>
-            </ol>
-            <figure className="stage" data-ui aria-label="Example calls to the relay" style={{ margin: 0 }}>
-              <div className="cap">
-                <span id="stage-cap">builder → relay</span>
-                <span>example</span>
+                <div className="how-try">
+                  <SlipTry />
+                </div>
               </div>
-              <div className="frame">
-                {FRAMES.map((html, n) => (
-                  <pre
-                    key={n}
-                    translate="no"
-                    className={n === 0 ? 'cur' : undefined}
-                    data-frame={n}
-                    dangerouslySetInnerHTML={{ __html: html }}
-                  />
+              <ol className="steps">
+                {STEPS.map((step, n) => (
+                  <li className="scene" data-scene={n + 1} data-step={n} key={n}>
+                    <div className="step-txt">
+                      <p className="say">{step.say}</p>
+                      <p className="more">{step.more}</p>
+                    </div>
+                    <figure className="stage" data-ui aria-label="Example call to the relay">
+                      <div className="cap">
+                        <span className="who">{step.cap}</span>
+                        <span>example</span>
+                      </div>
+                      <pre translate="no" data-frame={n} dangerouslySetInnerHTML={{ __html: FRAMES[n] }} />
+                    </figure>
+                  </li>
                 ))}
-              </div>
-            </figure>
+              </ol>
+            </div>
           </div>
         </section>
 
