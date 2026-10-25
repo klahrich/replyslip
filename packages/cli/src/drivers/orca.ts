@@ -37,7 +37,9 @@ export type OrcaExecResult = {
 /** `execFile(file, args)` with `shell: false`. Tests pass a fake. */
 export type OrcaExecFile = (file: string, args: readonly string[], timeoutMs: number) => Promise<OrcaExecResult>;
 
-type TerminalRow = { handle: string; title: string };
+type TerminalRow = { handle: string; tabId: string; leafId: string };
+
+type ListedTerminals = { terminals: TerminalRow[]; sawLeafId: boolean; sawTerminal: boolean };
 
 type Receipt = {
   delivered: boolean;
@@ -106,13 +108,26 @@ export function createOrcaDriver(options?: {
   }
 
   async function listTerminals(): Promise<{ ok: true; terminals: TerminalRow[] } | { ok: false; error: string }> {
-    const result = await run(listArgs(), QUICK_TIMEOUT_MS);
+    const plain = await loadList(listArgs());
+    if (!plain.ok) return plain;
+    // Current hosts put tabId and leafId on each summary. Older JSON omits them.
+    if (plain.sawLeafId || !plain.sawTerminal) return { ok: true, terminals: plain.terminals };
+    const visual = await loadList(['terminal', 'list', '--include-visual-layouts', '--json']);
+    if (!visual.ok) return visual;
+    if (!visual.sawLeafId) return { ok: false, error: 'orca terminal list did not include tabId and leafId' };
+    return { ok: true, terminals: visual.terminals };
+  }
+
+  async function loadList(
+    args: readonly string[],
+  ): Promise<{ ok: true } & ListedTerminals | { ok: false; error: string }> {
+    const result = await run(args, QUICK_TIMEOUT_MS);
     if (isDown(result)) return { ok: false, error: ORCA_NOT_RUNNING };
     if (result.code !== 0 || result.timedOut) {
       return { ok: false, error: `orca terminal list exited ${result.code}` };
     }
     const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
-    return { ok: true, terminals: terminalsFrom(payload) };
+    return { ok: true, ...terminalsFrom(payload) };
   }
 
   async function send(handle: string, notice: string, retryRequest?: string, waitSubmit = true): Promise<OrcaExecResult> {
@@ -178,9 +193,9 @@ export function createOrcaDriver(options?: {
   async function submitReplacement(target: string, notice: string, staleHandle: string, waitSubmit: boolean): Promise<NudgeResult> {
     const listed = await listTerminals();
     if (!listed.ok) return { ok: false, error: listed.error };
-    const matches = matchTitle(listed.terminals, target);
+    const matches = matchPane(listed.terminals, target);
     if (matches.length !== 1 || matches[0].handle === staleHandle) {
-      return { ok: false, error: `Orca terminal handle for ${quote(target)} is stale` };
+      return { ok: false, error: `Orca pane ${quote(target)} handle is stale` };
     }
     return submit(matches[0].handle, target, notice, false, waitSubmit);
   }
@@ -201,9 +216,9 @@ export function createOrcaDriver(options?: {
     async nudge(target: string, notice: string): Promise<NudgeResult> {
       const listed = await listTerminals();
       if (!listed.ok) return { ok: false, error: listed.error };
-      const matches = matchTitle(listed.terminals, target);
-      if (matches.length === 0) return { ok: false, error: `no Orca terminal titled ${quote(target)}` };
-      if (matches.length > 1) return { ok: false, error: `more than one Orca terminal titled ${quote(target)}` };
+      const matches = matchPane(listed.terminals, target);
+      if (matches.length === 0) return { ok: false, error: `no Orca pane ${quote(target)}` };
+      if (matches.length > 1) return { ok: false, error: `more than one Orca pane ${quote(target)}` };
       return submit(matches[0].handle, target, notice, true);
     },
   };
@@ -213,9 +228,19 @@ function quote(target: string): string {
   return JSON.stringify(target);
 }
 
-function matchTitle(terminals: TerminalRow[], target: string): TerminalRow[] {
-  const wanted = target.trim();
-  return terminals.filter((terminal) => terminal.title === wanted);
+/** `ORCA_PANE_KEY` is `tabId:leafId`. One colon, no whitespace. Titles do not match. */
+function parsePaneKey(value: string): { tabId: string; leafId: string } | null {
+  const trimmed = value.trim();
+  const colon = trimmed.indexOf(':');
+  if (colon <= 0 || colon !== trimmed.lastIndexOf(':') || colon === trimmed.length - 1) return null;
+  if (/\s/.test(trimmed)) return null;
+  return { tabId: trimmed.slice(0, colon), leafId: trimmed.slice(colon + 1) };
+}
+
+function matchPane(terminals: TerminalRow[], target: string): TerminalRow[] {
+  const wanted = parsePaneKey(target);
+  if (!wanted) return [];
+  return terminals.filter((terminal) => terminal.tabId === wanted.tabId && terminal.leafId === wanted.leafId);
 }
 
 function isDown(result: OrcaExecResult): boolean {
@@ -311,21 +336,77 @@ function retryFlag(text: string): string | null {
   return match?.[1] ?? null;
 }
 
-function terminalsFrom(payload: unknown): TerminalRow[] {
+function terminalsFrom(payload: unknown): ListedTerminals {
   const root = record(payload);
-  if (!root) return [];
-  const result = record(root.result);
-  const list = arrayOf(result?.terminals) ?? arrayOf(root.terminals);
-  if (!list) return [];
+  const result = record(root?.result) ?? root;
+  const list = arrayOf(result?.terminals);
   const found: TerminalRow[] = [];
-  for (const item of list) {
-    const row = record(item);
-    if (!row) continue;
-    const handle = typeof row.handle === 'string' ? row.handle.trim() : '';
-    const title = typeof row.title === 'string' ? row.title.trim() : '';
-    if (handle && title) found.push({ handle, title });
+  const seen = new Set<string>();
+  let sawTerminal = false;
+  let sawLeafId = false;
+  if (list) {
+    for (const item of list) {
+      const row = record(item);
+      if (!row) continue;
+      const handle = typeof row.handle === 'string' ? row.handle.trim() : '';
+      if (!handle) continue;
+      sawTerminal = true;
+      const tabId = typeof row.tabId === 'string' ? row.tabId.trim() : '';
+      const leafId = typeof row.leafId === 'string' ? row.leafId.trim() : '';
+      if (tabId && leafId) {
+        sawLeafId = true;
+        pushTerminal(found, seen, { handle, tabId, leafId });
+        continue;
+      }
+      const recorded = typeof row.recordedPaneKey === 'string' ? parsePaneKey(row.recordedPaneKey) : null;
+      if (recorded) {
+        sawLeafId = true;
+        pushTerminal(found, seen, { handle, tabId: recorded.tabId, leafId: recorded.leafId });
+      }
+    }
   }
-  return found;
+  const layouts = arrayOf(result?.visualLayouts);
+  if (layouts) {
+    for (const layout of layouts) {
+      walkVisual(record(layout)?.root, found, seen, (hasLeaf) => {
+        sawTerminal = true;
+        if (hasLeaf) sawLeafId = true;
+      });
+    }
+  }
+  return { terminals: found, sawLeafId, sawTerminal };
+}
+
+function pushTerminal(found: TerminalRow[], seen: Set<string>, row: TerminalRow) {
+  const key = `${row.handle}\0${row.tabId}\0${row.leafId}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  found.push(row);
+}
+
+function walkVisual(
+  node: Record<string, unknown> | null,
+  found: TerminalRow[],
+  seen: Set<string>,
+  note: (hasLeaf: boolean) => void,
+) {
+  if (!node) return;
+  if (node.type === 'terminal') {
+    const handle = typeof node.handle === 'string' ? node.handle.trim() : '';
+    const tabId = typeof node.tabId === 'string' ? node.tabId.trim() : '';
+    const leafId = typeof node.leafId === 'string' ? node.leafId.trim() : '';
+    note(Boolean(leafId));
+    if (handle && tabId && leafId) pushTerminal(found, seen, { handle, tabId, leafId });
+    return;
+  }
+  if (node.type === 'split' || node.type === 'pane-split') {
+    walkVisual(record(node.first), found, seen, note);
+    walkVisual(record(node.second), found, seen, note);
+    return;
+  }
+  const tabs = arrayOf(node.tabs);
+  if (!tabs) return;
+  for (const tab of tabs) walkVisual(record(record(tab)?.panes), found, seen, note);
 }
 
 function parseJson(text: string): unknown {

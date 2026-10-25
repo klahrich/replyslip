@@ -48,14 +48,27 @@ describe('local delivery', () => {
       method: 'PUT',
       cookie: session.cookie,
       params: { id: agent.id },
-      body: { mode: 'local', driver: 'orca', target: 'Reviewer agent' },
+      body: { mode: 'local', driver: 'orca', target: 'tab_a:11111111-1111-4111-8111-111111111111' },
     });
     expect(orca.status).toBe(200);
     expect(orca.data.agent.delivery).toMatchObject({
       mode: 'local',
       driver: 'orca',
+      target: 'tab_a:11111111-1111-4111-8111-111111111111',
+      pane: 'tab_a:11111111-1111-4111-8111-111111111111',
+    });
+
+    const orcaTitle = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
+      method: 'PUT',
+      cookie: session.cookie,
+      params: { id: agent.id },
+      body: { mode: 'local', driver: 'orca', target: 'Reviewer agent' },
+    });
+    expect(orcaTitle.status).toBe(200);
+    expect(orcaTitle.data.agent.delivery).toMatchObject({
+      mode: 'local',
+      driver: 'orca',
       target: 'Reviewer agent',
-      pane: 'Reviewer agent',
     });
 
     const bad = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
