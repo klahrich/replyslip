@@ -546,6 +546,11 @@ issues:  users.email loses its
             </Link>
           </li>
           <li>
+            <Link className="link" href="/compare/agent-relay">
+              ReplySlip vs Agent Relay
+            </Link>
+          </li>
+          <li>
             <a className="link" href="https://github.com/klahrich/replyslip">
               GitHub
             </a>

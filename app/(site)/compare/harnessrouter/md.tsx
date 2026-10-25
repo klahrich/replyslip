@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-/** A small Markdown reader for this article: headings, paragraphs, lists, one table, and inline bold, code and links. */
+/** A small Markdown reader for the /compare articles: headings, paragraphs, lists, one table, and inline bold, code and links. */
 export type Block =
   | { t: 'h1' | 'h2' | 'h3' | 'p'; text: string }
   | { t: 'ul' | 'ol'; items: string[] }

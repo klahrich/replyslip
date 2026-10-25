@@ -1,4 +1,4 @@
-/* /compare/harnessrouter: an article on the site tokens. Prose holds to a reading column; the table may use the 1080 cap. */
+/* /compare pages (harnessrouter, agent-relay): an article on the site tokens. Prose holds to a reading column; the table may use the 1080 cap. */
 .cmp{--m-edge:clamp(20px,3.2vw,48px);--m:max(var(--m-edge),calc((100vw - 1080px) / 2))}
 .cmp-body{margin:0 var(--m);max-width:1080px}
 .cmp-body>:is(h1,h2,h3,p,ul,ol),.cmp-faq>*{max-width:700px}
@@ -45,3 +45,8 @@
 .cmp-faq h2+.cmp-q{margin-top:24px}
 .cmp-faq .cmp-q h3{margin-top:0}
 .cmp .foot-simple{padding-left:var(--m);padding-right:var(--m)}
+
+/* Other comparisons: a small link list between the article and the footer */
+.cmp-more{margin:clamp(56px,7vw,88px) var(--m) 0;max-width:700px;padding-top:20px;box-shadow:inset 0 1px 0 var(--surface-2)}
+.cmp-more h2{font-size:var(--s-small);line-height:1.4;font-weight:600;letter-spacing:0}
+.cmp-more ul{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:8px 24px;font-size:var(--s-small)}
