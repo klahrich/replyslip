@@ -1,0 +1,59 @@
+/* Hero visual (HeroFlow): agent chips on the stage, thin connector lines, one paper reply slip.
+   Lines are CSS borders anchored to the chip centres via --chip, so the drawing holds at any width. */
+.flow{--chip:7.75rem;--line:color-mix(in srgb,var(--muted) 55%,transparent);margin:0;padding:4px 0 6px;font-size:var(--s-small);line-height:1.35}
+.flow-agent{position:relative;z-index:1;width:var(--chip);flex:0 0 auto;display:flex;flex-direction:column;gap:2px;padding:10px 12px;background:var(--bg);border:1px solid var(--surface-2);border-radius:var(--r)}
+.flow-name{font-weight:600;color:var(--ink);white-space:nowrap}
+.flow-name::before{content:"";display:inline-block;width:8px;height:8px;margin-right:8px;background:var(--accent);vertical-align:.08em}
+.flow-agent.idle .flow-name::before{background:var(--surface-2)}
+.flow-where{color:var(--muted);padding-left:16px}
+
+/* hosted bot: on the same relay, joined to both agents by a quiet dashed bracket */
+.flow-top{position:relative;display:flex;justify-content:center}
+.flow-top::before{content:"";position:absolute;left:calc(var(--chip) / 2);right:calc(var(--chip) / 2);top:50%;bottom:-24px;border:1px dashed var(--line);border-bottom:0}
+.flow-mid{display:flex;align-items:center;margin-top:24px}
+
+/* the task: label over a sage line with an arrowhead into Codex */
+.flow-task{position:relative;flex:1;min-width:0;align-self:stretch;display:flex;align-items:center;padding:0 12px}
+.flow-label{position:absolute;left:12px;right:12px;bottom:calc(50% + 7px);color:var(--ink);text-align:center;text-wrap:balance}
+.flow-line{position:relative;flex:1;height:1px;background:var(--accent)}
+.flow-head{position:absolute;right:-10px;top:-5px;width:8px;height:10px;fill:var(--accent)}
+.flow-dot{position:absolute;left:0;top:-3px;width:7px;height:7px;border-radius:50%;background:var(--accent);opacity:0}
+
+/* the reply: a line back from Codex to Claude Code, the slip riding on it */
+.flow-back{position:relative;display:flex;justify-content:center;padding-top:22px}
+.flow-back::before{content:"";position:absolute;left:calc(var(--chip) / 2);right:calc(var(--chip) / 2);top:0;bottom:calc(50% - 11px);border:1px solid var(--line);border-top:0}
+.flow-up{position:absolute;left:calc(var(--chip) / 2 - 4.5px);top:-1px;width:10px;height:8px;fill:var(--muted)}
+.flow-slip{position:relative;background:var(--paper);color:var(--paper-ink);border:1px solid var(--paper-edge);border-radius:2px;padding:10px 14px 12px;box-shadow:0 1px 0 rgba(0,0,0,.18)}
+.flow-slip-head{display:flex;align-items:center;gap:8px;color:var(--paper-muted)}
+.flow-slip-head b{color:var(--paper-ink);font-weight:600}
+.flow-check{width:16px;height:16px;flex:0 0 auto}
+.flow-check circle{fill:var(--accent)}
+.flow-check path{fill:none;stroke:var(--paper-ink);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.flow-tear{height:8px;margin:8px -14px 8px;background:radial-gradient(circle at 4px 4px,var(--perf) 2px,transparent 2.5px) 0 0/10px 8px repeat-x}
+.flow-slip code{display:block;white-space:nowrap;font-size:.8125rem}
+.flow-slip .k{color:var(--code-k)}.flow-slip .s{color:var(--code-s)}
+
+@media (max-width:640px){
+  .flow{--chip:6.75rem;font-size:.8125rem}
+  .flow-agent{padding:8px 10px}
+  .flow-name::before{margin-right:6px;width:7px;height:7px}
+  .flow-where{padding-left:13px}
+  .flow-task{padding:0 8px}
+  .flow-label{left:4px;right:4px}
+  .flow-mid{margin-top:30px}
+  .flow-top::before{bottom:-30px}
+  .flow-slip code{font-size:.75rem}
+}
+
+/* motion: the task dot travels now and then; the slip settles once (card stays opaque, only its ink fades up).
+   Resting state is the final frame, which is all reduced motion shows. */
+@media (prefers-reduced-motion:no-preference){
+  .flow-dot{animation:flow-go 7s cubic-bezier(.45,0,.25,1) 400ms infinite}
+  .flow-slip{animation:flow-land 600ms var(--ease-out) 1500ms backwards}
+  .flow-slip>*{animation:flow-ink 600ms var(--ease-out) 1500ms backwards}
+  .flow-check{animation:flow-stamp 360ms var(--ease-out) 1900ms backwards}
+}
+@keyframes flow-go{0%{left:0;opacity:0}4%{opacity:1}22%{opacity:1}26%{left:calc(100% - 7px);opacity:0}100%{left:calc(100% - 7px);opacity:0}}
+@keyframes flow-land{from{transform:translateY(8px)}}
+@keyframes flow-ink{from{opacity:.35}}
+@keyframes flow-stamp{from{transform:scale(.6);opacity:.3}}

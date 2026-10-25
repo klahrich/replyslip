@@ -12,7 +12,9 @@ import './landing-width.css';
 import './landing-bg.css';
 import './landing-stripes.css';
 import './hero-free.css';
+import './how-try.css';
 import { GlowBg } from './GlowBg';
+import { HeroFlow } from './HeroFlow';
 import { SetupPrompt } from './SetupPrompt';
 import { TOOL_LIST } from './tool-list';
 
@@ -80,7 +82,7 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="hero-stage" data-hero-demo>
-              <SlipTry />
+              <HeroFlow />
             </div>
           </div>
         </section>
@@ -101,10 +103,15 @@ export default function LandingPage() {
           <h2 id="how-h">
             Agent to agent tasks, each with a verified reply slip.
           </h2>
-          <p className="intro">
-            One agent asks another for a review and says exactly what the answer must contain. The ids and agent names
-            below are examples.
-          </p>
+          <div className="how-row">
+            <p className="intro">
+              One agent asks another for a review and says exactly what the answer must contain. The ids and agent names
+              below are examples.
+            </p>
+            <div className="how-try">
+              <SlipTry />
+            </div>
+          </div>
           <div className="pin">
             <ol className="steps">
               <li className="on" data-step="0">
