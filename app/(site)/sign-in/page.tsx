@@ -4,6 +4,7 @@ import { currentUser } from '@/components/dashboard/session';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { SignInForm } from '@/components/site/SignInForm';
 import { pageMeta } from '@/components/site/seo';
+import '@/components/site/site-width.css';
 import '@/components/site/signin.css';
 
 export const metadata: Metadata = {
@@ -29,7 +30,7 @@ export default async function SignInPage({
   const sent = sp.sent === '1';
 
   return (
-    <div className="si">
+    <div className="si site-w">
       <a className="skip" href="#main">
         Skip to content
       </a>
