@@ -114,12 +114,12 @@ echo "$ORCA_PANE_KEY"
 
 If \`ORCA_PANE_KEY\` is unset, stop. Ask the human to run you inside an Orca terminal. Do not guess a key, a title, or a handle.
 
-Tell the human these exact dashboard values, and only these for delivery:
+Tell the human these exact dashboard values, and only these for delivery. The driver dropdown labels them this way:
 
-- driver \`orca\`
-- target \`<the value of ORCA_PANE_KEY>\`
+- driver **Orca** (value \`orca\`)
+- **Pane** \`<the value of ORCA_PANE_KEY>\`
 
-The human copies them in. The dashboard field is **Pane** for both drivers. Inside that terminal, \`echo $ORCA_PANE_KEY\` prints the same value. Enable the CLI first if it is still off: Orca → Settings → Experimental → CLI. \`orca status --json\` confirms it. \`orca\` must be on \`PATH\`, or set \`REPLYSLIP_ORCA_BIN\` to the binary. Orca 1.4.199 or newer is the recommended minimum.
+The human copies them in. The dashboard field is **Pane** for both drivers. For herdr the same dropdown is labeled **herdr** (value \`herdr\`). Inside your Orca pane, \`echo $ORCA_PANE_KEY\` prints the same value. Enable the CLI first if it is still off: Orca → Settings → Experimental → CLI. \`orca status --json\` confirms it. \`orca\` must be on \`PATH\`, or set \`REPLYSLIP_ORCA_BIN\` to the binary. Orca 1.4.199 or newer is the recommended minimum.
 
 The pane key is Orca's own pane identity. A current key is a tab id plus a UUID leaf id. Those ids are stored with the workspace layout and come back after an Orca restart. The handle does not. On each wake the watcher runs \`orca terminal list --json\` and sends only when exactly one terminal has that \`tabId\` and \`leafId\`. That JSON includes both fields on each terminal. If a host omits \`leafId\`, the watcher repeats the list with \`--include-visual-layouts\`. Zero matches, or more than one match, are not delivered.
 
@@ -202,7 +202,7 @@ Any other MCP client:
 
 ### 4. Check for a watcher before you ask for a key
 
-Do this on herdr and on Orca, before you create a watcher key and before you ask the human for one. One watcher on this machine delivers every local agent in the workspace. A second \`replyslip watch\` only wastes polls.
+Do this on herdr and on Orca, before you create a watcher key and before you ask the human for one. One watcher key per machine covers every local agent on that machine. The dashboard shows the secret only once, when the key is created, so do not ask the human to open an old key again. One \`replyslip watch\` on this machine delivers all of those agents. A second watch only wastes polls.
 
 1. Run the status command. It reads \`~/.replyslip/watcher.lock\` and does not need a key:
 
@@ -214,7 +214,7 @@ node "$HOME/.replyslip/replyslip.mjs" watch --status
 
 Read the status line, then decide:
 
-- \`A ReplySlip watcher is running on this machine (pid N); it delivers every local agent in this workspace.\` means a watcher is already running here. The lock holds that pid and the time it started. Skip the watcher key. Skip starting \`replyslip watch\`. Ask the human only to set this agent's delivery (the dashboard step below, and not the watcher-key step). \`watcher_online\` may still be false for a few seconds, until that watcher polls. Do not start another watcher while this line is printed.
+- \`A ReplySlip watcher is running on this machine (pid N); it delivers every local agent in this workspace.\` means a watcher is already running here. The lock holds that pid and the time it started. Skip the watcher key. Skip starting \`replyslip watch\`. The key already on this machine covers this agent, and the dashboard will not show that secret again. Ask the human only to set this agent's delivery (the dashboard step below, and not the watcher-key step). \`watcher_online\` may still be false for a few seconds, until that watcher polls. Do not start another watcher while this line is printed.
 - \`No ReplySlip watcher is running on this machine.\` together with \`watcher_online: true\` means some watcher in the workspace has polled, and it is not this machine. A watcher only types into panes on the machine where it runs. Continue with the watcher key and the watch steps below.
 - \`No ReplySlip watcher is running on this machine.\` together with \`watcher_online: false\` means this machine has no watcher. Continue with the watcher key and the watch steps below.
 
@@ -226,14 +226,14 @@ Stop here. Tell the human the ReplySlip name and the target from the herdr or Or
 
 If step 4 found a watcher already running on this machine, ask for delivery only:
 
-1. On the dashboard, open this agent and choose **Local agent via herdr or Orca**. The field is **Pane** for both drivers. For herdr, leave the driver on **herdr** and type the herdr agent name. That field is not the pane id. \`w1:p1\` will be rejected. For Orca, set the driver to **orca** and paste the pane key from above (\`echo $ORCA_PANE_KEY\` inside that terminal). Do not type a terminal title. Save.
+1. On the dashboard, open this agent and choose **Local agent via herdr or Orca**. The field is **Pane** for both drivers. For herdr, choose **herdr** (value \`herdr\`) and type the herdr agent name. That field is not the pane id. \`w1:p1\` will be rejected. For Orca, choose **Orca** (value \`orca\`) and paste the pane key from above (\`echo $ORCA_PANE_KEY\` inside your Orca pane). Do not type a terminal title. Save.
 
 Then skip sections 6 and 7 and go to the test wake. Do not ask for a watcher key.
 
 If step 4 found no watcher on this machine, ask the human to do both of these, and to wait until both are done:
 
-1. On the dashboard, open this agent and choose **Local agent via herdr or Orca**. The field is **Pane** for both drivers. For herdr, leave the driver on **herdr** and type the herdr agent name. That field is not the pane id. \`w1:p1\` will be rejected. For Orca, set the driver to **orca** and paste the pane key from above (\`echo $ORCA_PANE_KEY\` inside that terminal). Do not type a terminal title. Save.
-2. In **Watchers**, create a watcher key and give you the secret privately. A watcher key (\`rsw_\`) polls for every local agent in the workspace. Your agent key cannot poll.
+1. On the dashboard, open this agent and choose **Local agent via herdr or Orca**. The field is **Pane** for both drivers. For herdr, choose **herdr** (value \`herdr\`) and type the herdr agent name. That field is not the pane id. \`w1:p1\` will be rejected. For Orca, choose **Orca** (value \`orca\`) and paste the pane key from above (\`echo $ORCA_PANE_KEY\` inside your Orca pane). Do not type a terminal title. Save.
+2. In **Watchers**, create one watcher key for this machine and give you the secret privately. The dashboard shows that secret only once. That one key covers every local agent on this machine. A watcher key (\`rsw_\`) polls for them. Your agent key cannot poll.
 
 Do not invent a delivery setting. Your agent key cannot change delivery, so a stolen key cannot redirect wakes.
 
@@ -268,7 +268,7 @@ herdr pane run <new-pane-id> "node \\"$HOME/.replyslip/replyslip.mjs\\" watch --
 
 The new pane id is \`.result.pane.pane_id\` from the split. Use the absolute script path and the absolute key-file path.
 
-On Orca, run that same \`node ... watch --key-file\` command in another terminal. Do not pass a driver flag, and do not store a terminal handle in ReplySlip. \`orca\` must be on \`PATH\`, or export \`REPLYSLIP_ORCA_BIN\` to the binary, in the environment of that process. Enable the CLI under Settings → Experimental → CLI. Orca 1.4.199 or newer is the recommended minimum.
+On Orca, run that same \`node ... watch --key-file\` command in another Orca pane. Do not pass a driver flag, and do not store a terminal handle in ReplySlip. \`orca\` must be on \`PATH\`, or export \`REPLYSLIP_ORCA_BIN\` to the binary, in the environment of that process. Enable the CLI under Settings → Experimental → CLI. Orca 1.4.199 or newer is the recommended minimum.
 
 \`watch\` creates \`~/.replyslip/watcher.lock\` with this process's pid and start time. If a live process already holds that lock, the new command prints \`A ReplySlip watcher is already running on this machine (pid N); it delivers every local agent in this workspace.\` and exits 0. Stop there. That watcher delivers this agent too. The lock is removed on SIGINT, SIGTERM, and exit. A lock left by a dead pid is stale, and the next \`watch\` takes it over.
 
@@ -774,7 +774,7 @@ Omitting \`url\` keeps the stored webhook URL. Omitting \`auth.token\`, \`auth.s
 
 Tokens, HMAC secrets, and header values are encrypted at rest with \`ENCRYPTION_KEY\`. Webhook URLs must be public http(s) unless \`REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1\`.
 
-For herdr and every driver other than \`orca\`, \`target\` is a single line of 1–200 characters with no control characters. When the driver is \`herdr\`, the herdr driver also requires a pane name of 1–64 characters: letters, numbers, \`.\`, \`_\`, \`-\`. The dashboard field is **Pane**. Find that name with \`herdr agent get\`, not the pane id. The herdr driver needs herdr 0.8.0 or newer on \`PATH\` on the watcher machine. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. When the driver is \`orca\`, the server requires \`/^[^\s:]+:[^\s:]+$/\`, no control characters, and at most 200 characters. The issue message says the Orca pane key looks like tabId:leafId. The dashboard field is **Pane**, the same label as herdr. The agent prints the key during setup with \`echo $ORCA_PANE_KEY\` inside that terminal. The watcher matches \`tabId\` and \`leafId\` from \`orca terminal list --json\`. \`orca status --json\` checks that the CLI is up. \`orca\` must be on \`PATH\`, or \`REPLYSLIP_ORCA_BIN\` must name the binary. Orca 1.4.199 or newer is the recommended minimum. The watch command is the same as for herdr. ReplySlip does not bundle herdr or Orca, does not modify them, and does not depend on them. Webhook and \`none\` do not need either binary.
+For herdr and every driver other than \`orca\`, \`target\` is a single line of 1–200 characters with no control characters. When the driver is \`herdr\`, the herdr driver also requires a pane name of 1–64 characters: letters, numbers, \`.\`, \`_\`, \`-\`. The dashboard field is **Pane**. Find that name with \`herdr agent get\`, not the pane id. The herdr driver needs herdr 0.8.0 or newer on \`PATH\` on the watcher machine. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. When the driver is \`orca\`, the server requires \`/^[^\s:]+:[^\s:]+$/\`, no control characters, and at most 200 characters. The issue message says the Orca pane key looks like tabId:leafId. The dashboard field is **Pane**, the same label as herdr. The agent prints the key during setup with \`echo $ORCA_PANE_KEY\` inside your Orca pane. The watcher matches \`tabId\` and \`leafId\` from \`orca terminal list --json\`. \`orca status --json\` checks that the CLI is up. \`orca\` must be on \`PATH\`, or \`REPLYSLIP_ORCA_BIN\` must name the binary. Orca 1.4.199 or newer is the recommended minimum. The watch command is the same as for herdr. ReplySlip does not bundle herdr or Orca, does not modify them, and does not depend on them. Webhook and \`none\` do not need either binary.
 
 ### POST ${line('/api/v1/agents/:id/test-wake')}
 
