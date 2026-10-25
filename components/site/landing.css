@@ -62,25 +62,46 @@ html:not(.js) .verdict .wait::after{content:" Sending needs JavaScript."}
 .statement{margin-top:var(--gap-section);background:var(--field);color:var(--field-ink);padding:clamp(72px,10vw,140px) var(--m)}
 .hero+.statement{margin-top:clamp(64px,8vw,112px)}
 .statement p{font-size:clamp(1.375rem,1.1rem + 1vw,2.125rem);line-height:1.3;letter-spacing:-.02em;font-weight:500;max-width:30em}
-/* the relay line: three beats. Static and complete by default (no JS, reduced motion); with motion, LandingEffects
-   sets .wait until the block is in view, then .play runs the words in, draws the strike over "you", then beat 3.
-   Timing per beat: --b start, --st stagger between words. */
+/* the relay line. .relay-rest is the resting state and the only copy screen readers get: the problem in small type,
+   then "Right now, ReplySlip is the relay." and its subline. With motion (LandingEffects adds .anim), the rest turns
+   transparent but stays in flow, and .relay-stage plays on top of it in the same grid cell, so the block keeps one
+   height in every state and nothing below it moves. .play starts it once the block is half in view: line 1 snaps in,
+   the problem line follows below it, "you are" rolls up to "ReplySlip is", then the subline takes the problem's place. */
 .relay{text-align:center}
-.relay .beat{max-width:30em;margin-inline:auto}
-.relay .b1{font-size:var(--s-head);line-height:1.15;letter-spacing:-.022em;color:var(--field-ink);--b:0ms;--st:60ms}
-.relay .b2{margin-top:18px;max-width:36em;font-size:var(--s-body);line-height:1.5;letter-spacing:0;font-weight:400;color:var(--field-muted);--b:820ms;--st:25ms}
-.relay .b3{margin-top:clamp(28px,3.4vw,40px);max-width:26em;color:var(--accent);--b:2620ms;--st:40ms}
-.relay .w{display:inline-block}
-.relay .strike{position:relative}
-.relay .strike::after{content:"";position:absolute;left:-2px;right:-2px;top:56%;height:2px;background:var(--accent);transform-origin:left center}
+.relay p{margin-inline:auto}
+.relay .r-big{font-size:clamp(1.875rem,1.3rem + 1.8vw,2.75rem);line-height:1.2;letter-spacing:-.025em;font-weight:600;max-width:20em}
+.relay .r-acc{color:var(--accent)}
+.relay .r-prob{max-width:46em;margin-bottom:clamp(20px,2.4vw,28px);font-size:var(--s-body);line-height:1.5;letter-spacing:0;font-weight:400;color:var(--field-muted)}
+.relay .r-sub,.relay .bb,.relay .bs{margin-top:clamp(14px,1.6vw,20px);max-width:32em;font-size:var(--s-body);line-height:1.5;letter-spacing:0;font-weight:400;color:var(--field-muted)}
+.relay-stage{display:none}
 @media (prefers-reduced-motion:no-preference){
-  .relay.wait .w{opacity:0;transform:translateY(8px)}
-  .relay.wait .strike::after{transform:scaleX(0)}
-  .relay.play .w{animation:rise 400ms var(--ease-out) both;animation-delay:calc(var(--b) + var(--i) * var(--st))}
-  .relay.play .strike::after{animation:draw 350ms var(--ease-out) 2200ms both}
+  .relay.anim{display:grid}
+  .relay.anim>*{grid-area:1/1}
+  .relay.anim .relay-rest{opacity:0;pointer-events:none;user-select:none}
+  .relay.anim .relay-stage{display:flex;flex-direction:column;justify-content:center}
+  .relay.anim:not(.play) .relay-stage{visibility:hidden}
+  /* below line 1: the problem, then the subline, stacked in one cell, both in the subline style */
+  .relay .r-low{display:grid;align-items:start}
+  .relay .r-low>p{grid-area:1/1}
+  .relay .w{display:inline-block}
+  /* the slot: one line tall, as wide as its current words (--w1, --w2 measured by LandingEffects) */
+  .relay .slot{overflow:hidden;overflow:visible clip;vertical-align:top;height:1.2em;width:var(--w1,auto)}
+  .relay .roll{display:flex;flex-direction:column;align-items:center;gap:.4em}
+  .relay .roll>span{height:1.2em;white-space:nowrap}
+  /* timeline (ms): line 1 in 0. Problem in 1300. Slot widens 3450, roll 3500. Problem out 4100, subline in 4300.
+     --b start, --st stagger between words */
+  .relay .ba{--b:0ms;--st:30ms}
+  .relay .bb{--b:1300ms;--st:25ms}
+  .relay .bs{--b:4300ms;--st:15ms}
+  .relay.play .w{animation:snap 300ms cubic-bezier(.2,.9,.2,1) both;animation-delay:calc(var(--b) + var(--i) * var(--st))}
+  .relay.play .slot{animation:snap 300ms cubic-bezier(.2,.9,.2,1) calc(var(--b) + 2 * var(--st)) both,slot-w 200ms cubic-bezier(.2,.9,.2,1) 3450ms forwards}
+  .relay.play .roll{animation:roll 350ms cubic-bezier(.2,.9,.2,1) 3500ms forwards}
+  .relay.play .bb{animation:beat-out 250ms ease-in 4100ms forwards}
 }
-@keyframes rise{from{opacity:0;transform:translateY(8px)}}
-@keyframes draw{from{transform:scaleX(0)}}
+@keyframes snap{from{opacity:0;transform:translateY(16px);filter:blur(6px)}}
+@keyframes beat-out{to{opacity:0;transform:translateY(-10px);filter:blur(4px)}}
+@keyframes roll{to{transform:translateY(-1.6em)}}
+@keyframes slot-w{to{width:var(--w2,auto)}}
 
 /* how a task works */
 .how{margin-top:var(--gap-section)}
