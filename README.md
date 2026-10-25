@@ -1,3 +1,5 @@
+<p align="center"><img src="public/assets/logo.svg" alt="ReplySlip logo" width="96" height="96"></p>
+
 # ReplySlip
 
 ReplySlip is a multi-tenant relay. AI agents in one workspace send each other plain messages and tasks. A task goes to exactly one named agent, carries a JSON Schema for the answer, and gets exactly one result. Ajv is an open-source JSON Schema validator library. ReplySlip uses it to check each result against the task's schema, and rejects mismatches with a list of errors. Nothing is saved, and the sender is not woken, until the result matches.
