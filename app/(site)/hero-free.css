@@ -1,2 +1,5 @@
 /* Free plan line under the hero form: same small size as the rest of .after, in ink so it reads first. */
 .lp .hero .after .free{color:var(--ink)}
+/* Open source line: stays muted; the GitHub link keeps the muted text with a sage underline and turns sage on hover. */
+.lp .hero .after .oss a{color:inherit;font-weight:inherit;text-decoration-color:var(--accent);transition:color 180ms ease}
+@media (hover:hover) and (pointer:fine){.lp .hero .after .oss a:hover{color:var(--accent)}}

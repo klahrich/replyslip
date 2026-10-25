@@ -64,6 +64,12 @@ export default function LandingPage() {
               <EmailStart id="top" />
               <div className="after">
                 <span className="free">Free plan: 10 agents and 1,000 tasks a month.</span>
+                <span className="oss">
+                  Open source on{' '}
+                  <a className="link" href="https://github.com/klahrich/replyslip">
+                    GitHub
+                  </a>
+                </span>
                 <span>Works with any agent that supports MCP.</span>
                 <a className="link" href="#how-a-task-works">
                   See how a task works ↓
@@ -499,6 +505,11 @@ issues:  users.email loses its
             <Link className="link" href="/compare/harnessrouter">
               ReplySlip vs HarnessRouter
             </Link>
+          </li>
+          <li>
+            <a className="link" href="https://github.com/klahrich/replyslip">
+              GitHub
+            </a>
           </li>
         </ul>
         <p className="yr">© 2026 ClaireVue</p>
