@@ -135,6 +135,7 @@ export function WatcherKeys({ origin }: { origin: string }) {
           <p className="dash-secret-help">
             On that machine, set <code translate="no">REPLYSLIP_URL={origin}</code> and <code translate="no">REPLYSLIP_WATCHER_KEY</code> to this key,
             then run <code translate="no">replyslip watch</code>. For herdr agents, herdr 0.8.0 or newer must be on its PATH.
+            For Orca agents, a recent Orca must be running with its CLI turned on (Settings → Experimental → CLI) and <code translate="no">orca</code> on its PATH.
           </p>
         </OnceSecret>
       ) : null}
