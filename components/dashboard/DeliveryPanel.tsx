@@ -13,6 +13,8 @@ type HeaderRow = { key: number; name: string; value: string };
 /** Mirrors the server's rules in lib/delivery.ts so most mistakes are caught before a round trip. */
 const PANE_NAME = /^[A-Za-z0-9._-]{1,64}$/;
 const MAX_TARGET = 200;
+/** `$ORCA_PANE_KEY` is `tabId:leafId`: one colon, no whitespace, both sides non-empty (same rule as the CLI's orca driver). */
+const ORCA_PANE_KEY = /^[^\s:]+:[^\s:]+$/;
 const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
 const BLOCKED_HEADERS = new Set(['host', 'content-length', 'transfer-encoding', 'connection', 'cookie', 'content-type', 'authorization']);
 const MAX_HEADERS = 20;
@@ -129,8 +131,9 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
         if (!t) e.target = 'Enter the herdr pane name.';
         else if (!PANE_NAME.test(t)) e.target = 'Use 1–64 letters, numbers, dots, underscores or hyphens, with no spaces.';
       } else if (driver === 'orca') {
-        if (!t) e.target = 'Enter the Orca pane key.';
-        else if (t.length > MAX_TARGET) e.target = `Use at most ${MAX_TARGET} characters.`;
+        if (!t || t.length > MAX_TARGET || /[\u0000-\u001f]/.test(t) || !ORCA_PANE_KEY.test(t)) {
+          e.target = 'Enter the Orca pane key (looks like tabId:leafId).';
+        }
       } else e.driver = 'Choose a driver.';
     }
     if (mode === 'webhook') {
