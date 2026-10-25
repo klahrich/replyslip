@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 
 /**
  * Progressive enhancements only; every element is visible and readable before this runs.
- * The task-list status flip, the "how a task works" rows fading in and the FAQ pane.
+ * The relay line, the task-list status flip, the "how a task works" rows fading in and the FAQ pane.
  */
 export function LandingEffects() {
   useEffect(() => {
@@ -41,6 +41,25 @@ export function LandingEffects() {
         fo.disconnect();
         document.removeEventListener('visibilitychange', onVis);
         flip.classList.remove('flip');
+      });
+    }
+
+    // the relay line: hold the beats back until the block is in view, then play them once
+    const relay = document.querySelector<HTMLElement>('[data-relay]');
+    if (relay && !reduce && relay.getBoundingClientRect().bottom > 0) {
+      relay.classList.add('wait');
+      const lo = new IntersectionObserver(
+        (es) => {
+          if (!es.some((e) => e.isIntersecting)) return;
+          lo.disconnect();
+          relay.classList.replace('wait', 'play');
+        },
+        { threshold: 0.4 },
+      );
+      lo.observe(relay);
+      cleanups.push(() => {
+        lo.disconnect();
+        relay.classList.remove('wait', 'play');
       });
     }
 
