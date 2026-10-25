@@ -6,11 +6,9 @@ import { agentKeyPath, joinCodeEnvName, registerAgent, resolveJoinCode } from '.
 import { watch } from './watch.ts';
 import {
   WATCHER_NOT_RUNNING_MESSAGE,
-  acquireWatcherLock,
   alreadyRunningMessage,
-  bindWatcherLockLifecycle,
+  listLiveWatcherLocks,
   runningStatusMessage,
-  watcherStatus,
 } from './watcher-lock.ts';
 
 export type CliIo = {
@@ -100,8 +98,9 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
   }
 
   if (argv.includes('--status')) {
-    const status = watcherStatus(io.home);
-    stdout(status.running && status.lock ? runningStatusMessage(status.lock.pid) : WATCHER_NOT_RUNNING_MESSAGE);
+    const live = listLiveWatcherLocks(io.home);
+    if (live.length === 0) stdout(WATCHER_NOT_RUNNING_MESSAGE);
+    else for (const lock of live) stdout(runningStatusMessage(lock.pid, lock.origin));
     return 0;
   }
 
@@ -125,19 +124,16 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     stderr('--interval must be at least 500 milliseconds.');
     return 1;
   }
-  const acquired = acquireWatcherLock({ home: io.home, force: argv.includes('--force') });
-  if (!acquired.ok) {
-    stdout(alreadyRunningMessage(acquired.pid));
-    return 0;
-  }
-  const unbind = bindWatcherLockLifecycle(acquired.hold.release);
-  try {
-    await watch({ url, key, intervalMs, once: argv.includes('--once'), fetchImpl: io.fetchImpl });
-    return 0;
-  } finally {
-    unbind();
-    acquired.hold.release();
-  }
+  const result = await watch({
+    url,
+    key,
+    intervalMs,
+    once: argv.includes('--once'),
+    fetchImpl: io.fetchImpl,
+    lock: { home: io.home, force: argv.includes('--force') },
+  });
+  if (result.blockedPid !== undefined) stdout(alreadyRunningMessage(result.blockedPid));
+  return 0;
 }
 
 /** One line, trimmed. The key is never included in an error. */

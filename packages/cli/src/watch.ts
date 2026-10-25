@@ -3,6 +3,7 @@
 import { WAKE_NOTICE } from '../../../lib/wake-notice.ts';
 import { defaultRegistry, type DriverRegistry } from './drivers/registry.ts';
 import type { CommandRunner, DriverCheck } from './drivers/types.ts';
+import { acquireWatcherLock, bindWatcherLockLifecycle, type WatcherLockHold } from './watcher-lock.ts';
 
 export type DueWake = {
   id: string;
@@ -111,46 +112,69 @@ export async function watch(options: {
   registry?: DriverRegistry;
   runCommand?: CommandRunner;
   log?: (message: string) => void;
-}): Promise<void> {
+  /** When set, the first poll's workspace_id scopes the lock before any nudge. */
+  lock?: { home?: string; force?: boolean };
+}): Promise<{ blockedPid?: number }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const log = options.log ?? console.error;
   const registry = options.registry ?? defaultRegistry(options.runCommand);
   const base = options.url.replace(/\/$/, '');
   const checks = await checkDrivers(registry, log);
   const warned = new Set<string>();
+  let hold: WatcherLockHold | null = null;
+  let unbind: (() => void) | null = null;
 
-  do {
-    const response = await fetchImpl(`${base}/api/v1/watcher/poll`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${options.key}` },
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Watcher poll failed (${response.status}): ${text.slice(0, 200)}`);
-    }
-    const payload = (await response.json()) as { wakes?: DueWake[] };
-    const acked = await nudgeWakes({
-      wakes: payload.wakes ?? [],
-      registry,
-      checks,
-      warned,
-      log,
-    });
-    if (acked.length > 0) {
-      const ack = await fetchImpl(`${base}/api/v1/watcher/ack`, {
+  try {
+    do {
+      const response = await fetchImpl(`${base}/api/v1/watcher/poll`, {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${options.key}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ wake_ids: acked }),
+        headers: { authorization: `Bearer ${options.key}` },
       });
-      if (!ack.ok) {
-        const text = await ack.text();
-        throw new Error(`Watcher ack failed (${ack.status}): ${text.slice(0, 200)}`);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Watcher poll failed (${response.status}): ${text.slice(0, 200)}`);
       }
-    }
-    if (options.once) return;
-    await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
-  } while (!options.once);
+      const payload = (await response.json()) as { wakes?: DueWake[]; workspace_id?: unknown };
+      if (options.lock && !hold) {
+        const workspaceId = typeof payload.workspace_id === 'string' && payload.workspace_id ? payload.workspace_id : null;
+        const acquired = acquireWatcherLock({
+          home: options.lock.home,
+          force: options.lock.force,
+          origin: base,
+          workspaceId,
+          watcherKey: options.key,
+        });
+        if (!acquired.ok) return { blockedPid: acquired.pid };
+        hold = acquired.hold;
+        unbind = bindWatcherLockLifecycle(hold.release);
+      }
+      const acked = await nudgeWakes({
+        wakes: payload.wakes ?? [],
+        registry,
+        checks,
+        warned,
+        log,
+      });
+      if (acked.length > 0) {
+        const ack = await fetchImpl(`${base}/api/v1/watcher/ack`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${options.key}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ wake_ids: acked }),
+        });
+        if (!ack.ok) {
+          const text = await ack.text();
+          throw new Error(`Watcher ack failed (${ack.status}): ${text.slice(0, 200)}`);
+        }
+      }
+      if (options.once) return {};
+      await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
+    } while (!options.once);
+    return {};
+  } finally {
+    unbind?.();
+    hold?.release();
+  }
 }

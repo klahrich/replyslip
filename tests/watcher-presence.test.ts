@@ -69,6 +69,7 @@ describe('watcher last_seen', () => {
 
     const polled = await call(poll, 'http://localhost/api/v1/watcher/poll', { bearer: secret });
     expect(polled.status).toBe(200);
+    expect(polled.data.workspace_id).toBe(session.workspace.id);
     const listed = await call(listAgents, 'http://localhost/api/v1/agents', { cookie: session.cookie });
     const byName = new Map(listed.data.agents.map((agent: { name: string }) => [agent.name, agent]));
     const pane = byName.get('PaneBot');
