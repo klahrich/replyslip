@@ -4,6 +4,12 @@ import { readFile, stat } from 'node:fs/promises';
 import { AGENT_NAME_PATTERN } from '../../../lib/constants.ts';
 import { agentKeyPath, joinCodeEnvName, registerAgent, resolveJoinCode } from './register.ts';
 import { watch } from './watch.ts';
+import {
+  WATCHER_NOT_RUNNING_MESSAGE,
+  alreadyRunningMessage,
+  listLiveWatcherLocks,
+  runningStatusMessage,
+} from './watcher-lock.ts';
 
 export type CliIo = {
   env?: NodeJS.ProcessEnv;
@@ -91,6 +97,13 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     return 1;
   }
 
+  if (argv.includes('--status')) {
+    const live = listLiveWatcherLocks(io.home);
+    if (live.length === 0) stdout(WATCHER_NOT_RUNNING_MESSAGE);
+    else for (const lock of live) stdout(runningStatusMessage(lock.pid, lock.origin));
+    return 0;
+  }
+
   const url = flag(argv, '--url') ?? env.REPLYSLIP_URL;
   const keyFile = flag(argv, '--key-file');
   let key = flag(argv, '--key') ?? env.REPLYSLIP_WATCHER_KEY;
@@ -111,7 +124,15 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     stderr('--interval must be at least 500 milliseconds.');
     return 1;
   }
-  await watch({ url, key, intervalMs, once: argv.includes('--once'), fetchImpl: io.fetchImpl });
+  const result = await watch({
+    url,
+    key,
+    intervalMs,
+    once: argv.includes('--once'),
+    fetchImpl: io.fetchImpl,
+    lock: { home: io.home, force: argv.includes('--force') },
+  });
+  if (result.blockedPid !== undefined) stdout(alreadyRunningMessage(result.blockedPid));
   return 0;
 }
 

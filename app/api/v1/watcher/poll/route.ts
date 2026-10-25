@@ -14,6 +14,6 @@ export function POST(req: Request) {
     if (!watcher) throw new HttpError(401, 'unauthorized', 'Watcher key required.');
     await recordWatcherSeen(watcher.keyId);
     const wakes = await leaseHerdrWakes(watcher.workspaceId);
-    return json({ wakes });
+    return json({ wakes, workspace_id: watcher.workspaceId });
   });
 }

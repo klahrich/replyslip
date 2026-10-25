@@ -608,6 +608,220 @@ function defaultRegistry(run) {
   ]);
 }
 
+// packages/cli/src/watcher-lock.ts
+import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
+import { hostname, homedir as homedir2, uptime } from "node:os";
+import path2 from "node:path";
+var LOCK_NAME = /^watcher-[0-9a-f]{16}\.lock$/;
+function normalizeOrigin(origin) {
+  return origin.replace(/\/+$/, "");
+}
+function watcherScopeId(origin, workspaceId, watcherKey) {
+  const normalized = normalizeOrigin(origin);
+  const material = workspaceId ? `${normalized}
+${workspaceId}` : `${normalized}
+${createHash("sha256").update(watcherKey).digest("hex")}`;
+  return createHash("sha256").update(material).digest("hex").slice(0, 16);
+}
+function watcherLockPath(home, scopeId) {
+  if (!/^[0-9a-f]{16}$/.test(scopeId)) throw new Error("Invalid watcher lock scope.");
+  return path2.join(replyslipHome(home), `watcher-${scopeId}.lock`);
+}
+function alreadyRunningMessage(pid) {
+  return `A ReplySlip watcher is already running for this workspace (pid ${pid}); it delivers every local agent in this workspace.`;
+}
+function runningStatusMessage(pid, origin) {
+  return `A ReplySlip watcher is running for this workspace (pid ${pid}, origin ${origin}).`;
+}
+var WATCHER_NOT_RUNNING_MESSAGE = "No ReplySlip watcher is running for this workspace.";
+function roundedBootId(nowMs, uptimeSeconds) {
+  const bootMs = nowMs - uptimeSeconds * 1e3;
+  return String(Math.round(bootMs / 6e4) * 6e4);
+}
+function machineBootId(now = Date.now()) {
+  try {
+    const text = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    if (text) return text;
+  } catch {
+  }
+  return roundedBootId(now, uptime());
+}
+function readWatcherLock(file) {
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed.pid !== "number" || !Number.isInteger(parsed.pid) || parsed.pid <= 0) return null;
+    if (typeof parsed.startedAt !== "string" || parsed.startedAt.trim() === "") return null;
+    return {
+      pid: parsed.pid,
+      startedAt: parsed.startedAt,
+      hostname: typeof parsed.hostname === "string" ? parsed.hostname : "",
+      bootId: typeof parsed.bootId === "string" ? parsed.bootId : "",
+      origin: typeof parsed.origin === "string" ? parsed.origin : ""
+    };
+  } catch {
+    return null;
+  }
+}
+function pidIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+function lockIsCurrent(info, self, isAlive) {
+  return info.hostname === self.hostname && info.bootId === self.bootId && isAlive(info.pid);
+}
+function listLiveWatcherLocks(home = homedir2(), self) {
+  const dir = replyslipHome(home);
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const identity = {
+    hostname: self?.hostname ?? hostname(),
+    bootId: self?.bootId ?? machineBootId()
+  };
+  const isAlive = self?.isAlive ?? pidIsAlive;
+  const live = [];
+  for (const name of names) {
+    if (!LOCK_NAME.test(name)) continue;
+    const info = readWatcherLock(path2.join(dir, name));
+    if (info && lockIsCurrent(info, identity, isAlive)) live.push(info);
+  }
+  live.sort((a, b) => a.origin.localeCompare(b.origin) || a.pid - b.pid);
+  return live;
+}
+function acquireWatcherLock(options) {
+  const home = options.home ?? homedir2();
+  const origin = normalizeOrigin(options.origin);
+  const scopeId = watcherScopeId(origin, options.workspaceId, options.watcherKey);
+  const file = watcherLockPath(home, scopeId);
+  const pid = options.pid ?? process.pid;
+  const startedAt = (options.now ?? /* @__PURE__ */ new Date()).toISOString();
+  const self = {
+    hostname: options.hostname ?? hostname(),
+    bootId: options.bootId ?? machineBootId()
+  };
+  const isAlive = options.isAlive ?? pidIsAlive;
+  const identity = { pid, startedAt, hostname: self.hostname, bootId: self.bootId, origin };
+  mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  const first = attempt(file, identity, self, isAlive, Boolean(options.force), true, options);
+  if (first !== "lost") return first;
+  const seen = readWatcherLock(file);
+  if (seen && lockIsCurrent(seen, self, isAlive) && !options.force) return { ok: false, reason: "running", pid: seen.pid };
+  const second = attempt(file, identity, self, isAlive, Boolean(options.force), false, options);
+  if (second !== "lost") return second;
+  const last = readWatcherLock(file);
+  if (last && lockIsCurrent(last, self, isAlive)) return { ok: false, reason: "running", pid: last.pid };
+  throw new Error("Could not acquire the ReplySlip watcher lock.");
+}
+function bindWatcherLockLifecycle(release) {
+  const onSignal = () => {
+    release();
+    process.exit(0);
+  };
+  const onExit = () => release();
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  process.on("exit", onExit);
+  return () => {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    process.off("exit", onExit);
+  };
+}
+function attempt(file, identity, self, isAlive, force, hooks, options) {
+  const existing = readWatcherLock(file);
+  if (existing && lockIsCurrent(existing, self, isAlive) && !force) return { ok: false, reason: "running", pid: existing.pid };
+  if (hooks) options.onBeforeTakeover?.();
+  const after = readWatcherLock(file);
+  if (after && lockIsCurrent(after, self, isAlive) && !force) return { ok: false, reason: "running", pid: after.pid };
+  const temp = writeTemp(path2.dirname(file), identity);
+  try {
+    const placed = publish(temp, file, self, isAlive, force);
+    if (placed !== "placed") {
+      if (placed === "lost") return "lost";
+      return { ok: false, reason: "running", pid: placed.pid };
+    }
+    if (hooks) options.onAfterCreate?.();
+    const confirmed = readWatcherLock(file);
+    if (confirmed && confirmed.pid === identity.pid && confirmed.startedAt === identity.startedAt) {
+      return { ok: true, hold: createHold(file, identity) };
+    }
+    return "lost";
+  } finally {
+    removeLock(temp);
+  }
+}
+function publish(temp, file, self, isAlive, force) {
+  try {
+    renameSync(temp, file);
+    return "placed";
+  } catch (err) {
+    if (!isRenameConflict(err)) throw err;
+  }
+  const held = readWatcherLock(file);
+  if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid };
+  removeLock(file);
+  try {
+    renameSync(temp, file);
+    return "placed";
+  } catch (err) {
+    if (!isRenameConflict(err)) throw err;
+    return "lost";
+  }
+}
+function writeTemp(dir, identity) {
+  const temp = path2.join(dir, `.lock-${identity.pid}-${randomBytes(8).toString("hex")}.tmp`);
+  const fd = openSync(temp, "wx", 384);
+  try {
+    writeSync(fd, `${JSON.stringify(identity)}
+`);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    chmodSync(temp, 384);
+  } catch {
+  }
+  return temp;
+}
+function isRenameConflict(err) {
+  const code = err.code;
+  return code === "EEXIST" || code === "EPERM" || code === "ENOTEMPTY";
+}
+function removeLock(file) {
+  try {
+    unlinkSync(file);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+}
+function createHold(file, identity) {
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    const current = readWatcherLock(file);
+    if (!current || current.pid !== identity.pid || current.startedAt !== identity.startedAt) return;
+    if (current.hostname !== identity.hostname || current.bootId !== identity.bootId) return;
+    removeLock(file);
+  };
+  return { path: file, pid: identity.pid, startedAt: identity.startedAt, release };
+}
+
 // packages/cli/src/watch.ts
 function resolveWake(wake) {
   const driver = wake.driver?.trim() || (wake.pane ? "herdr" : "");
@@ -686,40 +900,61 @@ async function watch(options) {
   const base = options.url.replace(/\/$/, "");
   const checks = await checkDrivers(registry, log);
   const warned = /* @__PURE__ */ new Set();
-  do {
-    const response = await fetchImpl(`${base}/api/v1/watcher/poll`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${options.key}` }
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Watcher poll failed (${response.status}): ${text.slice(0, 200)}`);
-    }
-    const payload = await response.json();
-    const acked = await nudgeWakes({
-      wakes: payload.wakes ?? [],
-      registry,
-      checks,
-      warned,
-      log
-    });
-    if (acked.length > 0) {
-      const ack = await fetchImpl(`${base}/api/v1/watcher/ack`, {
+  let hold = null;
+  let unbind = null;
+  try {
+    do {
+      const response = await fetchImpl(`${base}/api/v1/watcher/poll`, {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${options.key}`,
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({ wake_ids: acked })
+        headers: { authorization: `Bearer ${options.key}` }
       });
-      if (!ack.ok) {
-        const text = await ack.text();
-        throw new Error(`Watcher ack failed (${ack.status}): ${text.slice(0, 200)}`);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Watcher poll failed (${response.status}): ${text.slice(0, 200)}`);
       }
-    }
-    if (options.once) return;
-    await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
-  } while (!options.once);
+      const payload = await response.json();
+      if (options.lock && !hold) {
+        const workspaceId = typeof payload.workspace_id === "string" && payload.workspace_id ? payload.workspace_id : null;
+        const acquired = acquireWatcherLock({
+          home: options.lock.home,
+          force: options.lock.force,
+          origin: base,
+          workspaceId,
+          watcherKey: options.key
+        });
+        if (!acquired.ok) return { blockedPid: acquired.pid };
+        hold = acquired.hold;
+        unbind = bindWatcherLockLifecycle(hold.release);
+      }
+      const acked = await nudgeWakes({
+        wakes: payload.wakes ?? [],
+        registry,
+        checks,
+        warned,
+        log
+      });
+      if (acked.length > 0) {
+        const ack = await fetchImpl(`${base}/api/v1/watcher/ack`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${options.key}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ wake_ids: acked })
+        });
+        if (!ack.ok) {
+          const text = await ack.text();
+          throw new Error(`Watcher ack failed (${ack.status}): ${text.slice(0, 200)}`);
+        }
+      }
+      if (options.once) return {};
+      await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
+    } while (!options.once);
+    return {};
+  } finally {
+    unbind?.();
+    hold?.release();
+  }
 }
 
 // packages/cli/src/cli.ts
@@ -797,6 +1032,12 @@ async function runReplyslip(argv, io = {}) {
     stderr("Usage: replyslip watch | register | key-path");
     return 1;
   }
+  if (argv.includes("--status")) {
+    const live = listLiveWatcherLocks(io.home);
+    if (live.length === 0) stdout(WATCHER_NOT_RUNNING_MESSAGE);
+    else for (const lock of live) stdout(runningStatusMessage(lock.pid, lock.origin));
+    return 0;
+  }
   const url = flag(argv, "--url") ?? env.REPLYSLIP_URL;
   const keyFile = flag(argv, "--key-file");
   let key = flag(argv, "--key") ?? env.REPLYSLIP_WATCHER_KEY;
@@ -817,7 +1058,15 @@ async function runReplyslip(argv, io = {}) {
     stderr("--interval must be at least 500 milliseconds.");
     return 1;
   }
-  await watch({ url, key, intervalMs, once: argv.includes("--once"), fetchImpl: io.fetchImpl });
+  const result = await watch({
+    url,
+    key,
+    intervalMs,
+    once: argv.includes("--once"),
+    fetchImpl: io.fetchImpl,
+    lock: { home: io.home, force: argv.includes("--force") }
+  });
+  if (result.blockedPid !== void 0) stdout(alreadyRunningMessage(result.blockedPid));
   return 0;
 }
 async function readWatcherKeyFile(file, stderr) {
