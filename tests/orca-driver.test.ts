@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { WAKE_NOTICE } from '@/lib/wake-notice';
 import {
+  MIN_ORCA_VERSION,
   ORCA_NOT_RUNNING,
+  ORCA_OLD_HOST_WARNING,
   ORCA_WAIT_SUBMIT_SECONDS,
   createOrcaDriver,
   orcaBinary,
@@ -168,6 +170,43 @@ describe('orca driver', () => {
       ['terminal', 'list', '--json'],
       sendArgs('term_new'),
     ]);
+  });
+
+  it('falls back to a plain send when an older host refuses --wait-submit', async () => {
+    const logs: string[] = [];
+    const refused = fail(
+      JSON.stringify({
+        ok: false,
+        error: {
+          code: 'incompatible_runtime',
+          message:
+            'This Orca host does not support --wait-submit. No input was sent; update Orca on the execution host, or omit only --wait-submit for a legacy prompt whose delivery cannot be observed or retried safely.',
+        },
+      }),
+    );
+    const legacy = ok(
+      JSON.stringify({
+        send: {
+          accepted: true,
+          prompt: {
+            requestId: 'unsupported-old-host',
+            stages: ['input_accepted'],
+            provider: 'old-host',
+            observation: 'unsupported',
+          },
+        },
+      }),
+    );
+    const { execFile, calls } = scripted([() => listed([{ handle: 'term_1', title: 'Worker' }]), () => refused, () => legacy]);
+    const driver = createOrcaDriver({ execFile, env: {}, log: (message) => logs.push(message) });
+    expect(await driver.nudge('Worker', WAKE_NOTICE)).toEqual({ ok: true });
+    expect(calls.map((call) => call.args)).toEqual([
+      ['terminal', 'list', '--json'],
+      sendArgs('term_1'),
+      ['terminal', 'send', '--terminal', 'term_1', '--text', WAKE_NOTICE, '--enter', '--json'],
+    ]);
+    expect(logs).toEqual([ORCA_OLD_HOST_WARNING]);
+    expect(ORCA_OLD_HOST_WARNING).toContain(MIN_ORCA_VERSION);
   });
 
   it('reports when Orca is not running', async () => {

@@ -241,7 +241,9 @@ ${result.stderr}`;
 import { execFile as execFileCb } from "node:child_process";
 var ORCA_BIN_ENV = "REPLYSLIP_ORCA_BIN";
 var ORCA_NOT_RUNNING = "Orca isn't running or its CLI isn't enabled (Settings \u2192 Experimental \u2192 CLI)";
+var MIN_ORCA_VERSION = "1.4.199";
 var ORCA_WAIT_SUBMIT_SECONDS = "10";
+var ORCA_OLD_HOST_WARNING = `[replyslip] orca: this host refused --wait-submit (old-host). Fell back to a plain send and treated input_accepted as delivered. Orca ${MIN_ORCA_VERSION} or newer is the recommended minimum.`;
 var SEND_TIMEOUT_MS = 2e4;
 var QUICK_TIMEOUT_MS = 5e3;
 function orcaBinary(env = process.env) {
@@ -276,25 +278,17 @@ function execFileOrca(file, args, timeoutMs) {
 function createOrcaDriver(options) {
   const execFile = options?.execFile ?? execFileOrca;
   const bin = orcaBinary(options?.env);
+  const log = options?.log ?? console.error;
   async function run(args, timeoutMs) {
     return execFile(bin, args, timeoutMs);
   }
   function listArgs() {
     return ["terminal", "list", "--json"];
   }
-  function sendArgs(handle, notice, retryRequest) {
-    const args = [
-      "terminal",
-      "send",
-      "--terminal",
-      handle,
-      "--text",
-      notice,
-      "--enter",
-      "--wait-submit",
-      ORCA_WAIT_SUBMIT_SECONDS,
-      "--json"
-    ];
+  function sendArgs(handle, notice, retryRequest, waitSubmit = true) {
+    const args = ["terminal", "send", "--terminal", handle, "--text", notice, "--enter"];
+    if (waitSubmit) args.push("--wait-submit", ORCA_WAIT_SUBMIT_SECONDS);
+    args.push("--json");
     if (retryRequest) args.push("--retry-request", retryRequest);
     return args;
   }
@@ -307,17 +301,43 @@ function createOrcaDriver(options) {
     const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
     return { ok: true, terminals: terminalsFrom(payload) };
   }
-  async function send(handle, notice, retryRequest) {
-    return run(sendArgs(handle, notice, retryRequest), SEND_TIMEOUT_MS);
+  async function send(handle, notice, retryRequest, waitSubmit = true) {
+    return run(sendArgs(handle, notice, retryRequest, waitSubmit), waitSubmit ? SEND_TIMEOUT_MS : QUICK_TIMEOUT_MS);
   }
-  async function submit(handle, target, notice, allowRelist) {
-    const first = classify(await send(handle, notice));
+  async function finishLegacy(plain, handle, target, notice, allowRelist) {
+    if (isStaleResult(plain) && allowRelist) return submitReplacement(target, notice, handle, false);
+    const receipt = classify(plain);
+    if (legacyAccepted(plain) || receipt.delivered) {
+      log(ORCA_OLD_HOST_WARNING);
+      return { ok: true };
+    }
+    if (receipt.unproven) return { ok: true };
+    if (receipt.down) return { ok: false, error: ORCA_NOT_RUNNING };
+    return { ok: false, error: receipt.error };
+  }
+  async function submit(handle, target, notice, allowRelist, waitSubmit = true) {
+    const raw = await send(handle, notice, void 0, waitSubmit);
+    if (!waitSubmit) return finishLegacy(raw, handle, target, notice, allowRelist);
+    if (isOldHostReceipt(raw)) {
+      log(ORCA_OLD_HOST_WARNING);
+      return { ok: true };
+    }
+    if (isOldHostRefusal(raw)) return finishLegacy(await send(handle, notice, void 0, false), handle, target, notice, allowRelist);
+    const first = classify(raw);
     if (first.delivered) return { ok: true };
-    if (first.stale && allowRelist) return submitReplacement(target, notice, handle);
+    if (first.stale && allowRelist) return submitReplacement(target, notice, handle, true);
     if (first.ambiguous && first.retryRequest) {
-      const retried = classify(await send(handle, notice, first.retryRequest));
+      const retriedRaw = await send(handle, notice, first.retryRequest, true);
+      if (isOldHostRefusal(retriedRaw)) {
+        return finishLegacy(await send(handle, notice, void 0, false), handle, target, notice, allowRelist);
+      }
+      if (isOldHostReceipt(retriedRaw)) {
+        log(ORCA_OLD_HOST_WARNING);
+        return { ok: true };
+      }
+      const retried = classify(retriedRaw);
       if (retried.delivered) return { ok: true };
-      if (retried.stale && allowRelist) return submitReplacement(target, notice, handle);
+      if (retried.stale && allowRelist) return submitReplacement(target, notice, handle, true);
       if (!retried.down) return { ok: true };
       return { ok: false, error: ORCA_NOT_RUNNING };
     }
@@ -325,14 +345,14 @@ function createOrcaDriver(options) {
     if (first.down) return { ok: false, error: ORCA_NOT_RUNNING };
     return { ok: false, error: first.error };
   }
-  async function submitReplacement(target, notice, staleHandle) {
+  async function submitReplacement(target, notice, staleHandle, waitSubmit) {
     const listed = await listTerminals();
     if (!listed.ok) return { ok: false, error: listed.error };
     const matches = matchTitle(listed.terminals, target);
     if (matches.length !== 1 || matches[0].handle === staleHandle) {
       return { ok: false, error: `Orca terminal handle for ${quote(target)} is stale` };
     }
-    return submit(matches[0].handle, target, notice, false);
+    return submit(matches[0].handle, target, notice, false, waitSubmit);
   }
   return {
     id: "orca",
@@ -389,6 +409,29 @@ function errorText(payload, result) {
   if (typeof error?.message === "string" && error.message.trim()) return error.message.trim();
   if (result.timedOut) return "orca terminal send timed out";
   return `orca terminal send exited ${result.code}`;
+}
+function isOldHostRefusal(result) {
+  const text = `${result.stdout}
+${result.stderr}`;
+  if (/does not support --wait-submit/i.test(text)) return true;
+  const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
+  const error = record(record(payload)?.error);
+  return error?.code === "incompatible_runtime" && /wait-submit/i.test(text);
+}
+function isOldHostReceipt(result) {
+  const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
+  const prompt = record(sendRecord(payload)?.prompt);
+  return prompt?.provider === "old-host" || prompt?.requestId === "unsupported-old-host";
+}
+function isStaleResult(result) {
+  const text = `${result.stdout}
+${result.stderr}`;
+  return isStale(parseJson(result.stdout) ?? parseJson(result.stderr), text);
+}
+function legacyAccepted(result) {
+  const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
+  const stages = stagesOf(payload);
+  return stages.includes("input_accepted") || stages.includes("turn_started") || sendAccepted(payload) || isOldHostReceipt(result);
 }
 function isStale(payload, text) {
   if (text.includes("terminal_handle_stale")) return true;
