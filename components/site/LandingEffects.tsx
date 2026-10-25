@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 
 /**
  * Progressive enhancements only; every element is visible and readable before this runs.
- * The task-list status flip, the pinned "how a task works" scenes and the FAQ pane.
+ * The task-list status flip, the "how a task works" rows fading in and the FAQ pane.
  */
 export function LandingEffects() {
   useEffect(() => {
@@ -44,111 +44,28 @@ export function LandingEffects() {
       });
     }
 
-    // how a task works: pin the section and show one scene at a time, when motion is welcome and the tallest scene fits
-    const how = document.querySelector<HTMLElement>('[data-how]');
-    const pin = how?.querySelector<HTMLElement>('.how-pin');
-    const box = how?.querySelector<HTMLElement>('.scenes');
-    const scenes = how ? [...how.querySelectorAll<HTMLElement>('.scene')] : [];
-    if (how && pin && box && scenes.length) {
-      const motion = matchMedia('(prefers-reduced-motion: reduce)');
-      let cur = -1;
-      let raf = 0;
-      let top = 0;
-      let band = 1;
-      const show = (i: number) => {
-        if (i === cur) return;
-        cur = i;
-        scenes.forEach((s, j) => s.classList.toggle('on', j === i));
-      };
-      const onScroll = () => {
-        if (!how.classList.contains('fx')) return;
-        cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(() => {
-          const i = Math.floor((top - how.getBoundingClientRect().top) / band);
-          show(Math.max(0, Math.min(scenes.length - 1, i)));
-        });
-      };
-      // keyboard focus inside a faded scene scrolls the track to that scene
-      const onFocus = (e: FocusEvent) => {
-        const i = scenes.findIndex((s) => s.contains(e.target as Node));
-        if (i < 0 || i === cur || !how.classList.contains('fx')) return;
-        scrollTo({ top: how.getBoundingClientRect().top + scrollY - top + i * band + 1, behavior: 'instant' });
-        show(i);
-      };
-      // phones stack: with the browser bars, the live slip and a card rarely fit one screen
-      const wide = matchMedia('(min-width: 900px)');
-      let lastW = 0;
-      let lastH = 0;
-      const setup = (grew = false) => {
-        const was = how.classList.contains('fx');
-        if (!grew) {
-          lastW = innerWidth;
-          lastH = innerHeight;
-        }
-        how.classList.add('fx');
-        how.style.removeProperty('--track');
-        const vh = innerHeight;
-        const full = pin.offsetHeight;
-        const head = box.getBoundingClientRect().top - pin.getBoundingClientRect().top;
-        // centre the heading and scene together; if only the scene fits, the heading scrolls off above it
-        let on = !motion.matches && wide.matches;
-        if (full + 48 <= vh) top = (vh - full) / 2;
-        else if (full - head + 32 <= vh) top = 16 - head;
-        // the slip grew past the screen while in use (printed errors): stay pinned, bottom on the screen's edge
-        else if (grew && was) top = vh - full - 16;
-        else on = false;
-        if (grew && !was) on = false;
-        how.classList.toggle('fx', on);
-        if (on) {
-          band = 0.8 * vh;
-          how.style.setProperty('--pin-top', `${top}px`);
-          how.style.setProperty('--track', `${full + scenes.length * band}px`);
-          cur = -1;
-          onScroll();
-        } else scenes.forEach((s) => s.classList.add('on'));
-        // the track changes the page height; keep a deep link below it in view
-        if (was !== on && location.hash) {
-          const t = document.getElementById(decodeURIComponent(location.hash.slice(1)));
-          if (t && !how.contains(t) && how.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING) {
-            t.scrollIntoView({ behavior: 'instant' });
+    // how a task works: rows below the fold wait hidden, then fade in once as they scroll into view
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-how] .scene')];
+    if (rows.length && !reduce) {
+      const ro = new IntersectionObserver(
+        (es) => {
+          for (const e of es) {
+            if (!e.isIntersecting) continue;
+            e.target.classList.remove('hid');
+            ro.unobserve(e.target);
           }
-        }
-      };
-      let rt: ReturnType<typeof setTimeout> | undefined;
-      const later = (grew: boolean) => {
-        clearTimeout(rt);
-        rt = setTimeout(() => setup(grew), 150);
-      };
-      const reset = () => setup();
-      // ignore the small height changes of a phone's collapsing address bar
-      const onResize = () => {
-        if (innerWidth !== lastW || Math.abs(innerHeight - lastH) > 160) later(false);
-      };
-      // the live slip changes height when it prints a result; re-measure so the pinned block still fits
-      let slipH = -1;
-      const ro = new ResizeObserver(([e]) => {
-        const h = Math.round(e?.contentRect.height ?? 0);
-        if (slipH >= 0 && h !== slipH && innerWidth === lastW) later(true);
-        slipH = h;
-      });
-      const slip = how.querySelector('.how-try');
-      setup();
-      if (slip) ro.observe(slip);
-      addEventListener('scroll', onScroll, { passive: true });
-      addEventListener('resize', onResize);
-      motion.addEventListener('change', reset);
-      wide.addEventListener('change', reset);
-      how.addEventListener('focusin', onFocus);
+        },
+        { threshold: 0.2, rootMargin: '0px 0px -5% 0px' },
+      );
+      // rows already on screen or above it (an anchor jump, a reload mid-page) stay as they are
+      for (const r of rows) {
+        if (r.getBoundingClientRect().top < innerHeight * 0.9) continue;
+        r.classList.add('hid');
+        ro.observe(r);
+      }
       cleanups.push(() => {
-        cancelAnimationFrame(raf);
-        clearTimeout(rt);
         ro.disconnect();
-        removeEventListener('scroll', onScroll);
-        removeEventListener('resize', onResize);
-        motion.removeEventListener('change', reset);
-        wide.removeEventListener('change', reset);
-        how.removeEventListener('focusin', onFocus);
-        how.classList.remove('fx');
+        rows.forEach((r) => r.classList.remove('hid'));
       });
     }
 

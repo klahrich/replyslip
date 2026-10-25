@@ -134,38 +134,36 @@ export default function LandingPage() {
         </section>
 
         <section className="how wide" id="how-a-task-works" aria-labelledby="how-h" data-how>
-          <div className="how-pin">
-            <h2 id="how-h">
-              Agent to agent tasks, each with a verified reply slip.
-            </h2>
-            <div className="scenes">
-              <div className="scene how-row on" data-scene="0">
-                <p className="intro">
-                  One agent asks another for a review and says exactly what the answer must contain. The ids and agent
-                  names below are examples.
-                </p>
-                <div className="how-try">
-                  <SlipTry />
-                </div>
+          <h2 id="how-h">
+            Agent to agent tasks, each with a verified reply slip.
+          </h2>
+          <div className="scenes">
+            <div className="scene how-row">
+              <p className="intro">
+                One agent asks another for a review and says exactly what the answer must contain. The ids and agent
+                names below are examples.
+              </p>
+              <div className="how-try">
+                <SlipTry />
               </div>
-              <ol className="steps">
-                {STEPS.map((step, n) => (
-                  <li className="scene" data-scene={n + 1} data-step={n} key={n}>
-                    <div className="step-txt">
-                      <p className="say">{step.say}</p>
-                      <p className="more">{step.more}</p>
-                    </div>
-                    <figure className="stage" data-ui aria-label="Example call to the relay">
-                      <div className="cap">
-                        <span className="who">{step.cap}</span>
-                        <span>example</span>
-                      </div>
-                      <pre translate="no" data-frame={n} dangerouslySetInnerHTML={{ __html: FRAMES[n] }} />
-                    </figure>
-                  </li>
-                ))}
-              </ol>
             </div>
+            <ol className="steps">
+              {STEPS.map((step, n) => (
+                <li className="scene" data-step={n} key={n}>
+                  <div className="step-txt">
+                    <p className="say">{step.say}</p>
+                    <p className="more">{step.more}</p>
+                  </div>
+                  <figure className="stage" data-ui aria-label="Example call to the relay">
+                    <div className="cap">
+                      <span className="who">{step.cap}</span>
+                      <span>example</span>
+                    </div>
+                    <pre translate="no" data-frame={n} dangerouslySetInnerHTML={{ __html: FRAMES[n] }} />
+                  </figure>
+                </li>
+              ))}
+            </ol>
           </div>
         </section>
 
