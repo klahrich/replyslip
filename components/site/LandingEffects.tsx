@@ -44,22 +44,31 @@ export function LandingEffects() {
       });
     }
 
-    // the relay line: hold the beats back until the block is in view, then play them once
+    // the relay line: swap the resting copy for the stage, then play the beats once the block is half in view
     const relay = document.querySelector<HTMLElement>('[data-relay]');
-    if (relay && !reduce && relay.getBoundingClientRect().bottom > 0) {
-      relay.classList.add('wait');
+    const roll = relay?.querySelectorAll<HTMLElement>('.roll > span');
+    if (relay && roll?.length === 2 && !reduce && relay.getBoundingClientRect().bottom > 0) {
+      // the slot's width follows its words: "you are", then "ReplySlip is"
+      const size = () => {
+        relay.style.setProperty('--w1', `${roll[0]!.offsetWidth}px`);
+        relay.style.setProperty('--w2', `${roll[1]!.offsetWidth}px`);
+      };
+      relay.classList.add('anim');
+      size();
+      addEventListener('resize', size);
       const lo = new IntersectionObserver(
         (es) => {
           if (!es.some((e) => e.isIntersecting)) return;
           lo.disconnect();
-          relay.classList.replace('wait', 'play');
+          relay.classList.add('play');
         },
-        { threshold: 0.4 },
+        { threshold: 0.5 },
       );
       lo.observe(relay);
       cleanups.push(() => {
         lo.disconnect();
-        relay.classList.remove('wait', 'play');
+        removeEventListener('resize', size);
+        relay.classList.remove('anim', 'play');
       });
     }
 

@@ -19,12 +19,21 @@ import { HeroFlow } from './HeroFlow';
 import { SetupPrompt } from './SetupPrompt';
 import { TOOL_LIST } from './tool-list';
 
-/** The problem, then the fix: three beats that play in once (LandingEffects), with "you" struck out before beat 3. */
-const RELAY = [
-  { text: 'Right now, you are the relay.' },
-  { text: 'You copy one agent’s answer, check it has what you asked for, and paste it into the next terminal.' },
-  { text: 'ReplySlip takes that job. It checks each answer against your schema before handing it back.' },
-];
+const RELAY_A = 'Right now, you are the relay.';
+const RELAY_B = 'You copy one agent’s answer, check it has what you asked for, and paste it into the next terminal.';
+const RELAY_SUB = 'It checks each answer against your schema before handing it back.';
+
+/** One beat of the relay line, split into words that snap in one after another (the n-th word gets --i: n). */
+function Words({ text, from = 0 }: { text: string; from?: number }) {
+  return text.split(' ').map((word, i) => (
+    <Fragment key={i}>
+      {i > 0 && ' '}
+      <span className="w" style={{ '--i': from + i } as CSSProperties}>
+        {word}
+      </span>
+    </Fragment>
+  ));
+}
 
 /** How a task works: each step pairs its words with the example call in FRAMES at the same index. */
 const STEPS = [
@@ -135,24 +144,38 @@ export default function LandingPage() {
         </section>
 
         <section className="statement relay" aria-label="The problem" data-relay>
-          {RELAY.map((beat, b) => (
-            <p className={`beat b${b + 1}`} key={b}>
-              <span className="vh">{beat.text}</span>
-              <span aria-hidden="true">
-                {beat.text.split(' ').map((word, i) => (
-                  <Fragment key={i}>
-                    {i > 0 && ' '}
-                    <span
-                      className={b === 0 && word === 'you' ? 'w strike' : 'w'}
-                      style={{ '--i': i } as CSSProperties}
-                    >
-                      {word}
-                    </span>
-                  </Fragment>
-                ))}
-              </span>
+          <div className="relay-rest">
+            <p className="r-prob">
+              {RELAY_A} {RELAY_B}
             </p>
-          ))}
+            <p className="r-big">
+              Right now, <span className="r-acc">ReplySlip</span> is the relay.
+            </p>
+            <p className="r-sub">{RELAY_SUB}</p>
+          </div>
+          <div className="relay-stage" aria-hidden="true">
+            <p className="beat ba">
+              <Words text={RELAY_A} />
+            </p>
+            <p className="beat bb">
+              <Words text={RELAY_B} />
+            </p>
+            <div className="beat bc">
+              <p className="r-big">
+                <Words text="Right now," />{' '}
+                <span className="w slot" style={{ '--i': 2 } as CSSProperties}>
+                  <span className="roll">
+                    <span>you are</span>
+                    <span>
+                      <span className="r-acc">ReplySlip</span> is
+                    </span>
+                  </span>
+                </span>{' '}
+                <Words text="the relay." from={3} />
+              </p>
+              <p className="r-sub">{RELAY_SUB}</p>
+            </div>
+          </div>
         </section>
 
         <section className="how wide" id="how-a-task-works" aria-labelledby="how-h" data-how>
