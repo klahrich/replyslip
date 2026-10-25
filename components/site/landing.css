@@ -67,10 +67,9 @@ html:not(.js) .verdict .wait::after{content:" Sending needs JavaScript."}
 .how{margin-top:var(--gap-section)}
 .how h2,.tools h2,.rules h2,.faq h2{font-size:var(--s-head);line-height:1.12}
 .how .intro{margin-top:16px;max-width:34em;color:var(--muted)}
-/* Each scene pairs words with a card: scene 0 is the intro and the live slip, scenes 1-3 are the steps with their call.
-   Stacked by default (no JS, reduced motion, under 900px wide, or a viewport too short to hold the tallest scene). With .fx, set by
-   LandingEffects, the section is a tall track (--track) and .how-pin sticks (--pin-top) showing one scene at a time; scrolling
-   crossfades to the next. Every scene shares one grid cell, so the pinned block keeps one height and the cards keep one top. */
+/* Four rows in reading order: the intro with the live slip, then each step beside its call. Every row is visible
+   by default; LandingEffects marks the rows still below the fold .hid (only when motion is welcome) and lifts each
+   one in once as it scrolls into view. */
 .scenes{margin-top:16px}
 .steps{list-style:none;margin:0;padding:0}
 .steps .scene{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:clamp(16px,2vw,32px);align-items:center;margin-top:clamp(56px,7vw,88px)}
@@ -83,14 +82,11 @@ html:not(.js) .verdict .wait::after{content:" Sending needs JavaScript."}
 .stage .cap .who{color:var(--paper-ink);font-weight:600}
 .stage pre{margin:0;white-space:pre;overflow-x:auto;line-height:1.6}
 pre .k{color:var(--code-k)}pre .s{color:var(--code-s)}pre .c{color:var(--paper-muted)}pre .e{color:var(--err)}pre .ok{color:var(--ok)}
-.how.fx{height:var(--track,auto)}
-.fx .how-pin{position:sticky;top:var(--pin-top,0)}
-.fx .scenes{display:grid}
-.fx .steps{display:contents}
-.fx .scene{grid-area:1/1;margin:0;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity 320ms ease,transform 320ms var(--ease-out)}
-.fx .scene.on{opacity:1;transform:none;pointer-events:auto}
-.fx .steps .scene{align-content:start}
-.fx .stage{margin-top:16px}
+@media (prefers-reduced-motion:no-preference){
+  .scene>*{transition:opacity 400ms var(--ease-out),transform 400ms var(--ease-out)}
+  .scene>:nth-child(2){transition-delay:80ms}
+  .scene.hid>*{opacity:0;transform:translateY(10px)}
+}
 
 /* tools: comparison set as text (light field) */
 .tools{margin-top:var(--gap-section);background:var(--field);color:var(--field-ink);padding:clamp(72px,9vw,120px) 0}
