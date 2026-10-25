@@ -48,13 +48,35 @@ const localTargetSchema = z
   .max(200)
   .refine((value) => !/[\u0000-\u001f]/.test(value), 'Target must be a single line.');
 
-const localDeliverySchema = z.object({
-  mode: z.literal('local'),
-  driver: z
-    .string()
-    .regex(DRIVER_ID_PATTERN, 'Driver id must be 1-32 lowercase letters, numbers, or hyphens.'),
-  target: localTargetSchema,
-});
+/** Orca's pane key is `tabId:leafId`: one colon, no whitespace, no control characters. */
+const ORCA_PANE_KEY_PATTERN = /^[^\s:]+:[^\s:]+$/;
+const ORCA_PANE_KEY_MESSAGE = 'The Orca pane key looks like tabId:leafId.';
+
+function orcaPaneKey(target: string): boolean {
+  return target.length <= 200 && !/[\u0000-\u001f]/.test(target) && ORCA_PANE_KEY_PATTERN.test(target);
+}
+
+const localDeliverySchema = z
+  .object({
+    mode: z.literal('local'),
+    driver: z
+      .string()
+      .regex(DRIVER_ID_PATTERN, 'Driver id must be 1-32 lowercase letters, numbers, or hyphens.'),
+    target: z.string(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.driver === 'orca') {
+      if (!orcaPaneKey(value.target)) {
+        ctx.addIssue({ code: 'custom', path: ['target'], message: ORCA_PANE_KEY_MESSAGE });
+      }
+      return;
+    }
+    const parsed = localTargetSchema.safeParse(value.target);
+    if (parsed.success) return;
+    for (const issue of parsed.error.issues) {
+      ctx.addIssue({ code: 'custom', path: ['target', ...issue.path], message: issue.message });
+    }
+  });
 
 const legacyHerdrSchema = z
   .object({

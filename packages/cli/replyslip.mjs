@@ -112,17 +112,17 @@ async function registerAgent(options) {
     const message = payload && typeof payload === "object" && payload && "error" in payload && typeof payload.error?.message === "string" ? payload.error.message : `Registration failed (HTTP ${response.status}).`;
     throw new Error(message);
   }
-  const record = payload;
-  if (typeof record.api_key !== "string" || typeof record.agent?.id !== "string") {
+  const record2 = payload;
+  if (typeof record2.api_key !== "string" || typeof record2.agent?.id !== "string") {
     throw new Error(`Registration failed (HTTP ${response.status}).`);
   }
-  const mcpUrl = typeof record.mcp?.url === "string" ? record.mcp.url : `${relay}/api/mcp`;
-  const createdAt = typeof record.agent.created_at === "string" ? record.agent.created_at : (/* @__PURE__ */ new Date()).toISOString();
+  const mcpUrl = typeof record2.mcp?.url === "string" ? record2.mcp.url : `${relay}/api/mcp`;
+  const createdAt = typeof record2.agent.created_at === "string" ? record2.agent.created_at : (/* @__PURE__ */ new Date()).toISOString();
   const filePath = await writeAgentKeyFile(
     {
       name: options.name,
-      agent_id: record.agent.id,
-      api_key: record.api_key,
+      agent_id: record2.agent.id,
+      api_key: record2.api_key,
       mcp_url: mcpUrl,
       relay_url: relay,
       created_at: createdAt
@@ -237,6 +237,341 @@ ${result.stderr}`;
   };
 }
 
+// packages/cli/src/drivers/orca.ts
+import { execFile as execFileCb } from "node:child_process";
+var ORCA_BIN_ENV = "REPLYSLIP_ORCA_BIN";
+var ORCA_NOT_RUNNING = "Orca isn't running or its CLI isn't enabled (Settings \u2192 Experimental \u2192 CLI)";
+var MIN_ORCA_VERSION = "1.4.199";
+var ORCA_WAIT_SUBMIT_SECONDS = "10";
+var ORCA_OLD_HOST_WARNING = `[replyslip] orca: this host refused --wait-submit (old-host). Fell back to a plain send and treated input_accepted as delivered. Orca ${MIN_ORCA_VERSION} or newer is the recommended minimum.`;
+var SEND_TIMEOUT_MS = 2e4;
+var QUICK_TIMEOUT_MS = 5e3;
+function orcaBinary(env = process.env) {
+  const override = env[ORCA_BIN_ENV]?.trim();
+  return override || "orca";
+}
+function execFileOrca(file, args, timeoutMs) {
+  return new Promise((resolve) => {
+    execFileCb(
+      file,
+      [...args],
+      { timeout: timeoutMs, shell: false, maxBuffer: 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => {
+        const out = String(stdout ?? "");
+        const errText = String(stderr ?? "");
+        if (err && err.code === "ENOENT") {
+          resolve({ code: 127, stdout: out, stderr: "ENOENT", timedOut: false });
+          return;
+        }
+        if (!err) {
+          resolve({ code: 0, stdout: out, stderr: errText, timedOut: false });
+          return;
+        }
+        const timedOut = Boolean(err.killed);
+        const exitCode = err.code;
+        const code = typeof exitCode === "number" ? exitCode : 1;
+        resolve({ code, stdout: out, stderr: errText, timedOut });
+      }
+    );
+  });
+}
+function createOrcaDriver(options) {
+  const execFile = options?.execFile ?? execFileOrca;
+  const bin = orcaBinary(options?.env);
+  const log = options?.log ?? console.error;
+  async function run(args, timeoutMs) {
+    return execFile(bin, args, timeoutMs);
+  }
+  function listArgs() {
+    return ["terminal", "list", "--json"];
+  }
+  function sendArgs(handle, notice, retryRequest, waitSubmit = true) {
+    const args = ["terminal", "send", "--terminal", handle, "--text", notice, "--enter"];
+    if (waitSubmit) args.push("--wait-submit", ORCA_WAIT_SUBMIT_SECONDS);
+    args.push("--json");
+    if (retryRequest) args.push("--retry-request", retryRequest);
+    return args;
+  }
+  async function listTerminals() {
+    const plain = await loadList(listArgs());
+    if (!plain.ok) return plain;
+    if (plain.sawLeafId || !plain.sawTerminal) return { ok: true, terminals: plain.terminals };
+    const visual = await loadList(["terminal", "list", "--include-visual-layouts", "--json"]);
+    if (!visual.ok) return visual;
+    if (!visual.sawLeafId) return { ok: false, error: "orca terminal list did not include tabId and leafId" };
+    return { ok: true, terminals: visual.terminals };
+  }
+  async function loadList(args) {
+    const result = await run(args, QUICK_TIMEOUT_MS);
+    if (isDown(result)) return { ok: false, error: ORCA_NOT_RUNNING };
+    if (result.code !== 0 || result.timedOut) {
+      return { ok: false, error: `orca terminal list exited ${result.code}` };
+    }
+    const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
+    return { ok: true, ...terminalsFrom(payload) };
+  }
+  async function send(handle, notice, retryRequest, waitSubmit = true) {
+    return run(sendArgs(handle, notice, retryRequest, waitSubmit), waitSubmit ? SEND_TIMEOUT_MS : QUICK_TIMEOUT_MS);
+  }
+  async function finishLegacy(plain, handle, target, notice, allowRelist) {
+    if (isStaleResult(plain) && allowRelist) return submitReplacement(target, notice, handle, false);
+    const receipt = classify(plain);
+    if (legacyAccepted(plain) || receipt.delivered) {
+      log(ORCA_OLD_HOST_WARNING);
+      return { ok: true };
+    }
+    if (receipt.unproven) return { ok: true };
+    if (receipt.down) return { ok: false, error: ORCA_NOT_RUNNING };
+    return { ok: false, error: receipt.error };
+  }
+  async function submit(handle, target, notice, allowRelist, waitSubmit = true) {
+    const raw = await send(handle, notice, void 0, waitSubmit);
+    if (!waitSubmit) return finishLegacy(raw, handle, target, notice, allowRelist);
+    if (isOldHostReceipt(raw)) {
+      log(ORCA_OLD_HOST_WARNING);
+      return { ok: true };
+    }
+    if (isOldHostRefusal(raw)) return finishLegacy(await send(handle, notice, void 0, false), handle, target, notice, allowRelist);
+    const first = classify(raw);
+    if (first.delivered) return { ok: true };
+    if (first.stale && allowRelist) return submitReplacement(target, notice, handle, true);
+    if (first.ambiguous && first.retryRequest) {
+      const retriedRaw = await send(handle, notice, first.retryRequest, true);
+      if (isOldHostRefusal(retriedRaw)) {
+        return finishLegacy(await send(handle, notice, void 0, false), handle, target, notice, allowRelist);
+      }
+      if (isOldHostReceipt(retriedRaw)) {
+        log(ORCA_OLD_HOST_WARNING);
+        return { ok: true };
+      }
+      const retried = classify(retriedRaw);
+      if (retried.delivered) return { ok: true };
+      if (retried.stale && allowRelist) return submitReplacement(target, notice, handle, true);
+      if (!retried.down) return { ok: true };
+      return { ok: false, error: ORCA_NOT_RUNNING };
+    }
+    if (first.unproven) return { ok: true };
+    if (first.down) return { ok: false, error: ORCA_NOT_RUNNING };
+    return { ok: false, error: first.error };
+  }
+  async function submitReplacement(target, notice, staleHandle, waitSubmit) {
+    const listed = await listTerminals();
+    if (!listed.ok) return { ok: false, error: listed.error };
+    const matches = matchPane(listed.terminals, target);
+    if (matches.length !== 1 || matches[0].handle === staleHandle) {
+      return { ok: false, error: `Orca pane ${quote(target)} handle is stale` };
+    }
+    return submit(matches[0].handle, target, notice, false, waitSubmit);
+  }
+  return {
+    id: "orca",
+    async check() {
+      const result = await run(["status", "--json"], QUICK_TIMEOUT_MS);
+      if (isDown(result) || result.code !== 0 || result.timedOut) {
+        return { ok: false, message: ORCA_NOT_RUNNING };
+      }
+      const payload = parseJson(result.stdout);
+      const root = record(payload);
+      if (root && root.ok === false) return { ok: false, message: ORCA_NOT_RUNNING };
+      const version = typeof root?.version === "string" ? root.version : void 0;
+      return { ok: true, version };
+    },
+    async nudge(target, notice) {
+      const listed = await listTerminals();
+      if (!listed.ok) return { ok: false, error: listed.error };
+      const matches = matchPane(listed.terminals, target);
+      if (matches.length === 0) return { ok: false, error: `no Orca pane ${quote(target)}` };
+      if (matches.length > 1) return { ok: false, error: `more than one Orca pane ${quote(target)}` };
+      return submit(matches[0].handle, target, notice, true);
+    }
+  };
+}
+function quote(target) {
+  return JSON.stringify(target);
+}
+function parsePaneKey(value) {
+  const trimmed = value.trim();
+  const colon = trimmed.indexOf(":");
+  if (colon <= 0 || colon !== trimmed.lastIndexOf(":") || colon === trimmed.length - 1) return null;
+  if (/\s/.test(trimmed)) return null;
+  return { tabId: trimmed.slice(0, colon), leafId: trimmed.slice(colon + 1) };
+}
+function matchPane(terminals, target) {
+  const wanted = parsePaneKey(target);
+  if (!wanted) return [];
+  return terminals.filter((terminal) => terminal.tabId === wanted.tabId && terminal.leafId === wanted.leafId);
+}
+function isDown(result) {
+  return result.stderr === "ENOENT" || result.code === 127;
+}
+function classify(result) {
+  const text = `${result.stdout}
+${result.stderr}`;
+  const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
+  const stages = stagesOf(payload);
+  const delivered = stages.includes("turn_started");
+  const accepted = stages.includes("input_accepted") || sendAccepted(payload);
+  const stale = isStale(payload, text);
+  const retryFromFlag = retryFlag(text);
+  const retryRequest = retryFromFlag ?? (result.code !== 0 || result.timedOut ? requestIdOf(payload) : null);
+  const down = isDown(result);
+  const ambiguous = !delivered && !stale && !down && Boolean(retryRequest) && (result.timedOut || result.code !== 0 || Boolean(retryFromFlag));
+  const unproven = !delivered && !stale && !down && !ambiguous && (result.timedOut || result.code === 0 && accepted);
+  const error = errorText(payload, result);
+  return { delivered, unproven, stale, ambiguous, retryRequest, down, error };
+}
+function errorText(payload, result) {
+  const root = record(payload);
+  const error = record(root?.error);
+  if (typeof error?.message === "string" && error.message.trim()) return error.message.trim();
+  if (result.timedOut) return "orca terminal send timed out";
+  return `orca terminal send exited ${result.code}`;
+}
+function isOldHostRefusal(result) {
+  const text = `${result.stdout}
+${result.stderr}`;
+  if (/does not support --wait-submit/i.test(text)) return true;
+  const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
+  const error = record(record(payload)?.error);
+  return error?.code === "incompatible_runtime" && /wait-submit/i.test(text);
+}
+function isOldHostReceipt(result) {
+  const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
+  const prompt = record(sendRecord(payload)?.prompt);
+  return prompt?.provider === "old-host" || prompt?.requestId === "unsupported-old-host";
+}
+function isStaleResult(result) {
+  const text = `${result.stdout}
+${result.stderr}`;
+  return isStale(parseJson(result.stdout) ?? parseJson(result.stderr), text);
+}
+function legacyAccepted(result) {
+  const payload = parseJson(result.stdout) ?? parseJson(result.stderr);
+  const stages = stagesOf(payload);
+  return stages.includes("input_accepted") || stages.includes("turn_started") || sendAccepted(payload) || isOldHostReceipt(result);
+}
+function isStale(payload, text) {
+  if (text.includes("terminal_handle_stale")) return true;
+  const root = record(payload);
+  const error = record(root?.error);
+  return error?.code === "terminal_handle_stale";
+}
+function stagesOf(payload) {
+  const send = sendRecord(payload);
+  const prompt = record(send?.prompt);
+  const stages = prompt?.stages ?? send?.stages;
+  if (!Array.isArray(stages)) return [];
+  return stages.filter((stage) => typeof stage === "string");
+}
+function sendAccepted(payload) {
+  return sendRecord(payload)?.accepted === true;
+}
+function sendRecord(payload) {
+  const root = record(payload);
+  if (!root) return null;
+  return record(root.send) ?? record(record(root.result)?.send);
+}
+function requestIdOf(payload) {
+  const root = record(payload);
+  if (!root) return null;
+  const mutation = record(root.mutation) ?? record(record(root.result)?.mutation);
+  const id = mutation?.requestId;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+function retryFlag(text) {
+  const match = text.match(/--retry-request(?:=|\s+)([^\s'"]+)/);
+  return match?.[1] ?? null;
+}
+function terminalsFrom(payload) {
+  const root = record(payload);
+  const result = record(root?.result) ?? root;
+  const list = arrayOf(result?.terminals);
+  const found = [];
+  const seen = /* @__PURE__ */ new Set();
+  let sawTerminal = false;
+  let sawLeafId = false;
+  if (list) {
+    for (const item of list) {
+      const row = record(item);
+      if (!row) continue;
+      const handle = typeof row.handle === "string" ? row.handle.trim() : "";
+      if (!handle) continue;
+      sawTerminal = true;
+      const tabId = typeof row.tabId === "string" ? row.tabId.trim() : "";
+      const leafId = typeof row.leafId === "string" ? row.leafId.trim() : "";
+      if (tabId && leafId) {
+        sawLeafId = true;
+        pushTerminal(found, seen, { handle, tabId, leafId });
+        continue;
+      }
+      const recorded = typeof row.recordedPaneKey === "string" ? parsePaneKey(row.recordedPaneKey) : null;
+      if (recorded) {
+        sawLeafId = true;
+        pushTerminal(found, seen, { handle, tabId: recorded.tabId, leafId: recorded.leafId });
+      }
+    }
+  }
+  const layouts = arrayOf(result?.visualLayouts);
+  if (layouts) {
+    for (const layout of layouts) {
+      walkVisual(record(layout)?.root, found, seen, (hasLeaf) => {
+        sawTerminal = true;
+        if (hasLeaf) sawLeafId = true;
+      });
+    }
+  }
+  return { terminals: found, sawLeafId, sawTerminal };
+}
+function pushTerminal(found, seen, row) {
+  const key = `${row.handle}\0${row.tabId}\0${row.leafId}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  found.push(row);
+}
+function walkVisual(node, found, seen, note) {
+  if (!node) return;
+  if (node.type === "terminal") {
+    const handle = typeof node.handle === "string" ? node.handle.trim() : "";
+    const tabId = typeof node.tabId === "string" ? node.tabId.trim() : "";
+    const leafId = typeof node.leafId === "string" ? node.leafId.trim() : "";
+    note(Boolean(leafId));
+    if (handle && tabId && leafId) pushTerminal(found, seen, { handle, tabId, leafId });
+    return;
+  }
+  if (node.type === "split" || node.type === "pane-split") {
+    walkVisual(record(node.first), found, seen, note);
+    walkVisual(record(node.second), found, seen, note);
+    return;
+  }
+  const tabs = arrayOf(node.tabs);
+  if (!tabs) return;
+  for (const tab of tabs) walkVisual(record(record(tab)?.panes), found, seen, note);
+}
+function parseJson(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(trimmed.slice(start, end + 1));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function arrayOf(value) {
+  return Array.isArray(value) ? value : null;
+}
+
 // packages/cli/src/drivers/registry.ts
 function createRegistry(initial = []) {
   const drivers = /* @__PURE__ */ new Map();
@@ -254,8 +589,23 @@ function createRegistry(initial = []) {
   for (const driver of initial) registry.register(driver);
   return registry;
 }
+function commandRunnerAsExec(run) {
+  return async (file, args) => {
+    try {
+      const result = await run(file, [...args]);
+      return { ...result, timedOut: false };
+    } catch (err) {
+      const missing = typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT";
+      if (missing) return { code: 127, stdout: "", stderr: "ENOENT", timedOut: false };
+      throw err;
+    }
+  };
+}
 function defaultRegistry(run) {
-  return createRegistry([createHerdrDriver(run ? { run } : void 0)]);
+  return createRegistry([
+    createHerdrDriver(run ? { run } : void 0),
+    createOrcaDriver(run ? { execFile: commandRunnerAsExec(run) } : void 0)
+  ]);
 }
 
 // packages/cli/src/watch.ts

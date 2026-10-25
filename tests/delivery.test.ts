@@ -44,6 +44,71 @@ describe('local delivery', () => {
     expect(local.status).toBe(200);
     expect(local.data.agent.delivery).toMatchObject({ mode: 'local', driver: 'tmux', target: 'dev:0.0' });
 
+    const orca = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
+      method: 'PUT',
+      cookie: session.cookie,
+      params: { id: agent.id },
+      body: { mode: 'local', driver: 'orca', target: 'tab_a:11111111-1111-4111-8111-111111111111' },
+    });
+    expect(orca.status).toBe(200);
+    expect(orca.data.agent.delivery).toMatchObject({
+      mode: 'local',
+      driver: 'orca',
+      target: 'tab_a:11111111-1111-4111-8111-111111111111',
+      pane: 'tab_a:11111111-1111-4111-8111-111111111111',
+    });
+
+    const orcaTitle = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
+      method: 'PUT',
+      cookie: session.cookie,
+      params: { id: agent.id },
+      body: { mode: 'local', driver: 'orca', target: 'Reviewer agent' },
+    });
+    expect(orcaTitle.status).toBe(400);
+    expect(orcaTitle.data.error).toEqual({
+      code: 'validation_error',
+      message: 'Invalid request body.',
+      details: { issues: [{ path: 'target', message: 'The Orca pane key looks like tabId:leafId.' }] },
+    });
+
+    const orcaLong = 'a:' + 'b'.repeat(199);
+    const orcaTooLong = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
+      method: 'PUT',
+      cookie: session.cookie,
+      params: { id: agent.id },
+      body: { mode: 'local', driver: 'orca', target: orcaLong },
+    });
+    expect(orcaTooLong.status).toBe(400);
+    expect(orcaTooLong.data.error.details.issues).toEqual([
+      { path: 'target', message: 'The Orca pane key looks like tabId:leafId.' },
+    ]);
+
+    const orcaControl = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
+      method: 'PUT',
+      cookie: session.cookie,
+      params: { id: agent.id },
+      body: { mode: 'local', driver: 'orca', target: 'tab:\u0001leaf' },
+    });
+    expect(orcaControl.status).toBe(400);
+    expect(orcaControl.data.error.details.issues[0].message).toBe('The Orca pane key looks like tabId:leafId.');
+
+    const orcaMax = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
+      method: 'PUT',
+      cookie: session.cookie,
+      params: { id: agent.id },
+      body: { mode: 'local', driver: 'orca', target: 'a:' + 'b'.repeat(198) },
+    });
+    expect(orcaMax.status).toBe(200);
+
+    const herdrLine = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
+      method: 'PUT',
+      cookie: session.cookie,
+      params: { id: agent.id },
+      body: { mode: 'local', driver: 'herdr', target: 'red\npane' },
+    });
+    expect(herdrLine.status).toBe(400);
+    expect(herdrLine.data.error.details.issues).toEqual([{ path: 'target', message: 'Target must be a single line.' }]);
+
     const bad = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
       method: 'PUT',
       cookie: session.cookie,
