@@ -129,7 +129,7 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
         if (!t) e.target = 'Enter the herdr pane name.';
         else if (!PANE_NAME.test(t)) e.target = 'Use 1–64 letters, numbers, dots, underscores or hyphens, with no spaces.';
       } else if (driver === 'orca') {
-        if (!t) e.target = 'Enter the Orca terminal title.';
+        if (!t) e.target = 'Enter the Orca pane key.';
         else if (t.length > MAX_TARGET) e.target = `Use at most ${MAX_TARGET} characters.`;
       } else e.driver = 'Choose a driver.';
     }
@@ -324,7 +324,7 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
             [
               ['none', 'None', 'The agent checks for tasks itself. ReplySlip sends nothing.'],
               ['webhook', 'Webhook', 'ReplySlip sends a POST to a URL you choose each time there is work.'],
-              ['local', 'Local agent via herdr or Orca', 'The watcher on your machine (replyslip watch) types a short notice into a herdr pane or Orca terminal.'],
+              ['local', 'Local agent via herdr or Orca', 'The watcher on your machine (replyslip watch) types a short notice into a herdr or Orca pane.'],
             ] as const
           ).map(([value, label, help]) => (
             <label key={value} className={mode === value ? 'dash-mode is-on' : 'dash-mode'}>
@@ -553,7 +553,7 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
               {err('driver')}
             </div>
             <div className="dash-field">
-              <label htmlFor={`${uid}-target`}>{driver === 'orca' ? 'Terminal title' : 'Pane'}</label>
+              <label htmlFor={`${uid}-target`}>Pane</label>
               <input
                 {...fieldProps('target', 'target')}
                 spellCheck={false}
@@ -564,8 +564,8 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
               />
               {driver === 'orca' ? (
                 <p className="dash-hint" id={`${uid}-target-hint`}>
-                  The exact title of the Orca terminal where {agent.name} runs. First turn on Orca’s CLI in Orca under Settings → Experimental → CLI. The
-                  watcher needs a watcher key from the Watchers section below.
+                  Your agent shows this during setup (or run <code translate="no">echo $ORCA_PANE_KEY</code> in its terminal). The watcher needs a
+                  watcher key from the Watchers section below.
                 </p>
               ) : (
                 <p className="dash-hint" id={`${uid}-target-hint`}>
@@ -702,13 +702,13 @@ function WakeMessage({ state, target, orca }: { state: WakeState; target: string
     case 'waiting':
       return <p className="dash-pending">Test wake pending. Waiting for the watcher to deliver it…</p>;
     case 'delivered':
-      return <p className="dash-ok">Test wake delivered to the {orca ? 'Orca terminal' : 'herdr pane'}.</p>;
+      return <p className="dash-ok">Test wake delivered to the {orca ? 'Orca pane' : 'herdr pane'}.</p>;
     case 'failed':
       return <p className="dash-err">Test wake failed{state.error ? `: ${state.error}` : '.'}</p>;
     case 'timeout':
       return (
         <p className="dash-pending">
-          Still pending after 30 seconds. Is the watcher running (<code translate="no">replyslip watch</code>) and is the {orca ? 'Orca terminal titled' : 'herdr pane named'}{' '}
+          Still pending after 30 seconds. Is the watcher running (<code translate="no">replyslip watch</code>) and is the {orca ? 'Orca pane key' : 'herdr pane named'}{' '}
           <code translate="no">{target || '…'}</code>? The wake stays queued and is delivered when the watcher picks it up.
         </p>
       );

@@ -11,7 +11,7 @@ async function fetchWatcherKeys(): Promise<WatcherKey[]> {
 }
 
 /**
- * Keys for `replyslip watch`, the local process that delivers wakes to herdr panes and Orca terminals.
+ * Keys for `replyslip watch`, the local process that delivers wakes to herdr and Orca panes.
  * A key belongs to the workspace, not to one agent.
  */
 export function WatcherKeys({ origin }: { origin: string }) {
