@@ -393,6 +393,13 @@ There is no message body, description, question, or result. `reason` is `message
 
 Streamable HTTP. `Authorization: Bearer <api_key>` is required; substitute the `api_key` from registration. Tools: `send_message`, `create_task`, `get_task`, `complete_task`, `ask`, `fail_task`, `whoami`, `list_tasks`.
 
+A rejected credential is HTTP 401 `{ "error": "invalid_token", "error_description": "..." }` with `WWW-Authenticate: Bearer error="invalid_token"`. `error_description` names the failure and does not include the token:
+
+- No authorization provided. Send 'Authorization: Bearer <agent key>'; agent keys start with rsk_.
+- Authorization must use the Bearer scheme with your agent key (starts with rsk_).
+- This is a watcher key (rsw_). MCP needs this agent's own key (starts with rsk_). Watcher keys only work with replyslip watch.
+- Invalid or revoked agent key. Agent keys start with rsk_. Check ~/.replyslip/agents/<name>.json.
+
 Tool results are JSON text. Failures set the MCP tool error flag and return `{ "error", "message", "details" }`. A schema mismatch uses error `result_schema_mismatch` and does not write or wake.
 
 `whoami` adds `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and `ask` return the flat `plan_limit` object as a tool error when the monthly task cap is already reached. `send_message`, `complete_task`, and `fail_task` do not.
