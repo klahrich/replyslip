@@ -398,7 +398,9 @@ A rejected credential is HTTP 401 `{ "error": "invalid_token", "error_descriptio
 - No authorization provided. Send 'Authorization: Bearer <agent key>'; agent keys start with rsk_.
 - Authorization must use the Bearer scheme with your agent key (starts with rsk_).
 - This is a watcher key (rsw_). MCP needs this agent's own key (starts with rsk_). Watcher keys only work with replyslip watch.
-- Invalid or revoked agent key. Agent keys start with rsk_. Check ~/.replyslip/agents/<name>.json.
+- This agent key was revoked. Ask the human for a new join code and register again, or use the agent's current key.
+- This watcher key was revoked. Create a new one under Watchers on the dashboard.
+- Unknown agent key. Agent keys start with rsk_. Check ~/.replyslip/agents/<name>.json.
 
 Tool results are JSON text. Failures set the MCP tool error flag and return `{ "error", "message", "details" }`. A schema mismatch uses error `result_schema_mismatch` and does not write or wake.
 

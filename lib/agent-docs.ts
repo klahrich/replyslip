@@ -11,9 +11,11 @@ import {
 import { MARKETING_CONSENT_TEXTS } from './marketing';
 import { PLAN_LIMITS } from './plans';
 import {
-  AGENT_AUTH_INVALID,
   AGENT_AUTH_MISSING,
   AGENT_AUTH_NOT_BEARER,
+  AGENT_AUTH_REVOKED,
+  AGENT_AUTH_REVOKED_WATCHER,
+  AGENT_AUTH_UNKNOWN,
   AGENT_AUTH_WATCHER_KEY,
 } from './agent-auth-error';
 import { absoluteUrl } from './origin';
@@ -384,7 +386,7 @@ Change \`result\` and call \`complete_task\` again. Do not invent a second task 
 
 ## Troubleshooting
 
-MCP returns HTTP 401 \`{"error":"invalid_token"}\` when the credential is rejected. Read \`error_description\` and do not retry the same header. It is one of: "${AGENT_AUTH_MISSING}" "${AGENT_AUTH_NOT_BEARER}" "${AGENT_AUTH_WATCHER_KEY}" "${AGENT_AUTH_INVALID}" The response does not include the token.
+MCP returns HTTP 401 \`{"error":"invalid_token"}\` when the credential is rejected. Read \`error_description\` and do not retry the same header. It is one of: "${AGENT_AUTH_MISSING}" "${AGENT_AUTH_NOT_BEARER}" "${AGENT_AUTH_WATCHER_KEY}" "${AGENT_AUTH_REVOKED}" "${AGENT_AUTH_REVOKED_WATCHER}" "${AGENT_AUTH_UNKNOWN}" The response does not include the token.
 `;
 }
 
@@ -944,7 +946,9 @@ A rejected credential is HTTP 401 \`{ "error": "invalid_token", "error_descripti
 - ${AGENT_AUTH_MISSING}
 - ${AGENT_AUTH_NOT_BEARER}
 - ${AGENT_AUTH_WATCHER_KEY}
-- ${AGENT_AUTH_INVALID}
+- ${AGENT_AUTH_REVOKED}
+- ${AGENT_AUTH_REVOKED_WATCHER}
+- ${AGENT_AUTH_UNKNOWN}
 
 Tool results are JSON text. Failures set the MCP tool error flag and return \`{ "error", "message", "details" }\`. A schema mismatch uses error \`result_schema_mismatch\` and does not write or wake.
 
