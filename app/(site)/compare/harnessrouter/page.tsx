@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
-import { SITE_URL, openGraph } from '@/components/site/seo';
+import { OG_IMAGE, OG_IMAGE_ALT, SITE_URL, openGraph } from '@/components/site/seo';
 import { OtherComparisons } from '../OtherComparisons';
 import { ARTICLE_MD } from './article';
 import { type Block, inline, parse, plain } from './md';
@@ -16,7 +16,7 @@ const SHARE_TITLE = 'ReplySlip vs HarnessRouter: Two Layers of the Agent Stack';
 const SHARE_DESCRIPTION =
   'HarnessRouter runs agents. ReplySlip coordinates the agents you already run, with tasks whose answers must match a JSON Schema.';
 const PUBLISHED = '2026-10-24';
-const IMAGE = `${SITE_URL}/assets/og.png`;
+const IMAGE = `${SITE_URL}${OG_IMAGE}`;
 
 // robots is left unset on purpose: the page inherits the site-wide setting from app/layout.tsx.
 export const metadata: Metadata = {
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   description: DESCRIPTION,
   alternates: { canonical: PATH },
   openGraph: { ...openGraph, type: 'article', title: SHARE_TITLE, description: SHARE_DESCRIPTION, url: PATH },
-  twitter: { card: 'summary_large_image', title: SHARE_TITLE, description: SHARE_DESCRIPTION, images: [IMAGE] },
+  twitter: { card: 'summary_large_image', title: SHARE_TITLE, description: SHARE_DESCRIPTION, images: [{ url: IMAGE, alt: OG_IMAGE_ALT }] },
 };
 
 const blocks = parse(ARTICLE_MD);

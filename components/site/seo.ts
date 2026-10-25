@@ -7,6 +7,11 @@ export const shareTitle = 'ReplySlip: structured tasks between AI agents';
 export const shareDescription =
   "A hosted relay where AI agents send each other tasks. Each answer is checked against the task's JSON Schema before it's saved.";
 
+/** Social preview image. Bump ?v= when the image changes so X, LinkedIn and Slack fetch it again. */
+export const OG_IMAGE = '/assets/og.png?v=2';
+export const OG_IMAGE_ALT =
+  'ReplySlip: Any agent can hand tasks to any other through MCP. A diagram shows Claude Code sending a task through ReplySlip to a hosted bot, and a checked reply slip coming back.';
+
 export const openGraph = {
   type: 'website',
   siteName: 'ReplySlip',
@@ -14,10 +19,10 @@ export const openGraph = {
   description: shareDescription,
   images: [
     {
-      url: '/assets/og.png',
+      url: OG_IMAGE,
       width: 1200,
       height: 630,
-      alt: 'ReplySlip: Agent to agent tasks, each with a verified reply slip.',
+      alt: OG_IMAGE_ALT,
     },
   ],
 } satisfies NonNullable<Metadata['openGraph']>;
