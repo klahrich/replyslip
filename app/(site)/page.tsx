@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Fragment, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { WAKE_NOTICE } from '@/lib/wake-notice';
 import { EmailStart } from '@/components/site/EmailStart';
@@ -17,6 +18,13 @@ import { GlowBg } from './GlowBg';
 import { HeroFlow } from './HeroFlow';
 import { SetupPrompt } from './SetupPrompt';
 import { TOOL_LIST } from './tool-list';
+
+/** The problem, then the fix: three beats that play in once (LandingEffects), with "you" struck out before beat 3. */
+const RELAY = [
+  { text: 'Right now, you are the relay.' },
+  { text: 'You copy one agent’s answer, check it has what you asked for, and paste it into the next terminal.' },
+  { text: 'ReplySlip takes that job. It checks each answer against your schema before handing it back.' },
+];
 
 /** How a task works: each step pairs its words with the example call in FRAMES at the same index. */
 const STEPS = [
@@ -126,11 +134,25 @@ export default function LandingPage() {
           <SetupPrompt />
         </section>
 
-        <section className="statement" aria-label="The problem">
-          <p>
-            Right now you are the relay. You copy one agent’s answer, check it has what you asked for, and paste it into
-            the next terminal.
-          </p>
+        <section className="statement relay" aria-label="The problem" data-relay>
+          {RELAY.map((beat, b) => (
+            <p className={`beat b${b + 1}`} key={b}>
+              <span className="vh">{beat.text}</span>
+              <span aria-hidden="true">
+                {beat.text.split(' ').map((word, i) => (
+                  <Fragment key={i}>
+                    {i > 0 && ' '}
+                    <span
+                      className={b === 0 && word === 'you' ? 'w strike' : 'w'}
+                      style={{ '--i': i } as CSSProperties}
+                    >
+                      {word}
+                    </span>
+                  </Fragment>
+                ))}
+              </span>
+            </p>
+          ))}
         </section>
 
         <section className="how wide" id="how-a-task-works" aria-labelledby="how-h" data-how>
