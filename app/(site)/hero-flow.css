@@ -1,30 +1,28 @@
-/* Hero visual (HeroFlow): agent chips on the stage, thin connector lines, one paper reply slip.
-   Lines are CSS borders anchored to the chip centres via --chip, so the drawing holds at any width. */
-.flow{--chip:7.75rem;--line:color-mix(in srgb,var(--muted) 55%,transparent);margin:0;padding:4px 0 6px;font-size:var(--s-small);line-height:1.35}
+/* Hero visual (HeroFlow): two agent chips, a task line out along the top and a reply line back along the bottom
+   carrying one paper reply slip. Lines are CSS borders anchored to the chip centres via --chip, so the drawing holds
+   at any width. */
+.flow{--chip:7.75rem;--tap:calc(var(--chip) / 2);--line:color-mix(in srgb,var(--muted) 60%,transparent);width:100%;max-width:520px;margin:0 auto;font-size:var(--s-small);line-height:1.35}
 .flow-agent{position:relative;z-index:1;width:var(--chip);flex:0 0 auto;display:flex;flex-direction:column;gap:2px;padding:10px 12px;background:var(--bg);border:1px solid var(--surface-2);border-radius:var(--r)}
 .flow-name{font-weight:600;color:var(--ink);white-space:nowrap}
 .flow-name::before{content:"";display:inline-block;width:8px;height:8px;margin-right:8px;background:var(--accent);vertical-align:.08em}
-.flow-agent.idle .flow-name::before{background:var(--surface-2)}
-.flow-where{color:var(--muted);padding-left:16px}
+.flow-where{color:var(--muted);padding-left:16px;white-space:nowrap}
+.flow-mid{display:flex;align-items:center}
 
-/* hosted bot: on the same relay, joined to both agents by a quiet dashed bracket */
-.flow-top{position:relative;display:flex;justify-content:center}
-.flow-top::before{content:"";position:absolute;left:calc(var(--chip) / 2);right:calc(var(--chip) / 2);top:50%;bottom:-24px;border:1px dashed var(--line);border-bottom:0}
-.flow-mid{display:flex;align-items:center;margin-top:24px}
-
-/* the task: label over a sage line with an arrowhead into Codex */
+/* the task: label over a sage line with an arrowhead into the hosted bot */
 .flow-task{position:relative;flex:1;min-width:0;align-self:stretch;display:flex;align-items:center;padding:0 12px}
 .flow-label{position:absolute;left:12px;right:12px;bottom:calc(50% + 7px);color:var(--ink);text-align:center;text-wrap:balance}
 .flow-line{position:relative;flex:1;height:1px;background:var(--accent)}
 .flow-head{position:absolute;right:-10px;top:-5px;width:8px;height:10px;fill:var(--accent)}
 .flow-dot{position:absolute;left:0;top:-3px;width:7px;height:7px;border-radius:50%;background:var(--accent);opacity:0}
 
-/* the reply: a line back from Codex to Claude Code, the slip riding on it */
+/* the reply: down from the hosted bot, back along the bottom, up into Claude Code; the slip rides on it */
 .flow-back{position:relative;display:flex;justify-content:center;padding-top:22px}
-.flow-back::before{content:"";position:absolute;left:calc(var(--chip) / 2);right:calc(var(--chip) / 2);top:0;bottom:calc(50% - 11px);border:1px solid var(--line);border-top:0}
-.flow-up{position:absolute;left:calc(var(--chip) / 2 - 4.5px);top:-1px;width:10px;height:8px;fill:var(--muted)}
+.flow-back::before{content:"";position:absolute;left:var(--tap);right:var(--tap);top:0;bottom:calc(50% - 11px);border:1px solid var(--line);border-top:0}
+.flow-up{position:absolute;left:calc(var(--tap) - 4.5px);top:-1px;width:10px;height:8px;fill:var(--muted)}
+/* the return line runs through the slip's middle, so the left arrowhead rides just outside its left edge */
+.flow-left{position:absolute;right:calc(100% + 6px);top:50%;margin-top:-5px;width:8px;height:10px;fill:var(--muted)}
 .flow-slip{position:relative;background:var(--paper);color:var(--paper-ink);border:1px solid var(--paper-edge);border-radius:2px;padding:10px 14px 12px;box-shadow:0 1px 0 rgba(0,0,0,.18)}
-.flow-slip-head{display:flex;align-items:center;gap:8px;color:var(--paper-muted)}
+.flow-slip-head{display:flex;align-items:center;gap:8px;color:var(--paper-muted);white-space:nowrap}
 .flow-slip-head b{color:var(--paper-ink);font-weight:600}
 .flow-check{width:16px;height:16px;flex:0 0 auto}
 .flow-check circle{fill:var(--accent)}
@@ -34,14 +32,12 @@
 .flow-slip .k{color:var(--code-k)}.flow-slip .s{color:var(--code-s)}
 
 @media (max-width:640px){
-  .flow{--chip:6.75rem;font-size:.8125rem}
+  .flow{--chip:6.75rem;--tap:calc(var(--chip) * .3);font-size:.8125rem}
   .flow-agent{padding:8px 10px}
   .flow-name::before{margin-right:6px;width:7px;height:7px}
   .flow-where{padding-left:13px}
   .flow-task{padding:0 8px}
-  .flow-label{left:4px;right:4px}
-  .flow-mid{margin-top:30px}
-  .flow-top::before{bottom:-30px}
+  .flow-label{left:2px;right:2px}
   .flow-slip code{font-size:.75rem}
 }
 
@@ -57,3 +53,14 @@
 @keyframes flow-land{from{transform:translateY(8px)}}
 @keyframes flow-ink{from{opacity:.35}}
 @keyframes flow-stamp{from{transform:scale(.6);opacity:.3}}
+
+/* placement: the stage hugs the drawing, sits on columns 7-12 (6-12 under 1100px, so the task label keeps to two lines) with a clear gutter after the copy, and spans from the
+   top of the lead paragraph to the bottom of the signup button (the .after notes below it are a constant 150px).
+   Under 1100px the copy column runs tall, so the stage just sits at the paragraph top at its own height. */
+@media (min-width:900px){
+  .lp .hero-stage{grid-column:6/span 7;margin:8px 0 0;padding:24px 28px;display:flex;align-items:center}
+}
+@media (min-width:1100px){
+  .lp .hero-row{align-items:stretch}
+  .lp .hero-stage{grid-column:7/span 6;margin-bottom:150px}
+}

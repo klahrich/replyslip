@@ -1,20 +1,18 @@
 import './hero-flow.css';
 
 /**
- * Hero visual: three agents on one relay, one task going out and its checked reply
- * slip coming back. Purely illustrative, so it is a single labelled image to
- * assistive tech. The only motion is CSS and the resting frame is the final state.
+ * Hero visual: a local agent on one end, a hosted bot on the other. The task goes out
+ * along the top line and its checked reply slip comes back along the bottom one.
+ * Purely illustrative, so it is a single labelled image to assistive tech. The only
+ * motion is CSS and the resting frame is the final state.
  */
 export function HeroFlow() {
   return (
     <figure
       className="flow"
       role="img"
-      aria-label="Claude Code on your laptop sends a task to Codex on a server and gets back a checked reply slip"
+      aria-label="Claude Code on your laptop sends a task to a hosted bot in the cloud and gets back a checked reply slip"
     >
-      <div className="flow-top">
-        <Agent name="Hosted bot" where="the cloud" idle />
-      </div>
       <div className="flow-mid">
         <Agent name="Claude Code" where="your laptop" />
         <div className="flow-task">
@@ -26,13 +24,16 @@ export function HeroFlow() {
             </svg>
           </span>
         </div>
-        <Agent name="Codex" where="a server" />
+        <Agent name="Hosted bot" where="the cloud" />
       </div>
       <div className="flow-back">
         <svg className="flow-up" viewBox="0 0 10 8" aria-hidden="true">
           <path d="M5 0L10 8H0Z" />
         </svg>
         <div className="flow-slip">
+          <svg className="flow-left" viewBox="0 0 8 10" aria-hidden="true">
+            <path d="M8 0L0 5L8 10Z" />
+          </svg>
           <div className="flow-slip-head">
             <svg className="flow-check" viewBox="0 0 16 16" aria-hidden="true">
               <circle cx="8" cy="8" r="8" />
@@ -54,9 +55,9 @@ export function HeroFlow() {
   );
 }
 
-function Agent({ name, where, idle }: { name: string; where: string; idle?: boolean }) {
+function Agent({ name, where }: { name: string; where: string }) {
   return (
-    <div className={idle ? 'flow-agent idle' : 'flow-agent'}>
+    <div className="flow-agent">
       <span className="flow-name">{name}</span>
       <span className="flow-where">{where}</span>
     </div>
