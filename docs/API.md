@@ -178,7 +178,7 @@ One of:
 { "mode": "local", "driver": "herdr", "target": "red" }
 ```
 
-`driver` matches `^[a-z0-9-]{1,32}$`. The server accepts any id. `herdr` is the driver this repo runs. `target` is a single line, 1–200 characters. The driver interprets it (a herdr pane name, for example).
+`driver` matches `^[a-z0-9-]{1,32}$`. The server accepts any id. `herdr` and `orca` are the drivers this repo runs. `target` is a single line, 1–200 characters. For herdr it is the pane name. For Orca it is the terminal title from `orca terminal list --json` (Settings → Experimental → CLI must be on). The handle is not part of this body.
 
 Deprecated, still accepted, and stored as the object above:
 
@@ -208,7 +208,7 @@ Omitting `url` keeps the stored webhook URL. Omitting `auth.token`, `auth.secret
 
 Tokens, HMAC secrets, and header values are encrypted at rest with `ENCRYPTION_KEY`. Webhook URLs must be public http(s) unless `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS=1`.
 
-`target` is a single line of 1–200 characters. When the driver is `herdr`, the target must also be a pane name of 1–64 characters: letters, numbers, `.`, `_`, `-`. The herdr driver refuses any other target. The herdr driver needs herdr 0.8.0 or newer on `PATH` on the watcher machine. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. Webhook and `none` do not need it.
+`target` is a single line of 1–200 characters. When the driver is `herdr`, the herdr driver also requires a pane name of 1–64 characters: letters, numbers, `.`, `_`, `-`. Find that name with `herdr agent get`, not the pane id. The herdr driver needs herdr 0.8.0 or newer on `PATH` on the watcher machine. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. When the driver is `orca`, `target` is the Orca terminal title and may contain spaces. Find it with `orca terminal list --json` after enabling Settings → Experimental → CLI. `orca status --json` checks that the CLI is up. `REPLYSLIP_ORCA_BIN` overrides the binary. ReplySlip does not bundle herdr or Orca, does not modify them, and does not depend on them. Webhook and `none` do not need either binary.
 
 ### POST `/api/v1/agents/:id/test-wake`
 
@@ -377,7 +377,7 @@ Session cookie.
 { "wakes": [ { "id": "uuid", "driver": "herdr", "target": "red", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ] }
 ```
 
-There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, `failure`, or `test`. `driver` and `target` say which local nudge to run. `pane` is a deprecated alias of `target`. Due wakes are leased for 60 seconds. The CLI (`replyslip watch`, default poll 3000 ms, minimum 500) acks a wake only when the driver's `nudge` returns ok. For herdr that command is `herdr agent prompt <target> <notice>`, and ok means exit 0. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose startup check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The notice passed to the driver is fixed and is not taken from this payload. `herdr` must be on `PATH` when the driver is herdr; ReplySlip does not bundle it. The CLI passes the stored target through and does not choose another pane.
+There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, `failure`, or `test`. `driver` and `target` say which local nudge to run. `pane` is a deprecated alias of `target`. Due wakes are leased for 60 seconds. The CLI (`replyslip watch`, default poll 3000 ms, minimum 500) acks a wake only when the driver's `nudge` returns ok. For herdr that command is `herdr agent prompt <target> <notice>`, and ok means exit 0. For Orca, ok means the send receipt reached `turn_started`, or the receipt stopped at `input_accepted` or timed out and must not be typed again (an ambiguous failure is retried once with `--retry-request` inside that nudge). A no-match, a multiple match, a stale handle after one re-list, or Orca not running is not acked. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose startup check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The notice passed to the driver is fixed and is not taken from this payload. `herdr` must be on `PATH` when the driver is herdr, and `orca` when the driver is orca. Enable Orca's CLI under Settings → Experimental → CLI. ReplySlip does not bundle either binary. The CLI passes the stored target through and does not choose another pane. Orca titles are resolved on each wake; handles are not stored.
 
 ### POST `/api/v1/watcher/ack`
 

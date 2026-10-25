@@ -1,0 +1,186 @@
+import { describe, expect, it } from 'vitest';
+import { WAKE_NOTICE } from '@/lib/wake-notice';
+import {
+  ORCA_NOT_RUNNING,
+  ORCA_WAIT_SUBMIT_SECONDS,
+  createOrcaDriver,
+  orcaBinary,
+  type OrcaExecFile,
+  type OrcaExecResult,
+} from '../packages/cli/src/drivers/orca';
+
+type Call = { file: string; args: string[] };
+
+function scripted(steps: Array<(call: Call) => OrcaExecResult>): { execFile: OrcaExecFile; calls: Call[] } {
+  const calls: Call[] = [];
+  const execFile: OrcaExecFile = async (file, args) => {
+    const call = { file, args: [...args] };
+    calls.push(call);
+    const step = steps[calls.length - 1];
+    if (!step) throw new Error(`unexpected orca call ${calls.length}: ${args.join(' ')}`);
+    return step(call);
+  };
+  return { execFile, calls };
+}
+
+function ok(stdout: string): OrcaExecResult {
+  return { code: 0, stdout, stderr: '', timedOut: false };
+}
+
+function fail(stdout: string, code = 1): OrcaExecResult {
+  return { code, stdout, stderr: '', timedOut: false };
+}
+
+const running = ok(JSON.stringify({ ok: true, version: '1.4.205' }));
+
+function listed(titles: Array<{ handle: string; title: string }>): OrcaExecResult {
+  return ok(JSON.stringify({ result: { terminals: titles } }));
+}
+
+function receipt(stages: string[], extra: Record<string, unknown> = {}): OrcaExecResult {
+  return ok(
+    JSON.stringify({
+      send: { accepted: true, prompt: { stages } },
+      mutation: { requestId: 'req-ignored', replayed: false },
+      ...extra,
+    }),
+  );
+}
+
+const sendArgs = (handle: string, retry?: string) => [
+  'terminal',
+  'send',
+  '--terminal',
+  handle,
+  '--text',
+  WAKE_NOTICE,
+  '--enter',
+  '--wait-submit',
+  ORCA_WAIT_SUBMIT_SECONDS,
+  '--json',
+  ...(retry ? ['--retry-request', retry] : []),
+];
+
+describe('orca driver', () => {
+  it('sends the herdr notice once a title resolves and turn_started is delivered', async () => {
+    const { execFile, calls } = scripted([
+      () => running,
+      () => listed([{ handle: 'term_old', title: 'Worker' }, { handle: 'term_live', title: 'Reviewer' }]),
+      () => receipt(['input_accepted', 'turn_started']),
+    ]);
+    const driver = createOrcaDriver({ execFile, env: { REPLYSLIP_ORCA_BIN: '/opt/orca' } });
+    expect(orcaBinary({ REPLYSLIP_ORCA_BIN: '/opt/orca' })).toBe('/opt/orca');
+    expect(orcaBinary({})).toBe('orca');
+
+    expect((await driver.check()).ok).toBe(true);
+    expect(await driver.nudge('Reviewer', WAKE_NOTICE)).toEqual({ ok: true });
+    expect(calls.map((call) => call.file)).toEqual(['/opt/orca', '/opt/orca', '/opt/orca']);
+    expect(calls.map((call) => call.args)).toEqual([
+      ['status', '--json'],
+      ['terminal', 'list', '--json'],
+      sendArgs('term_live'),
+    ]);
+    expect(JSON.stringify(calls)).not.toContain('term_old');
+    expect(calls[2].args[5]).toContain('Another agent');
+  });
+
+  it('acks an input_accepted receipt without a second send', async () => {
+    const { execFile, calls } = scripted([
+      () => listed([{ handle: 'term_1', title: 'Worker' }]),
+      () => receipt(['input_accepted'], { warnings: ['input was accepted, but this provider cannot report delivery.'] }),
+    ]);
+    const driver = createOrcaDriver({ execFile, env: {} });
+    expect(await driver.nudge('Worker', WAKE_NOTICE)).toEqual({ ok: true });
+    expect(calls.map((call) => call.args)).toEqual([['terminal', 'list', '--json'], sendArgs('term_1')]);
+  });
+
+  it('acks a send timeout without resending', async () => {
+    const { execFile, calls } = scripted([
+      () => listed([{ handle: 'term_1', title: 'Worker' }]),
+      () => ({ code: 1, stdout: '', stderr: '', timedOut: true }),
+    ]);
+    const driver = createOrcaDriver({ execFile, env: {} });
+    expect(await driver.nudge('Worker', WAKE_NOTICE)).toEqual({ ok: true });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('retries an ambiguous failure only with --retry-request and then acks when still unproven', async () => {
+    const ambiguous = fail(
+      JSON.stringify({
+        ok: false,
+        warnings: ['ambiguous transport failure; repeat the exact command with --retry-request req_9'],
+        mutation: { requestId: 'req_9' },
+      }),
+    );
+    const { execFile, calls } = scripted([
+      () => listed([{ handle: 'term_1', title: 'Worker' }]),
+      () => ambiguous,
+      () => receipt(['input_accepted']),
+    ]);
+    const driver = createOrcaDriver({ execFile, env: {} });
+    expect(await driver.nudge('Worker', WAKE_NOTICE)).toEqual({ ok: true });
+    expect(calls.map((call) => call.args)).toEqual([
+      ['terminal', 'list', '--json'],
+      sendArgs('term_1'),
+      sendArgs('term_1', 'req_9'),
+    ]);
+  });
+
+  it('fails closed when the title matches nothing or more than one terminal', async () => {
+    const none = scripted([() => listed([{ handle: 'term_1', title: 'Other' }])]);
+    const missing = createOrcaDriver({ execFile: none.execFile, env: {} });
+    expect(await missing.nudge('Worker', WAKE_NOTICE)).toEqual({
+      ok: false,
+      error: 'no Orca terminal titled "Worker"',
+    });
+    expect(none.calls.map((call) => call.args[0])).toEqual(['terminal']);
+
+    const many = scripted([
+      () =>
+        listed([
+          { handle: 'term_a', title: 'Worker' },
+          { handle: 'term_b', title: 'Worker' },
+        ]),
+    ]);
+    const duplicate = createOrcaDriver({ execFile: many.execFile, env: {} });
+    expect(await duplicate.nudge('Worker', WAKE_NOTICE)).toEqual({
+      ok: false,
+      error: 'more than one Orca terminal titled "Worker"',
+    });
+    expect(many.calls).toHaveLength(1);
+  });
+
+  it('re-lists once after a stale handle and sends only to the replacement', async () => {
+    const { execFile, calls } = scripted([
+      () => listed([{ handle: 'term_old', title: 'Worker' }]),
+      () =>
+        fail(
+          JSON.stringify({ ok: false, error: { code: 'terminal_handle_stale', message: 'handle expired' } }),
+        ),
+      () => listed([{ handle: 'term_new', title: 'Worker' }]),
+      () => receipt(['turn_started']),
+    ]);
+    const driver = createOrcaDriver({ execFile, env: {} });
+    expect(await driver.nudge('Worker', WAKE_NOTICE)).toEqual({ ok: true });
+    expect(calls.map((call) => call.args)).toEqual([
+      ['terminal', 'list', '--json'],
+      sendArgs('term_old'),
+      ['terminal', 'list', '--json'],
+      sendArgs('term_new'),
+    ]);
+  });
+
+  it('reports when Orca is not running', async () => {
+    const down = scripted([() => ({ code: 127, stdout: '', stderr: 'ENOENT', timedOut: false })]);
+    const driver = createOrcaDriver({ execFile: down.execFile, env: {} });
+    expect(await driver.check()).toEqual({ ok: false, message: ORCA_NOT_RUNNING });
+
+    const statusFail = scripted([() => fail(JSON.stringify({ ok: false, error: { message: 'not running' } }))]);
+    const stopped = createOrcaDriver({ execFile: statusFail.execFile, env: {} });
+    expect(await stopped.check()).toEqual({ ok: false, message: ORCA_NOT_RUNNING });
+
+    const nudgeDown = scripted([() => ({ code: 127, stdout: '', stderr: 'ENOENT', timedOut: false })]);
+    const nudger = createOrcaDriver({ execFile: nudgeDown.execFile, env: {} });
+    expect(await nudger.nudge('Worker', WAKE_NOTICE)).toEqual({ ok: false, error: ORCA_NOT_RUNNING });
+  });
+});

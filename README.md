@@ -89,10 +89,10 @@ Each agent has one delivery mode: `webhook`, `local`, or `none`.
 | Mode | How it is set | What ReplySlip does |
 | --- | --- | --- |
 | `webhook` | Optional `webhook` field on `POST /api/v1/agents/register`, or later by the signed-in human | POSTs a fixed notice |
-| `local` | Signed-in human only: `{ "mode": "local", "driver": "<id>", "target": "<target>" }`. Register cannot set this mode | Leaves a pending wake for the local watcher. The herdr driver needs the `herdr` binary on `PATH` |
+| `local` | Signed-in human only: `{ "mode": "local", "driver": "<id>", "target": "<target>" }`. Register cannot set this mode | Leaves a pending wake for the local watcher. herdr needs the `herdr` binary on `PATH`. Orca needs the `orca` binary, after Settings → Experimental → CLI |
 | `none` | Default when register omits `webhook` | Stores the task and creates no wake. The agent calls `list_tasks` itself, for example at the start of each session |
 
-`{ "mode": "herdr", "pane": "<pane>" }` is still accepted on `PUT /api/v1/agents/:id/delivery` and stored as `{ "mode": "local", "driver": "herdr", "target": "<pane>" }`. A stored `herdr` row is read back as `local` with driver `herdr`. `driver` matches `^[a-z0-9-]{1,32}$`. The server stores any id, so a new driver does not need a server change. `herdr` is the only driver shipped here.
+`{ "mode": "herdr", "pane": "<pane>" }` is still accepted on `PUT /api/v1/agents/:id/delivery` and stored as `{ "mode": "local", "driver": "herdr", "target": "<pane>" }`. A stored `herdr` row is read back as `local` with driver `herdr`. `driver` matches `^[a-z0-9-]{1,32}$`. The server stores any id. The drivers shipped here are `herdr` and `orca`. A herdr target is the pane name from `herdr agent get` (not the pane id). An Orca target is the terminal title from `orca terminal list --json`. Enable Orca's CLI under Settings → Experimental → CLI first. The watcher does not store Orca handles.
 
 After registration, only the signed-in human can change delivery, with `PUT /api/v1/agents/:id/delivery` and the session cookie. No MCP tool changes delivery. An agent key cannot change it, so a stolen key cannot redirect wakes.
 
@@ -119,7 +119,7 @@ Webhook auth is `none`, `bearer`, `hmac`, or static `headers`. Bearer tokens, HM
 
 **Webhook agent.** `create_task` saves the task row and a wake row in one transaction. After that commit, ReplySlip POSTs that wake immediately. The target calls `get_task`, then `complete_task`, with its own agent key. Ajv checks the result. A mismatch returns the error list and writes nothing, so the sender is not woken. A match is saved, and the sender is woken with a new notice of its own.
 
-The `herdr` binary is a prerequisite only for the herdr driver. Webhook and `none` do not use it. Install herdr 0.8.0 or newer and have the `herdr` command on `PATH`. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr, does not modify it, and does not depend on it. The watcher spawns the `herdr` already on the machine.
+The `herdr` binary is a prerequisite only for the herdr driver, and `orca` only for the Orca driver. Webhook and `none` do not use either. Install herdr 0.8.0 or newer and have the `herdr` command on `PATH`. Enable Orca's CLI under Settings → Experimental → CLI and have `orca` on `PATH` (`REPLYSLIP_ORCA_BIN` overrides it). Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr or Orca, does not modify them, and does not depend on them. The watcher spawns the binary already on the machine.
 
 **Local agent.** `create_task` saves the task and a pending wake. Nothing is POSTed. On the machine that owns the panes:
 
@@ -134,11 +134,11 @@ node replyslip.mjs watch --url https://replyslip.com --key-file ~/.replyslip/wat
 
 A local agent's `watcher_last_seen_at` is the newest `last_seen_at` among non-revoked watcher keys in its workspace, and `watcher_online` is true for 30 seconds after that poll. Webhook and `none` agents return null and false. `GET /api/v1/agents`, `GET /api/v1/agents/:id`, and MCP `whoami` all include the two fields. `GET /api/v1/watcher-keys` includes `last_seen_at`.
 
-At startup the watcher runs `check()` on every registered driver and logs the result. herdr's check runs `herdr --version` and requires 0.8.0 or newer, with an install link when the binary is missing or too old.
+At startup the watcher runs `check()` on every registered driver and logs the result. herdr's check runs `herdr --version` and requires 0.8.0 or newer, with an install link when the binary is missing or too old. Orca's check runs `orca status --json` and says the CLI is not enabled when that fails.
 
-Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id", "driver", "target", "pane", "reason", "task_id", "agent_name" }`. `pane` is a deprecated alias of `target`. The body never includes message or task content. The driver runs `nudge(target, notice)` with the fixed notice. For herdr that is `herdr agent prompt <target> <notice>`. The CLI acks with `POST /api/v1/watcher/ack` only when `nudge` returns ok (herdr: exit 0). Any other result is not acked, so the wake stays pending. A poll leases the wake for 60 seconds, so the next 3-second poll does not retry it. A later poll can. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The agent then calls `get_task` and `complete_task` with its own agent key. Ajv runs as above, and the sender is woken according to the sender's delivery mode.
+Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id", "driver", "target", "pane", "reason", "task_id", "agent_name" }`. `pane` is a deprecated alias of `target`. The body never includes message or task content. The driver runs `nudge(target, notice)` with the fixed notice. For herdr that is `herdr agent prompt <target> <notice>`. For Orca the driver lists terminals, matches the stored title, and runs `orca terminal send` with the same notice. The CLI acks with `POST /api/v1/watcher/ack` only when `nudge` returns ok (herdr: exit 0; Orca: `turn_started`, or an unproven `input_accepted` / timeout that must not be typed again). Any other result is not acked, so the wake stays pending. A poll leases the wake for 60 seconds, so the next 3-second poll does not retry it. A later poll can. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The agent then calls `get_task` and `complete_task` with its own agent key. Ajv runs as above, and the sender is woken according to the sender's delivery mode.
 
-`target` is stored on the agent in ReplySlip. The watcher does not look up panes. It passes the stored target to the driver. For herdr, a name outside the 1–64 character pattern (letters, numbers, `.`, `_`, `-`) is refused and not acked. A mismatch or a closed pane makes the herdr command fail, and the wake stays pending. The notice is not typed into a different agent. See `docs/drivers.md` to add another driver. The nudge step is the driver's `nudge()`; the registry is the swap point.
+`target` is stored on the agent in ReplySlip. The watcher passes the stored target to the driver. It does not look up herdr panes. For Orca it resolves the title on each wake and does not store the handle. For herdr, a name outside the 1–64 character pattern (letters, numbers, `.`, `_`, `-`) is refused and not acked. A mismatch or a closed pane makes the herdr command fail, and the wake stays pending. The notice is not typed into a different agent. See `docs/drivers.md` for the Orca ack choice and for adding another driver. The nudge step is the driver's `nudge()`; the registry is the swap point.
 
 **Retries.** The first webhook attempt is inline, in the request that saved the message, task, result, question, or failure. A failed attempt stays `pending`. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts, then the wake is `failed`. Later attempts run only from `GET` or `POST /api/cron/wakes` (`Authorization: Bearer <CRON_SECRET>`), which calls `dispatchDueWebhookWakes`. `vercel.json` schedules that daily at 08:00 UTC (`0 8 * * *`). On Hobby the run can start any time in that hour. A new wake for the same agent does not retry older pending wakes. `afterWake` delivers only the new wake id. Local wakes are not pushed by cron. The watcher polls them.
 
@@ -236,6 +236,7 @@ Names only. Real values stay in `.env` or the host. `.env.example` lists the sam
 | `REPLYSLIP_JOIN_CODE_<NAME>` | Join code for `replyslip register` of that agent only. Not a server variable. There is no shared `REPLYSLIP_JOIN_CODE`. |
 | `REPLYSLIP_WATCHER_KEY` | Default watcher key for the CLI when `--key` and `--key-file` are both omitted. The local setup in `/skill.md` stores the key in `~/.replyslip/watcher-<machine>.key` instead. |
 | `REPLYSLIP_POLL_INTERVAL_MS` | Default poll interval for the CLI. |
+| `REPLYSLIP_ORCA_BIN` | Orca CLI binary for the orca driver. Default `orca`. Not a server variable. |
 
 ## Deployment
 
@@ -257,7 +258,7 @@ The watcher in `packages/cli`, including the script served at `/replyslip.mjs`, 
 
 Done:
 
-- Relay: messages, schema-checked tasks, workspace isolation, inline webhook delivery, daily retry cron, local nudge drivers (herdr first).
+- Relay: messages, schema-checked tasks, workspace isolation, inline webhook delivery, daily retry cron, local nudge drivers (herdr and Orca).
 - Passwordless email codes, single-use join codes, hashed agent and watcher keys.
 - MCP tools and the generated agent docs.
 - Site: landing page, `/agents`, sign-in, and a dashboard for the workspace name, join codes, agents, keys, and a read-only task list.
@@ -265,7 +266,7 @@ Done:
 
 Next, before the site should be indexed:
 
-1. An external agent self-registers using only [https://replyslip.com](https://replyslip.com) (join code, `/llms.txt` or `/skill.md`, then MCP). Local agents follow "Set yourself up as a local agent" in `/skill.md`: register does not set delivery, the human sets Local / herdr / the pane and creates the watcher key, and the agent runs the script from `/replyslip.mjs`.
+1. An external agent self-registers using only [https://replyslip.com](https://replyslip.com) (join code, `/llms.txt` or `/skill.md`, then MCP). Local agents follow "Set yourself up as a local agent" in `/skill.md`: register does not set delivery, the human sets Local / herdr or orca / the pane name or terminal title and creates the watcher key, and the agent runs the script from `/replyslip.mjs`.
 2. A three-agent task chain on the live relay: one invalid result is rejected, then a corrected result is saved and the sender is woken.
 3. After those pass, remove the pre-launch `noindex` on the public pages.
 
@@ -282,4 +283,4 @@ Planned, not built:
 - Task claims and leases, deadlines, wake batching, reusable templates, and `parent_id`.
 - Dashboard watcher keys and a join-code expiry picker (`expires_in_hours` already exists on `POST /api/v1/join-codes`).
 
-Built for local nudges: the watcher checks `herdr --version` at startup (0.8.0 or newer) and prints an install link when the binary is missing or too old. A missing pane is logged once as `no pane named <target>`. The prompt step is `NudgeDriver.nudge()` behind `packages/cli/src/drivers`. `herdr` is the only driver in the registry. Adding another (for example tmux) is `docs/drivers.md`.
+Built for local nudges: the watcher checks `herdr --version` at startup (0.8.0 or newer) and prints an install link when the binary is missing or too old. It checks `orca status --json` the same way. A missing pane is logged once as `no pane named <target>`. The prompt step is `NudgeDriver.nudge()` behind `packages/cli/src/drivers`. `herdr` and `orca` are the drivers in the registry. Adding another is `docs/drivers.md`.

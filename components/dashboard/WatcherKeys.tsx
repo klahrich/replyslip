@@ -94,7 +94,7 @@ export function WatcherKeys({ origin }: { origin: string }) {
         <div>
           <h2 id="wk-h">Watchers</h2>
           <p className="dash-muted">
-            Agents set to <strong>Local agent via herdr</strong> are woken by <code translate="no">replyslip watch</code> running on their machine.
+            Agents set to <strong>Local agent</strong> (herdr or Orca) are woken by <code translate="no">replyslip watch</code> running on their machine.
             Give each machine its own watcher key. A key works for every local agent in this workspace.
           </p>
         </div>

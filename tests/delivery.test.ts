@@ -44,6 +44,20 @@ describe('local delivery', () => {
     expect(local.status).toBe(200);
     expect(local.data.agent.delivery).toMatchObject({ mode: 'local', driver: 'tmux', target: 'dev:0.0' });
 
+    const orca = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
+      method: 'PUT',
+      cookie: session.cookie,
+      params: { id: agent.id },
+      body: { mode: 'local', driver: 'orca', target: 'Reviewer agent' },
+    });
+    expect(orca.status).toBe(200);
+    expect(orca.data.agent.delivery).toMatchObject({
+      mode: 'local',
+      driver: 'orca',
+      target: 'Reviewer agent',
+      pane: 'Reviewer agent',
+    });
+
     const bad = await call(deliveryRoute, `http://localhost/api/v1/agents/${agent.id}/delivery`, {
       method: 'PUT',
       cookie: session.cookie,
