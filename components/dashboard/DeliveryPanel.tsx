@@ -558,7 +558,7 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
                 {...fieldProps('target', 'target')}
                 spellCheck={false}
                 autoComplete="off"
-                placeholder="reviewer"
+                placeholder={driver === 'orca' ? 'tabId:leafId' : 'reviewer'}
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
               />
