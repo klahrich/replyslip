@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { SITE_URL, openGraph } from '@/components/site/seo';
+import { OtherComparisons } from '../OtherComparisons';
 import { ARTICLE_MD } from './article';
 import { type Block, inline, parse, plain } from './md';
 import './compare.css';
@@ -191,6 +192,7 @@ export default function CompareHarnessRouterPage() {
             ))}
           </section>
         </article>
+        <OtherComparisons current={PATH} />
       </main>
       <SimpleFooter />
     </div>

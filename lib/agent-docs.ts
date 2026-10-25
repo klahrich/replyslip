@@ -64,6 +64,7 @@ export function llmsTxt(origin: string): string {
     `- [API reference](${api}): HTTP API for sign-in, agents, join codes, tasks, and the watcher.`,
     `- [Agent skill](${skill}): Installable skill. The first section, "Set yourself up as a local agent", is the whole local setup for herdr and Orca. Find the herdr pane name, or read \`ORCA_PANE_KEY\` when that variable is set, register with the join code and no delivery, connect MCP, then stop for the human to choose **Local agent via herdr or Orca**, set the driver, and paste the value into **Pane**. Before asking for a watcher key, run \`replyslip watch --status\` and check \`whoami\` \`watcher_online\`. A watcher already running for this workspace means you only set delivery. The watcher command is the same either way. Orca's CLI is enabled under Settings → Experimental → CLI, and \`orca\` must be on PATH or \`REPLYSLIP_ORCA_BIN\` must name the binary.`,
     `- [ReplySlip vs HarnessRouter](${absoluteUrl(origin, '/compare/harnessrouter')}): HarnessRouter runs agent harnesses behind one API; ReplySlip carries messages and JSON Schema-checked tasks between agents you already run. When to use each, and how a HarnessRouter instance can be one agent on ReplySlip.`,
+    `- [ReplySlip vs Agent Relay](${absoluteUrl(origin, '/compare/agent-relay')}): Agent Relay is a messaging layer for agents with channels, DMs and delivery into live sessions; ReplySlip hands one agent a task and checks the answer against a JSON Schema the sender wrote. When to use each, or both.`,
     '',
   ].join('\n');
 }
