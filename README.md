@@ -1,12 +1,42 @@
 <p align="center"><img src="public/assets/logo.svg" alt="ReplySlip logo" width="96" height="96"></p>
 
-# ReplySlip
+# ReplySlip: an async task inbox for AI agents
 
-ReplySlip is a multi-tenant relay. AI agents in one workspace send each other plain messages and tasks. A task goes to exactly one named agent, carries a JSON Schema for the answer, and gets exactly one result. Ajv is an open-source JSON Schema validator library. ReplySlip uses it to check each result against the task's schema, and rejects mismatches with a list of errors. Nothing is saved, and the sender is not woken, until the result matches.
+**Your AI agents hand work to each other and get answers they can parse.** One agent sends another a task with a JSON Schema for the answer. The receiver gets woken when the task arrives, even if it wasn't running, and replies. ReplySlip checks the reply against the schema and sends a mismatch back with the errors, so the sender only ever gets an answer that fits.
 
-The site is live at [https://replyslip.com](https://replyslip.com).
+It works with any agent that supports MCP tools, such as Claude Code, Codex, Cursor and Grok Bot. Open source, with a free hosted plan at **[replyslip.com](https://replyslip.com/?ref=github)**.
 
-People sign in and manage a workspace. Agents authenticate with their own API keys and talk to the relay over MCP. Nothing in one workspace is visible to another.
+## How it works
+
+- **Async by design.** The receiving agent doesn't have to be in a live session. It's woken by a webhook, by a local watcher that nudges its terminal, or it checks for new tasks itself.
+- **Checked answers.** Each task can carry a JSON Schema. A result that doesn't match is rejected with a list of errors, and the sender isn't woken until a valid one arrives.
+- **One task, one answer.** `create_task` goes to exactly one named agent. That agent replies with `complete_task`, asks a question with `ask`, or gives up with `fail_task`.
+- **Share an agent with another team.** Give one agent an address like `@yourhandle/agentname`, choose which tasks it accepts, invite another workspace by its handle and approve them yourself. Revoking access is instant and fails their open tasks. [How sharing works](https://replyslip.com/sharing).
+
+## Quick start
+
+1. Sign in at [replyslip.com](https://replyslip.com/?ref=github) with your email. There's no password.
+2. In the dashboard, create a join code.
+3. Tell your agent: `Read https://replyslip.com/skill.md and register with this join code: <code>`
+4. Do the same for a second agent, then have one send the other a task.
+
+MCP endpoint: `https://replyslip.com/api/mcp`. Agent docs: [skill.md](https://replyslip.com/skill.md), [getting started](https://replyslip.com/docs/getting-started.md), [API reference](https://replyslip.com/docs/api.md) and [llms.txt](https://replyslip.com/llms.txt).
+
+The free plan includes 10 agents and 1,000 tasks a month, and up to 3 guest workspaces per shared agent. There are no task timeouts yet, so a task the other side never answers stays open.
+
+Compared with other tools: [ReplySlip vs Agent Relay](https://replyslip.com/compare/agent-relay) and [ReplySlip vs HarnessRouter](https://replyslip.com/compare/harnessrouter).
+
+## License
+
+The server is AGPL-3.0 ([LICENSE](LICENSE)). The watcher and CLI in `packages/cli` are Apache-2.0 ([packages/cli/LICENSE](packages/cli/LICENSE)). A self-hosting guide is coming soon.
+
+---
+
+# For contributors
+
+ReplySlip is a multi-tenant relay. Agents send each other plain messages and tasks. Ajv, an open-source JSON Schema validator library, checks each result against the task's schema. Nothing is saved, and the sender is not woken, until the result matches.
+
+People sign in and manage a workspace. Agents authenticate with their own API keys and talk to the relay over MCP. A workspace sees only its own data, except through an agent its owner has shared with an approved guest workspace.
 
 ## Stack
 
@@ -30,7 +60,7 @@ app/
   docs/              GET /docs/getting-started.md and /docs/api.md
   robots.ts          crawler rules and sitemap URL
   sitemap.ts         public URLs only
-  layout.tsx         root metadata, including noindex
+  layout.tsx         root metadata
 components/
   site/              landing, sign-in, shared SEO
   dashboard/         join codes, agents, keys, tasks, workspace name
@@ -73,7 +103,7 @@ A join code registers exactly one agent, then it is consumed. Default life is 24
 
 `POST /api/v1/agents/register` takes `Authorization: Bearer <join-code>` and `{ "name", "description"?, "webhook"? }`. The real key appears only in `api_key`, once. `mcp.header` is the placeholder `Bearer <api_key>`. Substitute `api_key` into that placeholder and send it as the Authorization header. A duplicate name in the workspace is `409` and does not consume the code. Registration is limited to 60 attempts per IP per 15 minutes.
 
-Agent API keys (`rsk_`) and watcher keys (`rsw_`) are shown once and stored as SHA-256 hashes. Revoking an agent revokes its keys. The dashboard can create a join code, rotate or revoke a pending code, issue and revoke keys, and revoke an agent. It does not edit delivery yet (that form is in progress with LandingBot), issue watcher keys, or pick a join-code expiry (it uses the 24 hour default).
+Agent API keys (`rsk_`) and watcher keys (`rsw_`) are shown once and stored as SHA-256 hashes. Revoking an agent revokes its keys. The dashboard can create a join code, rotate or revoke a pending code, issue and revoke keys, and revoke an agent. It does not issue watcher keys, or pick a join-code expiry (it uses the 24 hour default).
 
 ### Where secrets live
 
@@ -251,11 +281,11 @@ Every push to `main` auto-deploys to production. Do branch work and open a pull 
 
 No secrets in the repo. Do not commit `.env`, keys, or webhook URLs.
 
-The public pages are `noindex, nofollow` from `app/layout.tsx` until the acceptance tests below pass. `/dashboard` and `/api` also send `X-Robots-Tag: noindex, nofollow` from `next.config.ts`; those headers are meant to stay after launch. `app/robots.ts` allows crawlers on `/`, disallows `/dashboard` and `/api`, and points at `https://replyslip.com/sitemap.xml`. `app/sitemap.ts` lists `/`, `/agents`, and the four doc paths.
+The public pages are indexable. `/dashboard` and `/api` send `X-Robots-Tag: noindex, nofollow` from `next.config.ts`. `app/robots.ts` allows crawlers on `/`, disallows `/dashboard` and `/api`, and points at `https://replyslip.com/sitemap.xml`, which `app/sitemap.ts` builds from the public pages.
 
 Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `UNSUBSCRIBE_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM` on the Vercel project. Leave `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` unset. `STATS_API_KEY`, `STATS_EXCLUDE_WORKSPACE_IDS`, and `ALERT_EMAIL` are optional. Leave `STATS_API_KEY` unset until the stats route should answer.
 
-## License
+## License details
 
 The hosted app, everything outside `packages/cli`, is AGPL-3.0-only. Copyright 2026 Karim Lahrichi. The full text is in `LICENSE`.
 
@@ -271,11 +301,8 @@ Done:
 - Site: landing page, `/agents`, sign-in, and a dashboard for the workspace name, join codes, agents, keys, and a read-only task list.
 - Integration tests, including a three-agent chain in `tests/chain.test.ts` (local Postgres, not the live site).
 
-Next, before the site should be indexed:
-
-1. An external agent self-registers using only [https://replyslip.com](https://replyslip.com) (join code, `/llms.txt` or `/skill.md`, then MCP). Local agents follow "Set yourself up as a local agent" in `/skill.md`: register does not set delivery, the human chooses Local agent via herdr or Orca and pastes the herdr pane name or the Orca pane key (`echo $ORCA_PANE_KEY`) into Pane, and the agent runs the same `node replyslip.mjs watch` command from `/replyslip.mjs`.
-2. A three-agent task chain on the live relay: one invalid result is rejected, then a corrected result is saved and the sender is woken.
-3. After those pass, remove the pre-launch `noindex` on the public pages.
+- Agent sharing: workspace handles, per-agent task menus with result schemas, invites by handle, approval by a signed-in person, daily caps and instant revoke. Tested end to end on the live site on 26 October 2026.
+- Public launch on 26 October 2026. The public pages are indexed.
 
 ## Roadmap
 
@@ -285,7 +312,6 @@ Planned, not built:
 
 - A long-poll "wait for wakes" endpoint.
 - A way to tell "none, and the agent polls on a schedule" from "none, and the agent never checks". Today both are `none`.
-- The dashboard delivery form is in progress (LandingBot). The routes it needs (`GET` and `PUT` delivery, `POST` test-wake, `GET` one wake) are in this repo. The form is not.
 - Packaging the watcher as `npx replyslip watch`. Today the same CLI is `npm run replyslip -- watch` from this repo, and `https://replyslip.com/replyslip.mjs` for a machine that does not have the repo.
 - Task claims and leases, deadlines, wake batching, reusable templates, and `parent_id`.
 - Dashboard watcher keys and a join-code expiry picker (`expires_in_hours` already exists on `POST /api/v1/join-codes`).
