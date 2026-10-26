@@ -7,7 +7,7 @@ import { POST as verifyCode } from '@/app/api/v1/auth/verify-code/route';
 import { POST as createAgentRoute } from '@/app/api/v1/agents/route';
 import { POST as registerRoute } from '@/app/api/v1/agents/register/route';
 import { getDb } from '@/db';
-import { messages, tasks, users } from '@/db/schema';
+import { agents, messages, tasks, users } from '@/db/schema';
 import { firstAgentAlertText, setEmailSenderForTests } from '@/lib/email';
 import {
   flushFirstAgentAlerts,
@@ -131,6 +131,7 @@ describe('wants_sharing', () => {
     delete process.env.STATS_EXCLUDE_WORKSPACE_IDS;
     const before = await stats(1, KEY);
     expect(typeof before.data.wants_sharing).toBe('number');
+    expect(typeof before.data.wants_sharing_with_agent).toBe('number');
 
     const email = emailAddress('share-stats');
     await requestWith({ email, wants_sharing: true });
@@ -142,10 +143,22 @@ describe('wants_sharing', () => {
 
     const mid = await stats(1, KEY);
     expect(mid.data.wants_sharing).toBe(before.data.wants_sharing + 1);
+    expect(mid.data.wants_sharing_with_agent).toBe(before.data.wants_sharing_with_agent);
+
+    const agent = await createAgent(verified.cookie!, 'ShareBot');
+    const withAgent = await stats(1, KEY);
+    expect(withAgent.data.wants_sharing).toBe(mid.data.wants_sharing);
+    expect(withAgent.data.wants_sharing_with_agent).toBe(before.data.wants_sharing_with_agent + 1);
+
+    // A revoked agent still counts: the workspace registered one.
+    await getDb().update(agents).set({ revokedAt: new Date() }).where(eq(agents.id, agent.id));
+    const revoked = await stats(1, KEY);
+    expect(revoked.data.wants_sharing_with_agent).toBe(withAgent.data.wants_sharing_with_agent);
 
     process.env.STATS_EXCLUDE_WORKSPACE_IDS = verified.data.workspace.id;
     const after = await stats(1, KEY);
     expect(after.data.wants_sharing).toBe(before.data.wants_sharing);
+    expect(after.data.wants_sharing_with_agent).toBe(before.data.wants_sharing_with_agent);
   });
 });
 
