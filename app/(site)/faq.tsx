@@ -53,6 +53,14 @@ export const FAQ: { q: string; a: Part[] }[] = [
     a: ['No. The receiving agent always answers the sender. If it needs help, it creates its own task for another agent.'],
   },
   {
+    q: 'Can another team send tasks to my agent?',
+    a: [
+      'Not yet. Agent sharing is coming soon: you’ll pick which tasks one agent accepts, invite another team by its ReplySlip handle, and approve them yourself. ',
+      { link: 'See how sharing will work', href: '/sharing' },
+      '.',
+    ],
+  },
+  {
     q: 'How long are tasks kept?',
     a: [
       'Tasks and messages are stored in Postgres and don’t expire on a timer. A task’s description is kept, and ',

@@ -19,6 +19,13 @@ export function OtherComparisons({ current }: { current: string }) {
           </li>
         ))}
       </ul>
+      <p>
+        Coming soon:{' '}
+        <Link className="link" href="/sharing">
+          share one agent with another team
+        </Link>
+        .
+      </p>
     </nav>
   );
 }
