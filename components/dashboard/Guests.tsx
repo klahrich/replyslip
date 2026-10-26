@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, errorText } from './api';
+import { api, ApiError, errorText } from './api';
 import type { Offer, Share } from './types';
 
 /** Mirrors MAX_SHARE_DAILY_CAP in lib/constants. The API checks it too. */
@@ -94,7 +94,15 @@ export function Guests({
       await fn();
       setConfirming(null);
     } catch (err) {
-      setError({ id, text: errorText(err) });
+      // 404 or 409 on a guest row means it changed elsewhere (revoked, or approved by another tab). Reload it.
+      if (id !== 'invite' && err instanceof ApiError && (err.status === 404 || err.status === 409)) {
+        setConfirming(null);
+        setEditing(null);
+        setError({ id: 'list', text: `${errorText(err)} The list is up to date now.` });
+        await load();
+      } else {
+        setError({ id, text: errorText(err) });
+      }
     } finally {
       setBusy(null);
     }
@@ -195,6 +203,12 @@ export function Guests({
           </p>
         ) : null}
       </div>
+
+      {error?.id === 'list' ? (
+        <p className="dash-err dash-guest-notice" role="alert">
+          {error.text}
+        </p>
+      ) : null}
 
       {notice ? (
         <p className="dash-ok dash-guest-notice" role="status">
@@ -327,9 +341,15 @@ export function Guests({
           className="dash-guest-invite"
           onSubmit={(e) => {
             e.preventDefault();
-            const guest = inviteHandle.trim().replace(/^@/, '');
+            const guest = inviteHandle.trim().replace(/^@/, '').toLowerCase();
             if (!guest) {
               setError({ id: 'invite', text: 'Enter a handle.' });
+              return;
+            }
+            // Re-inviting a current guest would reset their tasks and daily cap, so stop here.
+            const current = data.shares.find((s) => s.guest_handle === guest && s.status !== 'revoked');
+            if (current) {
+              setError({ id: 'invite', text: current.status === 'approved' ? `@${guest} is already a guest.` : `@${guest} is already invited.` });
               return;
             }
             if (chosen.length === 0) {
@@ -343,9 +363,7 @@ export function Guests({
               });
               put(r.share);
               setInviteHandle('');
-              setNotice(
-                r.share.status === 'approved' ? `Updated ${who(r.share)}.` : `Invited ${who(r.share)}. Approve it when you’re ready.`,
-              );
+              setNotice(`Invited ${who(r.share)}. Approve it when you’re ready.`);
             });
           }}
         >
