@@ -36,7 +36,7 @@ components/
   dashboard/         join codes, agents, keys, tasks, workspace name
 lib/                 auth, email, agents, tasks, wakes, delivery, MCP, agent docs
 db/                  Drizzle schema (db/schema.ts) and the Postgres client (db/index.ts)
-drizzle/             SQL migrations (0000_init.sql through 0005_marketing_consent.sql) and the journal
+drizzle/             SQL migrations (0000_init.sql through 0006_signup_source.sql) and the journal
 scripts/migrate.ts   npm run db:migrate
 scripts/bundle-replyslip.mjs   rebuild packages/cli/replyslip.mjs (esbuild, Node 18, zero npm deps)
 packages/cli/        npm run replyslip -- watch | register | key-path, and the served replyslip.mjs bundle (nudge drivers in src/drivers)
@@ -59,7 +59,7 @@ A workspace is the tenant. The first successful sign-in creates one and names it
 
 Sign-up and sign-in are the same passwordless flow. There is no password.
 
-1. `POST /api/v1/auth/request-code` with `{ "email" }` stores a 6-digit code as an HMAC (keyed with `ENCRYPTION_KEY`), expires it in 10 minutes, and emails it. A newer code invalidates older unused codes. The `200` body is the same whether or not the email already exists.
+1. `POST /api/v1/auth/request-code` with `{ "email" }` stores a 6-digit code as an HMAC (keyed with `ENCRYPTION_KEY`), expires it in 10 minutes, and emails it. Optional `source` is trimmed, capped at 200 characters, and stored on `users.signup_source` only when that request creates the user. A later request does not replace it. The field is not returned by the API. A newer code invalidates older unused codes. The `200` body is the same whether or not the email already exists.
 2. When `RESEND_API_KEY` is unset, `lib/email.ts` prints the code to the server log. When it is set, `EMAIL_FROM` is required and mail goes out through the Resend HTTP API.
 3. Over the limit (5 per email or 100 per IP per 15 minutes) the route returns `429` with `error.code` `rate_limited`, `retry_after_seconds`, and `Retry-After`. That request does not send a code and does not count toward the window.
 4. `POST /api/v1/auth/verify-code` with `{ "email", "code" }` allows 5 attempts, then the code is dead. Optional `marketing_opt_in: true` and `consent_text` record explicit marketing consent. The checkbox must start unchecked. Omitting them leaves consent untouched. Success sets an HttpOnly, Secure, SameSite=Lax cookie named `replyslip_session` (30 days). Only the SHA-256 hash of the session token is stored.
@@ -241,6 +241,9 @@ Names only. Real values stay in `.env` or the host. `.env.example` lists the sam
 | `REPLYSLIP_WATCHER_KEY` | Default watcher key for the CLI when `--key` and `--key-file` are both omitted. The local setup in `/skill.md` stores the key in `~/.replyslip/watcher-<machine>.key` instead. |
 | `REPLYSLIP_POLL_INTERVAL_MS` | Default poll interval for the CLI. |
 | `REPLYSLIP_ORCA_BIN` | Orca CLI binary for the orca driver when `orca` is not on `PATH`. Default `orca`. Not a server variable. |
+| `STATS_API_KEY` | Bearer token for `GET /api/admin/stats`. When unset, that route is 404. |
+| `STATS_EXCLUDE_WORKSPACE_IDS` | Comma-separated workspace UUIDs left out of `/api/admin/stats` and out of the first-agent alert. |
+| `ALERT_EMAIL` | Inbox for the first-agent alert. When unset, the alert is skipped. |
 
 ## Deployment
 
@@ -250,7 +253,7 @@ No secrets in the repo. Do not commit `.env`, keys, or webhook URLs.
 
 The public pages are `noindex, nofollow` from `app/layout.tsx` until the acceptance tests below pass. `/dashboard` and `/api` also send `X-Robots-Tag: noindex, nofollow` from `next.config.ts`; those headers are meant to stay after launch. `app/robots.ts` allows crawlers on `/`, disallows `/dashboard` and `/api`, and points at `https://replyslip.com/sitemap.xml`. `app/sitemap.ts` lists `/`, `/agents`, and the four doc paths.
 
-Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `UNSUBSCRIBE_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM` on the Vercel project. Leave `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` unset.
+Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `UNSUBSCRIBE_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM` on the Vercel project. Leave `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` unset. `STATS_API_KEY`, `STATS_EXCLUDE_WORKSPACE_IDS`, and `ALERT_EMAIL` are optional. Leave `STATS_API_KEY` unset until the stats route should answer.
 
 ## License
 

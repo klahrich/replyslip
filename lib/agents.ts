@@ -12,6 +12,7 @@ import {
 } from './constants';
 import { randomToken, sha256, tokenPrefix } from './crypto';
 import { applyDeliveryUpdate, deliveryColumns, publicDelivery, type DeliveryInput, type DeliveryUpdate } from './delivery';
+import { agentCountForUpdate, loadFirstAgentNotice, queueFirstAgentAlert } from './first-agent-alert';
 import { HttpError, isUniqueViolation } from './errors';
 import { clientIp } from './origin';
 import { assertWithinLimit } from './plans';
@@ -54,8 +55,9 @@ export async function createAgent(
     );
   }
   try {
-    return await getDb().transaction(async (tx) => {
+    const created = await getDb().transaction(async (tx) => {
       await assertWithinLimit(user.workspace.id, 'agents', tx);
+      const prior = await agentCountForUpdate(tx, user.workspace.id);
       const [agent] = await tx
         .insert(agents)
         .values({
@@ -65,8 +67,11 @@ export async function createAgent(
         })
         .returning();
       if (!agent) throw new HttpError(500, 'internal_error', 'Something went wrong.');
-      return agent;
+      const notice = prior === 0 ? await loadFirstAgentNotice(tx, agent) : null;
+      return { agent, notice };
     });
+    if (created.notice) queueFirstAgentAlert(created.notice);
+    return created.agent;
   } catch (err) {
     if (isUniqueViolation(err)) {
       throw new HttpError(409, 'name_taken', `An agent named ${input.name} already exists in this workspace.`);
@@ -349,7 +354,7 @@ export async function registerAgentWithJoinCode(input: {
   const secret = randomToken('rsk_');
 
   try {
-    return await getDb().transaction(async (tx) => {
+    const created = await getDb().transaction(async (tx) => {
       await tx.execute(sql`select id from join_codes where id = ${loaded.code.id} for update`);
       const [fresh] = await tx.select().from(joinCodes).where(eq(joinCodes.id, loaded.code.id)).limit(1);
       if (!fresh || fresh.revokedAt) {
@@ -362,6 +367,7 @@ export async function registerAgentWithJoinCode(input: {
         throw new HttpError(401, 'join_code_expired', 'This join code has expired.');
       }
       await assertWithinLimit(fresh.workspaceId, 'agents', tx);
+      const prior = await agentCountForUpdate(tx, fresh.workspaceId);
       const [agent] = await tx
         .insert(agents)
         .values({
@@ -385,8 +391,11 @@ export async function registerAgentWithJoinCode(input: {
       if (!consumed) {
         throw new HttpError(401, 'join_code_used', 'This join code has already been used.');
       }
-      return { agent, apiKey: secret };
+      const notice = prior === 0 ? await loadFirstAgentNotice(tx, agent) : null;
+      return { agent, apiKey: secret, notice };
     });
+    if (created.notice) queueFirstAgentAlert(created.notice);
+    return { agent: created.agent, apiKey: created.apiKey };
   } catch (err) {
     if (isUniqueViolation(err)) {
       throw new HttpError(409, 'name_taken', `An agent named ${input.name} already exists in this workspace.`);

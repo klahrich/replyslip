@@ -31,8 +31,10 @@ Sign-up and sign-in are the same flow. There is no password.
 Request:
 
 ```json
-{ "email": "owner@example.com" }
+{ "email": "owner@example.com", "source": "landing" }
 ```
+
+`source` is optional. It is trimmed and capped at 200 characters. A blank value is stored as null. It is written only when this request creates the user, and a later request does not replace it. The field is not returned by verify or `GET /auth/me`. The sign-in page does not send it.
 
 Response `200` when a code may have been sent. The body is the same whether or not the email already exists:
 
@@ -398,6 +400,20 @@ Tool results are JSON text. Failures set the MCP tool error flag and return `{ "
 `whoami` adds `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and `ask` return the flat `plan_limit` object as a tool error when the monthly task cap is already reached. `send_message`, `complete_task`, and `fail_task` do not.
 
 See https://<host>/docs/getting-started.md for arguments and the task rules.
+
+## Admin
+
+Not an agent API. `GET /api/admin/stats` is counts for the operator. The route is off unless `STATS_API_KEY` is set.
+
+### GET `/api/admin/stats`
+
+`Authorization: Bearer <STATS_API_KEY>`. The comparison is constant-time. A missing or wrong key is `401` `{ "error": { "code": "unauthorized", "message": "Unauthorized." } }`. When `STATS_API_KEY` is unset or blank, the route is `404` `{ "error": { "code": "not_found", "message": "Not found." } }` even if a bearer token is sent.
+
+`days` defaults to 14. It must be an integer from 1 to 90, or the route is `400` `validation_error`. Every response sets `X-Robots-Tag: noindex` and `Cache-Control: no-store`.
+
+`200` is counts only. `from` and `to` are UTC dates. `series` has one object per UTC day in that window. `totals` sums the window, except `totals.active_agents`, which is the number of distinct agents active on any day in the window rather than the sum of the daily counts.
+
+Each day and the totals have `signups`, `workspaces`, `agents_registered`, `active_agents`, `tasks_created`, `tasks_completed`, `tasks_failed`, `messages_sent`, and `signups_by_source`. An active agent sent or received a task or a message that day. `tasks_completed` and `tasks_failed` are counted on the UTC day they closed. `signups_by_source` groups `users.signup_source`. A missing source is the key `none`. `STATS_EXCLUDE_WORKSPACE_IDS` is a comma-separated list of workspace UUIDs left out of every count; other tokens are ignored. Sign-ups with no workspace yet are counted. The body never includes emails, names, message or task text, or ids.
 
 ## Cron
 

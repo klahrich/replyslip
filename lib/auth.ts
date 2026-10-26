@@ -50,9 +50,19 @@ function workspaceNameFromEmail(email: string): string {
   return cleaned ? `${cleaned} workspace` : 'Workspace';
 }
 
+const SIGNUP_SOURCE_MAX = 200;
+
+/** Trimmed, capped at 200 characters. Empty becomes null. Never written over an existing user. */
+export function normalizeSignupSource(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().slice(0, SIGNUP_SOURCE_MAX);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export async function requestLoginCode(
   emailInput: string,
   req: Request,
+  sourceInput?: string | null,
 ): Promise<{ limited: true; retryAfterSeconds: number } | { limited: false }> {
   const email = normalizeEmail(emailInput);
   const limit = await consumeRateLimit({
@@ -65,7 +75,7 @@ export async function requestLoginCode(
   const db = getDb();
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (existing.length === 0) {
-    await db.insert(users).values({ email });
+    await db.insert(users).values({ email, signupSource: normalizeSignupSource(sourceInput) });
   }
 
   const code = randomLoginCode();

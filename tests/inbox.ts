@@ -1,12 +1,17 @@
-import { setEmailSenderForTests, type LoginCodeEmail } from '@/lib/email';
+import { setEmailSenderForTests, type FirstAgentAlertEmail, type LoginCodeEmail } from '@/lib/email';
 
 export const inbox: LoginCodeEmail[] = [];
+export const alerts: FirstAgentAlertEmail[] = [];
 
 export function installInbox(): void {
   inbox.length = 0;
+  alerts.length = 0;
   setEmailSenderForTests({
     async sendLoginCode(message) {
       inbox.push(message);
+    },
+    async sendFirstAgentAlert(message) {
+      alerts.push(message);
     },
   });
 }

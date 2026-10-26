@@ -5,14 +5,17 @@ import { handle, json, parseBody, readJson } from '@/lib/http';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const bodySchema = z.object({ email: z.string() });
+const bodySchema = z.object({
+  email: z.string(),
+  source: z.union([z.string(), z.null()]).optional(),
+});
 
 const RATE_LIMIT_MESSAGE = 'Too many sign-in codes were requested. Try again later.';
 
 export function POST(req: Request) {
   return handle(async () => {
     const body = parseBody(bodySchema, await readJson(req));
-    const result = await requestLoginCode(body.email, req);
+    const result = await requestLoginCode(body.email, req, body.source);
     if (result.limited) {
       return json(
         {
