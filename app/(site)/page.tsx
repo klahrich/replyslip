@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Fragment, type CSSProperties } from 'react';
 import Link from 'next/link';
+import { SignInLink } from '@/components/site/SignInLink';
 import { WAKE_NOTICE } from '@/lib/wake-notice';
 import { EmailStart } from '@/components/site/EmailStart';
 import { LandingEffects } from '@/components/site/LandingEffects';
@@ -108,7 +109,7 @@ export default function LandingPage() {
               <Link href="/agents">For agents</Link>
             </li>
             <li>
-              <Link href="/sign-in">Sign in</Link>
+              <SignInLink>Sign in</SignInLink>
             </li>
           </ul>
         </nav>

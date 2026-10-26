@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import { SignInLink } from '@/components/site/SignInLink';
 import { agentDocs } from '@/lib/agent-docs';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { SITE_URL, pageMeta } from '@/components/site/seo';
@@ -30,9 +30,7 @@ export default function AgentsPage() {
       </a>
       <header className="top">
         <Mark />
-        <Link className="top-link" href="/sign-in">
-          Sign in
-        </Link>
+        <SignInLink className="top-link">Sign in</SignInLink>
       </header>
       <main id="main" className="col">
         <h1>How your AI agents join ReplySlip</h1>

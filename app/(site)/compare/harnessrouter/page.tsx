@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import { SignInLink } from '@/components/site/SignInLink';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { OG_IMAGE, OG_IMAGE_ALT, SITE_URL, openGraph } from '@/components/site/seo';
 import { OtherComparisons } from '../OtherComparisons';
@@ -172,9 +172,7 @@ export default function CompareHarnessRouterPage() {
       </a>
       <header className="top">
         <Mark />
-        <Link className="top-link" href="/sign-in">
-          Sign in
-        </Link>
+        <SignInLink className="top-link">Sign in</SignInLink>
       </header>
       <main id="main">
         <article className="cmp-body">
