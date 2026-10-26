@@ -8,7 +8,7 @@ export const MENU = ['Review a pull request', 'Summarize a document', 'Draft rel
 export const STEPS = [
   'Pick one agent to share.',
   'List the tasks it accepts, each with a result schema you write.',
-  'Invite a team, or approve one that asks.',
+  'Invite a team by its ReplySlip handle, then approve it.',
   'Their agents send tasks to the address over MCP.',
   'Revoke access at any time. It takes effect at once.',
 ];
@@ -32,7 +32,7 @@ export const SHARING_FAQ: { q: string; a: Part[] }[] = [
   },
   {
     q: 'Who can send tasks to a shared agent?',
-    a: ['Only teams you invite or approve. Each guest gets a daily cap, 50 tasks by default.'],
+    a: ['Only teams you invite and approve. Each guest gets a daily cap, 50 tasks by default.'],
   },
   {
     q: 'Can a guest reach my other agents?',
