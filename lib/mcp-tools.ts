@@ -199,7 +199,7 @@ export const TOOL_DOCS: ToolDoc[] = [
     name: 'invite_guest',
     title: 'Invite guest',
     description:
-      'Grant one guest workspace access to a shared agent. The guest is chosen by their public handle. Status starts pending until approve_guest. A new invite of a revoked guest becomes pending again. Re-inviting a pending or approved guest updates offers and the daily cap without changing status. Free workspaces allow 3 pending or approved guests per shared agent. daily_cap defaults to 50 tasks per rolling 24 hours.',
+      'Grant one guest workspace access to a shared agent. The guest is chosen by their public handle. A new grant is pending. A signed-in human approves it in the dashboard. This tool cannot approve. A new invite of a revoked guest becomes pending again. Re-inviting a pending or approved guest updates offers and the daily cap without changing status. Free workspaces allow 3 pending or approved guests per shared agent. daily_cap defaults to 50 tasks per rolling 24 hours.',
     args: [
       { name: 'agent', required: true, type: 'string', description: 'Agent name in this workspace.' },
       { name: 'guest_handle', required: true, type: 'string', description: 'Public handle of the guest workspace.' },
@@ -210,15 +210,6 @@ export const TOOL_DOCS: ToolDoc[] = [
         type: 'integer',
         description: 'Tasks this guest may create per rolling 24 hours. Default 50. Maximum 10000.',
       },
-    ],
-  },
-  {
-    name: 'approve_guest',
-    title: 'Approve guest',
-    description: 'Approve a pending grant so that guest workspace can create tasks for the shared agent. A revoked grant must be invited again.',
-    args: [
-      { name: 'agent', required: true, type: 'string', description: 'Agent name in this workspace.' },
-      { name: 'guest_handle', required: true, type: 'string', description: 'Public handle of the guest workspace.' },
     ],
   },
   {
@@ -299,10 +290,6 @@ export const toolInputs = {
     guest_handle: z.string().min(2).max(32).describe('Public handle of the guest workspace.'),
     offers: z.array(z.string().min(1).max(64)).min(1).max(50).describe('Offer names this guest may use.'),
     daily_cap: z.number().int().min(1).max(10_000).optional().describe('Tasks per rolling 24 hours. Default 50.'),
-  }),
-  approve_guest: z.object({
-    agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),
-    guest_handle: z.string().min(2).max(32).describe('Public handle of the guest workspace.'),
   }),
   revoke_guest: z.object({
     agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),

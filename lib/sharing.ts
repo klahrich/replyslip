@@ -508,6 +508,9 @@ export async function inviteGuest(
       await assertGuestWorkspaceLimit(workspaceId, Number.isFinite(used) ? used : 0, tx);
     }
     const now = new Date();
+    // Invite never approves. A new grant and a re-opened revoked grant are pending.
+    // A grant that is already pending or approved keeps that status.
+    const nextStatus = existing?.status === 'pending' || existing?.status === 'approved' ? existing.status : 'pending';
     let saved: ShareRow | undefined;
     if (!existing) {
       const [created] = await tx
@@ -515,7 +518,7 @@ export async function inviteGuest(
         .values({
           agentId: agent.id,
           guestWorkspaceId: guest.id,
-          status: 'pending',
+          status: nextStatus,
           dailyCap,
           updatedAt: now,
         })
@@ -525,7 +528,7 @@ export async function inviteGuest(
       const [updated] = await tx
         .update(agentShares)
         .set({
-          status: existing.status === 'revoked' ? 'pending' : existing.status,
+          status: nextStatus,
           dailyCap,
           updatedAt: now,
         })
@@ -647,11 +650,6 @@ async function shareIdForGuest(workspaceId: string, agentId: string, guestHandle
     .limit(1);
   if (!row) throw new HttpError(404, 'not_found', 'No share was found for that handle.');
   return row.id;
-}
-
-export async function approveGuestByHandle(workspaceId: string, agentId: string, guestHandle: string) {
-  const shareId = await shareIdForGuest(workspaceId, agentId, guestHandle);
-  return approveShare(workspaceId, agentId, shareId);
 }
 
 export async function revokeGuestByHandle(workspaceId: string, agentId: string, guestHandle: string) {

@@ -126,7 +126,7 @@ Verify and `GET /api/v1/auth/me` include `workspace.handle` as well.
 
 ## Sharing agents
 
-Session cookie. The same actions exist as MCP tools for an agent key in the owner workspace (`set_workspace_handle`, `set_agent_sharing`, `upsert_offer`, `delete_offer`, `invite_guest`, `approve_guest`, `revoke_guest`, `list_guest_shares`). A guest reads the menu with MCP `get_agent_card`. There is no public open mode.
+Session cookie. Owner MCP tools for an agent key in the workspace are `set_workspace_handle`, `set_agent_sharing`, `upsert_offer`, `delete_offer`, `invite_guest`, `revoke_guest`, and `list_guest_shares`. `invite_guest` leaves a new or re-opened grant `pending`. Approving a guest is not an MCP tool. A signed-in human approves with `POST /api/v1/agents/:id/shares/:shareId/approve`. An agent key (`rsk_`) on that route is `403` `human_required`. The same `403` is returned for `PATCH /api/v1/agents/:id/shares/:shareId` when the body sets `status` to `approved`. That field does not approve the grant. A guest reads the menu with MCP `get_agent_card`. There is no public open mode.
 
 ### PUT `/api/v1/agents/:id/sharing`
 
@@ -158,11 +158,11 @@ PATCH sends `name`, `description`, or `result_schema`. Tasks already created kee
 
 ### PATCH `/api/v1/agents/:id/shares/:shareId`
 
-`{ "offers": ["draft"], "daily_cap": 10 }`. Either field is optional. `200` `{ "share" }`. `409` `share_revoked` when the grant is revoked.
+`{ "offers": ["draft"], "daily_cap": 10 }`. Either field is optional. This route does not change `status`. `200` `{ "share" }`. `409` `share_revoked` when the grant is revoked. A bearer `rsk_` key is `403` `human_required` when the body sets `status` to `approved`. The grant stays as it was.
 
 ### POST `/api/v1/agents/:id/shares/:shareId/approve`
 
-Pending becomes approved. `200` `{ "share" }`. `409` `share_revoked` when it must be invited again.
+Session cookie. Pending becomes approved. `200` `{ "share" }`. `409` `share_revoked` when it must be invited again. A bearer `rsk_` key is `403` `human_required` and the grant is not approved. There is no MCP tool that approves a guest.
 
 ### POST `/api/v1/agents/:id/shares/:shareId/revoke`
 
@@ -449,11 +449,11 @@ Session cookie.
 
 ### POST, GET, DELETE `/api/mcp`
 
-Streamable HTTP. `Authorization: Bearer <api_key>` is required; substitute the `api_key` from registration. Tools: `send_message`, `create_task`, `get_task`, `complete_task`, `ask`, `fail_task`, `whoami`, `list_tasks`, `get_agent_card`, `set_workspace_handle`, `set_agent_sharing`, `upsert_offer`, `delete_offer`, `invite_guest`, `approve_guest`, `revoke_guest`, `list_guest_shares`.
+Streamable HTTP. `Authorization: Bearer <api_key>` is required; substitute the `api_key` from registration. Tools: `send_message`, `create_task`, `get_task`, `complete_task`, `ask`, `fail_task`, `whoami`, `list_tasks`, `get_agent_card`, `set_workspace_handle`, `set_agent_sharing`, `upsert_offer`, `delete_offer`, `invite_guest`, `revoke_guest`, `list_guest_shares`.
 
 Tool results are JSON text. Failures set the MCP tool error flag and return `{ "error", "message", "details" }`. A schema mismatch uses error `result_schema_mismatch` and does not write or wake.
 
-`whoami` adds `workspace_handle`, `shared`, `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and same-workspace `ask` return the flat `plan_limit` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. `guest_workspaces` is the same flat object when a free shared agent is already at 3 guests. `send_message`, `complete_task`, and `fail_task` do not count. `get_agent_card` returns `{ "card": { "address", "name", "description", "offers" } }` for an approved grant. Owner tools manage the handle, the shared flag, offers, and grants.
+`whoami` adds `workspace_handle`, `shared`, `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and same-workspace `ask` return the flat `plan_limit` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. `guest_workspaces` is the same flat object when a free shared agent is already at 3 guests. `send_message`, `complete_task`, and `fail_task` do not count. `get_agent_card` returns `{ "card": { "address", "name", "description", "offers" } }` for an approved grant. Owner tools manage the handle, the shared flag, offers, and grants. `invite_guest` cannot approve. A signed-in human approves in the dashboard.
 
 See https://<host>/docs/getting-started.md for arguments and the task rules.
 

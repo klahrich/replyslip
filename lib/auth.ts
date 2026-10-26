@@ -16,8 +16,9 @@ import {
   sha256,
 } from './crypto';
 import { getEmailSender } from './email';
+import { authenticateAgentKey } from './agents';
 import { HttpError } from './errors';
-import { readCookie } from './http';
+import { bearerToken, readCookie } from './http';
 import { recordMarketingOptIn } from './marketing';
 import { clientIp } from './origin';
 import { consumeRateLimit } from './rate-limit';
@@ -314,4 +315,21 @@ export async function requireUser(req: Request): Promise<SessionUser & { workspa
     throw new HttpError(409, 'workspace_required', 'This account has no workspace yet.');
   }
   return user as SessionUser & { workspace: NonNullable<SessionUser['workspace']> };
+}
+
+export const HUMAN_APPROVAL_MESSAGE = 'A signed-in human must approve guests in the dashboard.';
+
+/**
+ * Session cookie for a human owner. An agent API key (`rsk_`) is a different
+ * credential: it is looked up as an agent key, not as a session, and cannot approve.
+ */
+export async function requireHumanOwner(
+  req: Request,
+): Promise<SessionUser & { workspace: NonNullable<SessionUser['workspace']> }> {
+  const token = bearerToken(req);
+  if (token?.startsWith('rsk_')) {
+    await authenticateAgentKey(token, { recordUse: false });
+    throw new HttpError(403, 'human_required', HUMAN_APPROVAL_MESSAGE);
+  }
+  return requireUser(req);
 }

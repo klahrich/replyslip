@@ -10,7 +10,6 @@ import { PlanLimitError, workspacePlanUsage } from './plans';
 import { TOOL_DOCS, toolInputs } from './mcp-tools';
 import {
   agentInWorkspaceByName,
-  approveGuestByHandle,
   deleteOfferByName,
   getAgentCard,
   inviteGuest,
@@ -368,25 +367,6 @@ export const mcpHandler = createMcpHandler(
             offerNames: args.offers,
             dailyCap: args.daily_cap,
           });
-          return ok({ share });
-        } catch (err) {
-          return fail(err);
-        }
-      },
-    );
-
-    server.registerTool(
-      'approve_guest',
-      {
-        title: docsByName.get('approve_guest')!.title,
-        description: docsByName.get('approve_guest')!.description,
-        inputSchema: toolInputs.approve_guest,
-      },
-      async (args, ctx) => {
-        try {
-          const principal = principalFrom(ctx as ToolCtx);
-          const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
-          const share = await approveGuestByHandle(principal.workspaceId, agent.id, args.guest_handle);
           return ok({ share });
         } catch (err) {
           return fail(err);

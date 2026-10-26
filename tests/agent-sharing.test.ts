@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { POST as postOffer } from '@/app/api/v1/agents/[id]/offers/route';
 import { POST as postShare } from '@/app/api/v1/agents/[id]/shares/route';
+import { PATCH as patchShare } from '@/app/api/v1/agents/[id]/shares/[shareId]/route';
 import { POST as approveShare } from '@/app/api/v1/agents/[id]/shares/[shareId]/approve/route';
 import { POST as revokeShare } from '@/app/api/v1/agents/[id]/shares/[shareId]/revoke/route';
 import { PUT as putSharing } from '@/app/api/v1/agents/[id]/sharing/route';
@@ -12,7 +13,7 @@ import { tasks, workspaces } from '@/db/schema';
 import { ACCESS_REVOKED_REASON, DEFAULT_SHARE_DAILY_CAP } from '@/lib/constants';
 import { FREE_GUEST_WORKSPACES, setGuestWorkspaceLimitForTests, usePlanLimitsForTests, workspacePlanUsage } from '@/lib/plans';
 import { CROSS_WORKSPACE_TASK_NOTICE, GUEST_WAKE_NOTICE } from '@/lib/wake-notice';
-import { call, createAgent, createKey, mcpTool, setWebhook, signIn, startReceiver } from './helpers';
+import { call, createAgent, createKey, mcpListTools, mcpTool, setWebhook, signIn, startReceiver } from './helpers';
 
 const offerSchema = {
   type: 'object',
@@ -451,10 +452,17 @@ describe('agent sharing', () => {
       guest_handle: guestHandle,
       offers: ['draft'],
       daily_cap: 3,
+      status: 'approved',
     });
+    expect(invited.isError).toBe(false);
     expect(invited.payload.share.status).toBe('pending');
-    const approved = await mcpTool(plannerKey, 'approve_guest', { agent: 'Planner', guest_handle: guestHandle });
-    expect(approved.payload.share.status).toBe('approved');
+    const approved = await call(approveShare, `http://localhost/api/v1/agents/${planner.id}/shares/${invited.payload.share.id}/approve`, {
+      method: 'POST',
+      cookie: owner.cookie,
+      params: { id: planner.id, shareId: invited.payload.share.id },
+    });
+    expect(approved.status).toBe(200);
+    expect(approved.data.share.status).toBe('approved');
     const listed = await mcpTool(plannerKey, 'list_guest_shares', { agent: 'Planner' });
     expect(listed.payload.shares).toHaveLength(1);
     const guestBot = await createAgent(guest.cookie, 'GuestBot');
@@ -481,5 +489,85 @@ describe('agent sharing', () => {
     expect(after.payload.task.fail_reason).toBe('access revoked');
     const denied = await mcpTool(guestKey, 'get_agent_card', { address: `@${ownerHandle}/Planner` });
     expect(denied.payload.error).toBe('agent_not_found');
+  });
+
+  it('lets only a signed-in human approve a guest', async () => {
+    const owner = await signIn();
+    const guest = await signIn();
+    const guestHandle = handleName('g');
+    await setHandle(guest.cookie, guestHandle);
+    const planner = await createAgent(owner.cookie, 'Planner');
+    const plannerKey = await createKey(owner.cookie, planner.id);
+    await mcpTool(plannerKey, 'set_workspace_handle', { handle: handleName('o') });
+    await mcpTool(plannerKey, 'upsert_offer', {
+      agent: 'Planner',
+      name: 'draft',
+      description: 'Draft the requested page.',
+      result_schema: offerSchema,
+    });
+    await mcpTool(plannerKey, 'set_agent_sharing', { agent: 'Planner', shared: true });
+
+    const tools = await mcpListTools(plannerKey);
+    expect(tools.map((tool) => tool.name)).not.toContain('approve_guest');
+    const missing = await mcpTool(plannerKey, 'approve_guest', { agent: 'Planner', guest_handle: guestHandle });
+    expect(missing.isError).toBe(true);
+
+    const invited = await mcpTool(plannerKey, 'invite_guest', {
+      agent: 'Planner',
+      guest_handle: guestHandle,
+      offers: ['draft'],
+    });
+    expect(invited.isError).toBe(false);
+    expect(invited.payload.share.status).toBe('pending');
+    const shareId = invited.payload.share.id as string;
+
+    const byKey = await call(approveShare, `http://localhost/api/v1/agents/${planner.id}/shares/${shareId}/approve`, {
+      method: 'POST',
+      bearer: plannerKey,
+      cookie: owner.cookie,
+      params: { id: planner.id, shareId },
+    });
+    expect(byKey.status).toBe(403);
+    expect(byKey.data.error.code).toBe('human_required');
+
+    const byKeyOnly = await call(approveShare, `http://localhost/api/v1/agents/${planner.id}/shares/${shareId}/approve`, {
+      method: 'POST',
+      bearer: plannerKey,
+      params: { id: planner.id, shareId },
+    });
+    expect(byKeyOnly.status).toBe(403);
+    expect(byKeyOnly.data.error.code).toBe('human_required');
+
+    const patched = await call(patchShare, `http://localhost/api/v1/agents/${planner.id}/shares/${shareId}`, {
+      method: 'PATCH',
+      bearer: plannerKey,
+      cookie: owner.cookie,
+      params: { id: planner.id, shareId },
+      body: { status: 'approved', daily_cap: 9 },
+    });
+    expect(patched.status).toBe(403);
+    expect(patched.data.error.code).toBe('human_required');
+
+    const stillPending = await mcpTool(plannerKey, 'list_guest_shares', { agent: 'Planner' });
+    expect(stillPending.payload.shares[0].status).toBe('pending');
+    expect(stillPending.payload.shares[0].daily_cap).toBe(50);
+
+    const sessionPatch = await call(patchShare, `http://localhost/api/v1/agents/${planner.id}/shares/${shareId}`, {
+      method: 'PATCH',
+      cookie: owner.cookie,
+      params: { id: planner.id, shareId },
+      body: { status: 'approved', daily_cap: 9 },
+    });
+    expect(sessionPatch.status).toBe(200);
+    expect(sessionPatch.data.share.status).toBe('pending');
+    expect(sessionPatch.data.share.daily_cap).toBe(9);
+
+    const sessionApprove = await call(approveShare, `http://localhost/api/v1/agents/${planner.id}/shares/${shareId}/approve`, {
+      method: 'POST',
+      cookie: owner.cookie,
+      params: { id: planner.id, shareId },
+    });
+    expect(sessionApprove.status).toBe(200);
+    expect(sessionApprove.data.share.status).toBe('approved');
   });
 });
