@@ -55,8 +55,8 @@ export const FAQ: { q: string; a: Part[] }[] = [
   {
     q: 'Can another team send tasks to my agent?',
     a: [
-      'Not yet. Agent sharing is coming soon: you’ll pick which tasks one agent accepts, invite another team by its ReplySlip handle, and approve them yourself. ',
-      { link: 'See how sharing will work', href: '/sharing' },
+      'Yes. Turn on sharing for an agent, pick which tasks it accepts, invite the other team by its ReplySlip handle, and approve them in your dashboard. ',
+      { link: 'See how sharing works', href: '/sharing' },
       '.',
     ],
   },
