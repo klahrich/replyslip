@@ -3,7 +3,15 @@ import { eq } from 'drizzle-orm';
 import { createMcpHandler, withMcpAuth } from 'mcp-handler';
 import { getDb } from '@/db';
 import { workspaces } from '@/db/schema';
-import { authenticateAgentKey, getAgent, watcherPresence, workspaceWatcherLastSeen, type AgentPrincipal } from './agents';
+import { agentAuthErrorDescription, replaceWwwAuthenticateDescription } from './agent-auth-error';
+import {
+  authenticateAgentKey,
+  getAgent,
+  revokedCredentialFlags,
+  watcherPresence,
+  workspaceWatcherLastSeen,
+  type AgentPrincipal,
+} from './agents';
 import { whoamiDelivery } from './delivery';
 import { HttpError } from './errors';
 import { PlanLimitError, workspacePlanUsage } from './plans';
@@ -267,4 +275,43 @@ async function verifyAgentToken(_req: Request, bearerToken?: string): Promise<Au
   };
 }
 
-export const mcpAuthHandler = withMcpAuth(mcpHandler, verifyAgentToken, { required: true });
+const authorizedMcp = withMcpAuth(mcpHandler, verifyAgentToken, { required: true });
+
+export async function mcpAuthHandler(req: Request): Promise<Response> {
+  const res = await authorizedMcp(req);
+  return describeRejectedAgentAuth(res, req.headers.get('authorization'));
+}
+
+/**
+ * mcp-handler reports every missing AuthInfo as "No authorization provided".
+ * Keep its 401, invalid_token code, and WWW-Authenticate challenge, and replace
+ * only error_description. Revoked keys are recognized by hash. The description
+ * never includes the token.
+ */
+async function describeRejectedAgentAuth(res: Response, authorization: string | null): Promise<Response> {
+  if (res.status !== 401) return res;
+  let body: { error?: unknown } | null = null;
+  try {
+    body = (await res.clone().json()) as { error?: unknown };
+  } catch {
+    return res;
+  }
+  if (!body || body.error !== 'invalid_token') return res;
+  const token = bearerTokenFrom(authorization);
+  const stored = token ? await revokedCredentialFlags(token) : null;
+  const description = agentAuthErrorDescription(authorization, stored);
+  const headers = new Headers(res.headers);
+  headers.delete('content-length');
+  headers.delete('content-type');
+  const challenge = headers.get('www-authenticate');
+  if (challenge) headers.set('www-authenticate', replaceWwwAuthenticateDescription(challenge, description));
+  return Response.json({ error: 'invalid_token', error_description: description }, { status: 401, headers });
+}
+
+/** The same second field mcp-handler treats as the bearer token. Not logged. */
+function bearerTokenFrom(authorization: string | null): string | null {
+  if (!authorization) return null;
+  const [scheme, token] = authorization.split(' ');
+  if (!scheme || scheme.toLowerCase() !== 'bearer' || !token) return null;
+  return token;
+}

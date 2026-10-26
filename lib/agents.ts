@@ -497,6 +497,31 @@ export async function revokeWatcherKey(workspaceId: string, keyId: string) {
   return existing;
 }
 
+/**
+ * Whether this token's hash is a revoked agent key or a revoked watcher key.
+ * The lookup is the hash only, the same as authentication. The token, the hash,
+ * and the stored prefix are not returned. A live key is not reported here.
+ */
+export async function revokedCredentialFlags(token: string): Promise<{ agentKeyRevoked: boolean; watcherKeyRevoked: boolean }> {
+  const hash = sha256(token);
+  const db = getDb();
+  const [agentKey] = await db
+    .select({ keyRevokedAt: agentKeys.revokedAt, agentRevokedAt: agents.revokedAt })
+    .from(agentKeys)
+    .innerJoin(agents, eq(agents.id, agentKeys.agentId))
+    .where(eq(agentKeys.tokenHash, hash))
+    .limit(1);
+  const [watcherKey] = await db
+    .select({ revokedAt: watcherKeys.revokedAt })
+    .from(watcherKeys)
+    .where(eq(watcherKeys.tokenHash, hash))
+    .limit(1);
+  return {
+    agentKeyRevoked: Boolean(agentKey && (agentKey.keyRevokedAt || agentKey.agentRevokedAt)),
+    watcherKeyRevoked: Boolean(watcherKey?.revokedAt),
+  };
+}
+
 export async function authenticateWatcherKey(token: string): Promise<{ workspaceId: string; keyId: string } | null> {
   const db = getDb();
   const [key] = await db.select().from(watcherKeys).where(eq(watcherKeys.tokenHash, sha256(token))).limit(1);

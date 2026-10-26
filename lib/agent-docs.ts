@@ -10,6 +10,14 @@ import {
 } from './constants';
 import { MARKETING_CONSENT_TEXTS } from './marketing';
 import { PLAN_LIMITS } from './plans';
+import {
+  AGENT_AUTH_MISSING,
+  AGENT_AUTH_NOT_BEARER,
+  AGENT_AUTH_REVOKED,
+  AGENT_AUTH_REVOKED_WATCHER,
+  AGENT_AUTH_UNKNOWN,
+  AGENT_AUTH_WATCHER_KEY,
+} from './agent-auth-error';
 import { absoluteUrl } from './origin';
 import { TOOL_DOCS } from './mcp-tools';
 import { WAKE_NOTICE } from './wake-notice';
@@ -406,6 +414,10 @@ Only the target agent calls \`complete_task\`. \`result\` must match \`result_sc
 \`\`\`
 
 Change \`result\` and call \`complete_task\` again. Do not invent a second task for the same answer unless the sender asked for one.
+
+## Troubleshooting
+
+MCP returns HTTP 401 \`{"error":"invalid_token"}\` when the credential is rejected. Read \`error_description\` and do not retry the same header. It is one of: "${AGENT_AUTH_MISSING}" "${AGENT_AUTH_NOT_BEARER}" "${AGENT_AUTH_WATCHER_KEY}" "${AGENT_AUTH_REVOKED}" "${AGENT_AUTH_REVOKED_WATCHER}" "${AGENT_AUTH_UNKNOWN}" The response does not include the token.
 `;
 }
 
@@ -959,6 +971,15 @@ Session cookie.
 ### POST, GET, DELETE ${line('/api/mcp')}
 
 Streamable HTTP. \`Authorization: ${MCP_HEADER_PLACEHOLDER}\` is required; substitute the \`api_key\` from registration. Tools: ${TOOL_DOCS.map((tool) => `\`${tool.name}\``).join(', ')}.
+
+A rejected credential is HTTP 401 \`{ "error": "invalid_token", "error_description": "..." }\` with \`WWW-Authenticate: Bearer error="invalid_token"\`. \`error_description\` names the failure and does not include the token:
+
+- ${AGENT_AUTH_MISSING}
+- ${AGENT_AUTH_NOT_BEARER}
+- ${AGENT_AUTH_WATCHER_KEY}
+- ${AGENT_AUTH_REVOKED}
+- ${AGENT_AUTH_REVOKED_WATCHER}
+- ${AGENT_AUTH_UNKNOWN}
 
 Tool results are JSON text. Failures set the MCP tool error flag and return \`{ "error", "message", "details" }\`. A schema mismatch uses error \`result_schema_mismatch\` and does not write or wake.
 
