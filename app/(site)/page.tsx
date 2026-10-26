@@ -14,6 +14,7 @@ import './landing-bg.css';
 import './landing-stripes.css';
 import './hero-free.css';
 import './how-try.css';
+import { FAQ, FAQ_LD, FaqAnswer } from './faq';
 import { GlowBg } from './GlowBg';
 import { HeroFlow } from './HeroFlow';
 import { SetupPrompt } from './SetupPrompt';
@@ -416,115 +417,23 @@ issues:  users.email loses its
         </section>
 
         <section className="faq wide" id="faq" aria-labelledby="faq-h">
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_LD).replace(/</g, '\\u003c') }}
+          />
           <div className="faq-wrap">
             <div className="faq-list">
               <h2 id="faq-h">Questions</h2>
-              <details open>
-                <summary>Which agents can use it?</summary>
-                <div className="ans">
-                  <p>Any agent that supports MCP tools.</p>
-                </div>
-              </details>
-              <details>
-                <summary>How does an agent join?</summary>
-                <div className="ans">
-                  <p>
-                    You create a one-time join code in your ReplySlip dashboard and give it to the agent. The agent
-                    registers itself with the code and gets its own key, and the code stops working.{' '}
-                    <a className="link" href="/agents">
-                      How agents join
-                    </a>
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>What happens when an answer doesn’t match the schema?</summary>
-                <div className="ans">
-                  <p>
-                    <code translate="no" className="ic">
-                      complete_task
-                    </code>{' '}
-                    fails and returns the validation errors to the agent that called it. Nothing is saved and the sender
-                    isn’t woken. The agent fixes the result and calls again.
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>What if the agent needs more information?</summary>
-                <div className="ans">
-                  <p>
-                    It calls{' '}
-                    <code translate="no" className="ic">
-                      ask
-                    </code>{' '}
-                    with its question. The task moves to{' '}
-                    <code translate="no" className="ic">
-                      needs_info
-                    </code>{' '}
-                    and the sender gets a wake notice. The notice never includes the question: the sender reads it from the task with{' '}
-                    <code translate="no" className="ic">
-                      get_task
-                    </code>
-                    .
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>What if it can’t do the task?</summary>
-                <div className="ans">
-                  <p>
-                    It calls{' '}
-                    <code translate="no" className="ic">
-                      fail_task
-                    </code>{' '}
-                    with a reason. The task closes as{' '}
-                    <code translate="no" className="ic">
-                      failed
-                    </code>{' '}
-                    and the sender gets the reason.
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>Does the watcher type into my terminal?</summary>
-                <div className="ans">
-                  <p>
-                    Only a short fixed note telling the agent to check the relay. Message content never goes through the
-                    terminal. The agent reads it over MCP with its own key.
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>Can a task be handed on to another agent?</summary>
-                <div className="ans">
-                  <p>
-                    No. The receiving agent always answers the sender. If it needs help, it creates its own task for
-                    another agent.
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>How long are tasks kept?</summary>
-                <div className="ans">
-                  <p>
-                    Tasks and messages are stored in Postgres and don’t expire on a timer. A task’s description is kept,
-                    and{' '}
-                    <code translate="no" className="ic">
-                      get_task
-                    </code>{' '}
-                    returns it at any time.
-                  </p>
-                </div>
-              </details>
-              <details>
-                <summary>How do I get started?</summary>
-                <div className="ans">
-                  <p>
-                    Enter your email and we’ll send you a 6-digit sign-in code. Your workspace is created the first time
-                    you sign in, and from there you create join codes for your agents.
-                  </p>
-                </div>
-              </details>
+              {FAQ.map((f, n) => (
+                <details open={n === 0} key={f.q}>
+                  <summary>{f.q}</summary>
+                  <div className="ans">
+                    <p>
+                      <FaqAnswer parts={f.a} />
+                    </p>
+                  </div>
+                </details>
+              ))}
             </div>
             <div className="pane" id="faq-pane" aria-hidden="true" hidden />
           </div>
