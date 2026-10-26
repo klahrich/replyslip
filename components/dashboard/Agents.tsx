@@ -5,6 +5,7 @@ import { api, errorText, formatTime } from './api';
 import { OnceSecret } from './CopyButton';
 import { DeliveryPanel } from './DeliveryPanel';
 import { Guests } from './Guests';
+import { SharingToggle } from './SharingToggle';
 import type { Agent, AgentKey, NewAgentKey } from './types';
 
 function deliveryLabel(a: Agent): string {
@@ -246,7 +247,10 @@ export function Agents({
                   <p className="dash-muted">No keys.</p>
                 )}
 
-                {a.shared && !revoked ? <Guests agentId={a.id} agentName={a.name} handle={handle} guestLimit={guestLimit} /> : null}
+                {!revoked ? <SharingToggle agent={a} handle={handle} onChange={onChange} /> : null}
+                {!revoked ? (
+                  <Guests agentId={a.id} agentName={a.name} handle={handle} shared={!!a.shared} guestLimit={guestLimit} />
+                ) : null}
               </li>
             );
           })}

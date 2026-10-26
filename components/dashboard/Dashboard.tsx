@@ -8,6 +8,7 @@ import { EmailPrefs } from './EmailPrefs';
 import { JoinCodes, type DocPaths } from './JoinCodes';
 import { Tasks } from './Tasks';
 import { WatcherKeys } from './WatcherKeys';
+import { WorkspaceHandle } from './WorkspaceHandle';
 import { WorkspaceName } from './WorkspaceName';
 import type { Agent, AgentKey, JoinCode } from './types';
 
@@ -44,6 +45,7 @@ export function Dashboard({
   guestLimit: number | null;
 }) {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [handle, setHandle] = useState(workspace.handle);
   const [keys, setKeys] = useState<Record<string, AgentKey[]>>({});
   const [codes, setCodes] = useState<JoinCode[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -103,6 +105,11 @@ export function Dashboard({
           Signed in as {email} · created {formatTime(workspace.created_at)}
           {loaded ? ` · ${live} active ${live === 1 ? 'agent' : 'agents'}` : ''}
         </p>
+        <WorkspaceHandle
+          handle={handle}
+          shared={agents.filter((a) => a.shared && !a.revoked_at).length}
+          onSaved={setHandle}
+        />
       </section>
       {error ? (
         <p className="dash-err" role="alert">
@@ -113,7 +120,7 @@ export function Dashboard({
         </p>
       ) : null}
       <JoinCodes codes={codes} agents={agents} origin={origin} paths={paths} onChange={refresh} />
-      {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} handle={workspace.handle} guestLimit={guestLimit} /> : null}
+      {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} handle={handle} guestLimit={guestLimit} /> : null}
       <WatcherKeys />
       <Tasks refreshKey={tick} />
       <EmailPrefs initialOptIn={marketingOptIn} />

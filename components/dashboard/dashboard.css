@@ -191,4 +191,23 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-guest-offers legend{font-weight:500;margin-bottom:6px;padding:0}
 .dash-guest-offers label{display:flex;align-items:center;gap:8px;cursor:pointer}
 .dash-guest-offers input{width:16px;height:16px;margin:0;accent-color:var(--dash-accent)}
+.dash-task-form{display:grid;gap:8px;margin:4px 0 2px}
 .dash-guest-invite-note{margin-top:14px}
+/* Workspace handle and per-agent sharing */
+.dash-handle{margin-top:6px;font-size:var(--s-small)}
+.dash-handle code{font-size:.95em}
+.dash-handle-form{margin-top:12px}
+.dash-handle-form .dash-rename-row{gap:8px 10px}
+.dash-handle-at{font:500 var(--s-lead)/1 var(--font);color:var(--muted)}
+.dash-handle-form .dash-hint{margin-top:8px}
+.dash-handle-form .dash-hint code{font-size:.95em}
+.dash-sharing{margin-top:16px;padding-top:14px;border-top:1px solid var(--surface-2);display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 20px;font-size:var(--s-small)}
+.dash-sharing>p{min-width:0;flex:1 1 280px;overflow-wrap:anywhere}
+.dash-sharing code{font-size:.95em}
+.dash-sharing>.dash-err{flex-basis:100%;margin:0}
+.dash-sharing+.dash-guests{border-top:0;margin-top:10px;padding-top:0}
+.dash-offers{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:var(--s-small)}
+.dash-offers li{display:flex;flex-wrap:wrap;gap:0 12px;align-items:baseline}
+.dash-offers{gap:8px}
+.dash-offers code{font-size:.95em}
+.dash-offers-note{margin:6px 0 14px}
