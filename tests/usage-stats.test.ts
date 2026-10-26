@@ -9,7 +9,11 @@ import { POST as registerRoute } from '@/app/api/v1/agents/register/route';
 import { getDb } from '@/db';
 import { messages, tasks, users } from '@/db/schema';
 import { firstAgentAlertText, setEmailSenderForTests } from '@/lib/email';
-import { flushFirstAgentAlerts, publicDeliveryMode } from '@/lib/first-agent-alert';
+import {
+  flushFirstAgentAlerts,
+  publicDeliveryMode,
+  setFirstAgentAlertSchedulerForTests,
+} from '@/lib/first-agent-alert';
 import { call, createAgent, createJoinCode, emailAddress, signIn } from './helpers';
 import { alerts, inbox, latestCode } from './inbox';
 
@@ -205,6 +209,49 @@ describe('admin stats', () => {
 });
 
 describe('first-agent alert', () => {
+  it('defers the alert to the scheduler on both registration paths', async () => {
+    process.env.ALERT_EMAIL = 'ops@example.com';
+    const tasks: Array<() => Promise<void>> = [];
+    setFirstAgentAlertSchedulerForTests((task) => {
+      tasks.push(task);
+    });
+
+    const session = await signInWithSource('sched-source');
+    const created = await call(createAgentRoute, 'http://localhost/api/v1/agents', {
+      cookie: session.cookie,
+      body: { name: 'ScheduledBot' },
+    });
+    expect(created.status).toBe(201);
+    expect(alerts).toHaveLength(0);
+    expect(tasks).toHaveLength(1);
+    await tasks[0]!();
+    expect(alerts.map((alert) => alert.agentName)).toEqual(['ScheduledBot']);
+
+    const join = await createJoinCode(session.cookie);
+    const second = await call(registerRoute, 'http://localhost/api/v1/agents/register', {
+      bearer: join.secret,
+      body: { name: 'LaterBot' },
+    });
+    expect(second.status).toBe(201);
+    expect(tasks).toHaveLength(1);
+
+    const hookSession = await signInWithSource('sched-hook');
+    const hookJoin = await createJoinCode(hookSession.cookie);
+    const hooked = await call(registerRoute, 'http://localhost/api/v1/agents/register', {
+      bearer: hookJoin.secret,
+      body: {
+        name: 'ScheduledHook',
+        webhook: { url: 'https://example.com/hooks/replyslip', auth: { type: 'none' } },
+      },
+    });
+    expect(hooked.status).toBe(201);
+    expect(alerts).toHaveLength(1);
+    expect(tasks).toHaveLength(2);
+    await tasks[1]!();
+    expect(alerts[1]?.deliveryMode).toBe('webhook');
+    expect(alerts[1]?.agentName).toBe('ScheduledHook');
+  });
+
   it('maps herdr onto local', () => {
     expect(publicDeliveryMode('webhook')).toBe('webhook');
     expect(publicDeliveryMode('local')).toBe('local');

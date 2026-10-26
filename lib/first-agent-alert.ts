@@ -1,4 +1,5 @@
 import { asc, eq, sql } from 'drizzle-orm';
+import { after } from 'next/server';
 import type { Db } from '@/db';
 import { users, workspaces } from '@/db/schema';
 import { getEmailSender, type FirstAgentAlertEmail } from './email';
@@ -67,16 +68,41 @@ export async function loadFirstAgentNotice(
   };
 }
 
-let chain: Promise<void> = Promise.resolve();
+/** Runs after the response. Production uses Next's `after()` so the serverless function stays alive. */
+export type FirstAgentScheduler = (task: () => Promise<void>) => void;
 
-/** Tests await this so a fire-and-forget alert has settled. */
+let chain: Promise<void> = Promise.resolve();
+let scheduler: FirstAgentScheduler = (task) => {
+  after(task);
+};
+
+/** Tests await this when the chained scheduler is installed. */
 export function flushFirstAgentAlerts(): Promise<void> {
   return chain;
 }
 
+/** Tests replace `after()` with a scheduler that does not need a Next request scope. */
+export function setFirstAgentAlertSchedulerForTests(next: FirstAgentScheduler | null): void {
+  scheduler =
+    next ??
+    ((task) => {
+      after(task);
+    });
+}
+
+/** Queue alerts on a promise chain and reset it. `flushFirstAgentAlerts` waits for that chain. */
+export function installChainedFirstAgentAlertsForTests(): void {
+  chain = Promise.resolve();
+  setFirstAgentAlertSchedulerForTests((task) => {
+    chain = chain.then(task);
+  });
+}
+
 /**
- * Sends after the registration transaction has committed. Skips when `ALERT_EMAIL` is unset
- * or the workspace is excluded. A send failure is logged and does not reject.
+ * Schedules the send after the registration response. `createAgent` and
+ * `registerAgentWithJoinCode` both call this, including when a tool on the MCP
+ * route calls them. Skips when `ALERT_EMAIL` is unset or the workspace is excluded.
+ * A send failure is logged and does not reject.
  */
 export function queueFirstAgentAlert(notice: FirstAgentNotice): void {
   const to = process.env.ALERT_EMAIL?.trim() ?? '';
@@ -91,10 +117,12 @@ export function queueFirstAgentAlert(notice: FirstAgentNotice): void {
     signupSource: notice.signupSource,
     createdAt: notice.createdAt,
   };
-  chain = chain
-    .then(() => getEmailSender().sendFirstAgentAlert(message))
-    .catch((err: unknown) => {
+  scheduler(async () => {
+    try {
+      await getEmailSender().sendFirstAgentAlert(message);
+    } catch (err: unknown) {
       const reason = err instanceof Error ? err.message : 'unknown error';
       console.error(`[replyslip] first-agent alert failed: ${reason}`);
-    });
+    }
+  });
 }
