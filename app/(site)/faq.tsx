@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 
 /** A piece of an answer: plain words, an inline code name, or a link. Links stay out of the JSON-LD text. */
-type Part = string | { code: string } | { link: string; href: string };
+export type Part = string | { code: string } | { link: string; href: string };
 
 /** One source for the landing FAQ list and its FAQPage JSON-LD. */
 export const FAQ: { q: string; a: Part[] }[] = [
@@ -86,7 +86,7 @@ export function FaqAnswer({ parts }: { parts: Part[] }) {
   ));
 }
 
-const plain = (parts: Part[]) =>
+export const plain = (parts: Part[]) =>
   parts
     .map((p) => (typeof p === 'string' ? p : 'code' in p ? p.code : ''))
     .join('')

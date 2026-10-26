@@ -1,0 +1,107 @@
+/* /sharing, scoped under .sh */
+.sh main{margin:0 var(--mr) 0 var(--al);max-width:760px}
+.sh .sh-hero{margin-top:clamp(48px,10vh,120px)}
+.sh .sh-soon{display:inline-block;padding:4px 10px;border-radius:var(--r);background:#22332a;color:var(--accent);font-size:var(--s-small);font-weight:600}
+.sh h1{margin-top:18px;font-size:clamp(2rem,1rem + 3.4vw,3.5rem);line-height:1.04;letter-spacing:-.02em;max-width:18ch}
+.sh .lead{margin-top:20px;font-size:var(--s-lead);line-height:1.4;max-width:30em}
+.sh .sh-cta{margin-top:28px;display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px}
+.sh .sh-cta .btn{display:inline-flex;align-items:center;text-decoration:none}
+.sh .sh-note{margin-top:12px;font-size:var(--s-small);color:var(--muted);max-width:34em}
+.sh section{margin-top:clamp(64px,8vw,104px)}
+.sh h2{font-size:var(--s-head);line-height:1.12}
+.sh section>p,.sh section>ol,.sh section>ul{margin-top:16px;max-width:36em}
+.sh section>p+p{margin-top:12px}
+.sh ol.sh-steps{padding-left:1.4em;display:grid;gap:8px}
+.sh ul.sh-ctrl{padding-left:1.2em;display:grid;gap:8px}
+.sh ol.sh-steps li::marker{color:var(--accent);font-weight:600}
+.sh ul.sh-ctrl li::marker{color:var(--accent)}
+.sh .ic{font-family:var(--mono);font-size:.875em} /* taste-skill-ignore: literal code, tool names and file paths only */
+.sh .sh-links{display:flex;flex-wrap:wrap;gap:6px 24px}
+.sh .link{color:var(--ink)}
+.sh .sh-faq .sh-q{margin-top:20px;padding-top:20px;box-shadow:inset 0 1px 0 var(--surface-2);max-width:36em}
+.sh .sh-faq h2+.sh-q{margin-top:24px}
+.sh .sh-faq h3{font-size:var(--s-body);line-height:1.4}
+.sh .sh-faq .sh-q p{margin-top:8px;color:var(--muted)}
+
+/* hero card: your agent | lane | friend's agent; stacked on phones */
+.sh-card{margin:44px 0 0;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(120px,1fr) minmax(0,.9fr);align-items:stretch;background:var(--surface);border-radius:8px;padding:20px;gap:0}
+.sh-agent{background:var(--bg);border-radius:6px;padding:16px 18px;position:relative}
+.sh-you{background:#22332a}
+.sh-who{font-weight:600;font-size:var(--s-body)}
+.sh-addr{margin-top:4px;font:500 .9375rem/1.3 var(--mono);color:var(--accent);overflow-wrap:anywhere} /* taste-skill-ignore: literal code, tool names and file paths only */
+.sh-menu-h{margin-top:16px;font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.sh-menu{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px;font-size:var(--s-small)}
+.sh-menu li{padding:6px 10px;border-radius:var(--r);background:color-mix(in srgb,var(--bg) 55%,transparent);color:var(--ink)}
+.sh-sub{margin-top:4px;font-size:var(--s-small);color:var(--muted)}
+.sh-guest{margin-top:16px;display:inline-block;padding:4px 8px;border-radius:var(--r);background:var(--surface-2);font-size:.75rem;color:var(--ink)}
+.sh-lane{position:relative;container-type:inline-size;min-height:120px;display:flex;flex-direction:column;justify-content:center;gap:18px;padding:0 6px}
+.sh-lane::before,.sh-lane::after{content:"";position:absolute;left:10px;right:10px;border-top:1px dashed var(--surface-2)}
+.sh-lane::before{top:calc(50% - 20px)}
+.sh-lane::after{top:calc(50% + 20px)}
+.sh-slip{position:relative;z-index:1;align-self:flex-start;display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:6px 10px;border-radius:var(--r);font-size:.8125rem;line-height:1.2;white-space:nowrap;box-shadow:0 6px 18px rgb(0 0 0 / .35)}
+.sh-task{background:var(--paper);color:var(--paper-ink)}
+.sh-task{overflow:hidden;text-overflow:ellipsis}
+.sh-tag{font-size:.6875rem;text-transform:uppercase;letter-spacing:.06em;color:var(--paper-muted)}
+.sh-reply{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.sh-tick{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--accent-ink);color:var(--accent);font-size:.6875rem}
+/* still layout (reduced motion, or no JS needed at all): task slip at your end, reply at the friend's end */
+.sh-task{margin-left:0}
+.sh-reply{align-self:flex-end}
+
+@media (max-width:719px){
+  .sh-card{grid-template-columns:1fr;padding:14px}
+  .sh-lane{min-height:128px;flex-direction:row;align-items:center;justify-content:space-between;padding:0 4px}
+  .sh-lane::before,.sh-lane::after{display:none}
+  .sh-slip{align-self:flex-start}
+  .sh-reply{align-self:flex-end}
+}
+
+@media (prefers-reduced-motion:no-preference){
+  .sh-menu li.hit{animation:sh-hit 6s var(--ease-out) infinite}
+  @media (min-width:720px){
+    .sh-task{animation:sh-task-x 6s infinite}
+    .sh-reply{animation:sh-reply-x 6s infinite}
+  }
+  @media (max-width:719px){
+    .sh-task{align-self:center;animation:sh-task-y 6s infinite}
+    .sh-reply{align-self:center;animation:sh-reply-y 6s infinite}
+  }
+  .sh-tick{animation:sh-tick 6s infinite}
+}
+/* task: appears at the friend's side, snaps across to yours */
+@keyframes sh-task-x{
+  0%{transform:translateX(calc(100cqw - 100% - 12px)) scale(.6);opacity:0}
+  8%{transform:translateX(calc(100cqw - 100% - 12px)) scale(1);opacity:1;animation-timing-function:cubic-bezier(.7,0,.2,1)}
+  30%{transform:translateX(0) scale(1);opacity:1}
+  40%{transform:translateX(-14px) scale(.85);opacity:0}
+  100%{opacity:0}
+}
+@keyframes sh-reply-x{
+  0%,42%{transform:translateX(calc(-100cqw + 100% + 12px)) scale(.6);opacity:0}
+  50%{transform:translateX(calc(-100cqw + 100% + 12px)) scale(1);opacity:1;animation-timing-function:cubic-bezier(.7,0,.2,1)}
+  72%,90%{transform:translateX(0) scale(1);opacity:1}
+  100%{transform:translateX(0) scale(1);opacity:0}
+}
+@keyframes sh-task-y{
+  0%{transform:translateY(44px) scale(.6);opacity:0}
+  8%{transform:translateY(44px) scale(1);opacity:1;animation-timing-function:cubic-bezier(.7,0,.2,1)}
+  30%{transform:translateY(-44px) scale(1);opacity:1}
+  40%{transform:translateY(-52px) scale(.85);opacity:0}
+  100%{opacity:0}
+}
+@keyframes sh-reply-y{
+  0%,42%{transform:translateY(-44px) scale(.6);opacity:0}
+  50%{transform:translateY(-44px) scale(1);opacity:1;animation-timing-function:cubic-bezier(.7,0,.2,1)}
+  72%,90%{transform:translateY(44px) scale(1);opacity:1}
+  100%{transform:translateY(44px) scale(1);opacity:0}
+}
+@keyframes sh-hit{
+  0%,28%{background:color-mix(in srgb,var(--bg) 55%,transparent);color:var(--ink)}
+  32%,46%{background:var(--accent);color:var(--accent-ink)}
+  60%,100%{background:color-mix(in srgb,var(--bg) 55%,transparent);color:var(--ink)}
+}
+@keyframes sh-tick{
+  0%,70%{transform:scale(0)}
+  78%{transform:scale(1.35)}
+  84%,100%{transform:scale(1)}
+}
