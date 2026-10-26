@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { api, errorText, formatTime } from './api';
 import { OnceSecret } from './CopyButton';
 import { DeliveryPanel } from './DeliveryPanel';
+import { Guests } from './Guests';
 import type { Agent, AgentKey, NewAgentKey } from './types';
 
 function deliveryLabel(a: Agent): string {
@@ -55,10 +56,16 @@ export function Agents({
   agents,
   keys,
   onChange,
+  handle,
+  guestLimit,
 }: {
   agents: Agent[];
   keys: Record<string, AgentKey[]>;
   onChange: () => void;
+  /** Workspace handle, for a shared agent's @handle/name address. */
+  handle: string | null;
+  /** Free-plan guest workspaces per shared agent. Null when the plan has no cap. */
+  guestLimit: number | null;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; text: string } | null>(null);
@@ -238,6 +245,8 @@ export function Agents({
                 ) : (
                   <p className="dash-muted">No keys.</p>
                 )}
+
+                {a.shared && !revoked ? <Guests agentId={a.id} agentName={a.name} handle={handle} guestLimit={guestLimit} /> : null}
               </li>
             );
           })}
