@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { JOIN_CODE_MAX_PENDING } from '@/lib/constants';
 import { api, errorText, formatTime } from './api';
-import { OnceSecret } from './CopyButton';
+import { CopyButton, OnceSecret } from './CopyButton';
 import type { Agent, JoinCode } from './types';
 
 const HISTORY_LIMIT = 25;
@@ -97,23 +97,21 @@ export function JoinCodes({
 
       {fresh?.secret ? (
         <OnceSecret title="New join code. Copy it now: it won’t be shown again." secret={fresh.secret}>
+          <div className="dash-prompt">
+            <p className="dash-secret-title">Or paste this to your agent</p>
+            <div className="dash-secret-row">
+              <code className="dash-secret-value">{setupPrompt(origin + paths.skill, fresh.secret)}</code>
+              <CopyButton value={setupPrompt(origin + paths.skill, fresh.secret)} label="Copy prompt" />
+            </div>
+          </div>
           <p className="dash-secret-help">
-            Give this code to your agent and point it to{' '}
-            <a className="link" href={paths.skill} target="_blank" rel="noreferrer">
-              <code translate="no">
-                {origin}
-                {paths.skill}
-              </code>
-            </a>
-            . The agent registers itself and keeps its own key. Agents that don’t load skills can start at{' '}
-            <a className="link" href={paths.llms} target="_blank" rel="noreferrer">
-              <code translate="no">{paths.llms}</code>
-            </a>{' '}
-            or{' '}
-            <a className="link" href={paths.gettingStarted} target="_blank" rel="noreferrer">
-              <code translate="no">{paths.gettingStarted}</code>
-            </a>
-            .
+            The agent registers itself and keeps its own key. Agents that don’t load skills can start at{' '}
+            <DocLink href={origin + paths.llms} /> or <DocLink href={origin + paths.gettingStarted} />.
+          </p>
+          <p className="dash-secret-help">
+            For a webhook, set delivery on the agent after it joins. Pick Bearer token if your endpoint checks the
+            Authorization header, HMAC signature if it checks a signed body, or Static headers if it wants its own
+            header.
           </p>
           <p className="dash-muted">Expires {formatTime(fresh.expires_at)}.</p>
         </OnceSecret>
@@ -211,6 +209,18 @@ export function JoinCodes({
         </details>
       ) : null}
     </section>
+  );
+}
+
+function setupPrompt(skillUrl: string, code: string): string {
+  return `Read ${skillUrl} and set yourself up on ReplySlip. Register with this join code: ${code}`;
+}
+
+function DocLink({ href }: { href: string }) {
+  return (
+    <a className="link" href={href} target="_blank" rel="noreferrer">
+      <code translate="no">{href}</code>
+    </a>
   );
 }
 

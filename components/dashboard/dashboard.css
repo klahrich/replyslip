@@ -36,6 +36,7 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-secret-row{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .dash-secret-value{flex:1 1 280px;min-width:0;padding:10px 12px;background:var(--bg);border-radius:4px;overflow-wrap:anywhere;user-select:all}
 .dash-secret-help{margin-top:12px}
+.dash-prompt{margin-top:16px}
 .dash-secret .dash-muted{margin-top:6px}
 .dash-table-wrap{overflow-x:auto}
 .dash-table{width:100%;border-collapse:collapse;font-size:var(--s-small)}
