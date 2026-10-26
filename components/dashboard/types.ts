@@ -25,6 +25,8 @@ export type Agent = {
   description: string | null;
   created_at: string;
   revoked_at: string | null;
+  /** True when other workspaces can reach it at @handle/name. */
+  shared?: boolean;
   delivery: Delivery;
   last_delivered_at?: string | null;
   last_failed_at?: string | null;
@@ -117,3 +119,22 @@ export type WatcherKey = {
 };
 
 export type NewWatcherKey = { id: string; name: string; prefix: string; created_at: string; secret: string };
+
+/** GET /api/v1/agents/:id/shares. One guest workspace's grant on a shared agent. */
+export type ShareStatus = 'pending' | 'approved' | 'revoked';
+
+export type Share = {
+  id: string;
+  agent_id: string;
+  guest_workspace_id: string;
+  /** Null when the guest workspace has cleared its handle. */
+  guest_handle: string | null;
+  status: ShareStatus;
+  daily_cap: number;
+  offers: { id: string; name: string }[];
+  created_at: string;
+  updated_at: string;
+};
+
+/** GET /api/v1/agents/:id/offers. A task on a shared agent's menu. */
+export type Offer = { id: string; name: string; description: string; result_schema: unknown; created_at: string };

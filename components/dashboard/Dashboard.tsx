@@ -11,7 +11,7 @@ import { WatcherKeys } from './WatcherKeys';
 import { WorkspaceName } from './WorkspaceName';
 import type { Agent, AgentKey, JoinCode } from './types';
 
-type Workspace = { id: string; name: string; created_at: string };
+type Workspace = { id: string; name: string; handle: string | null; created_at: string };
 
 type Loaded = { agents: Agent[]; keys: Record<string, AgentKey[]>; codes: JoinCode[] };
 
@@ -32,6 +32,7 @@ export function Dashboard({
   marketingOptIn,
   origin,
   paths,
+  guestLimit,
 }: {
   workspace: Workspace;
   email: string;
@@ -39,6 +40,8 @@ export function Dashboard({
   marketingOptIn: boolean;
   origin: string;
   paths: DocPaths;
+  /** Free-plan guest workspaces per shared agent, or null when the plan has no cap. */
+  guestLimit: number | null;
 }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [keys, setKeys] = useState<Record<string, AgentKey[]>>({});
@@ -110,7 +113,7 @@ export function Dashboard({
         </p>
       ) : null}
       <JoinCodes codes={codes} agents={agents} origin={origin} paths={paths} onChange={refresh} />
-      {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} /> : null}
+      {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} handle={workspace.handle} guestLimit={guestLimit} /> : null}
       <WatcherKeys />
       <Tasks refreshKey={tick} />
       <EmailPrefs initialOptIn={marketingOptIn} />
