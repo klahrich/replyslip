@@ -46,6 +46,8 @@ export function Guests({
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
   const [taskEdit, setTaskEdit] = useState<{ id: string; names: string[] } | null>(null);
   const [notice, setNotice] = useState('');
+  /** Confirmation shown on the row that just changed, so it's next to the button you pressed. */
+  const [saved, setSaved] = useState<{ id: string; text: string } | null>(null);
   const [inviteHandle, setInviteHandle] = useState('');
   const [picked, setPicked] = useState<string[] | null>(null);
 
@@ -94,6 +96,7 @@ export function Guests({
     setBusy(id);
     setError(null);
     setNotice('');
+    setSaved(null);
     try {
       await fn();
       setConfirming(null);
@@ -146,6 +149,14 @@ export function Guests({
 
   if (!shared && used === 0) return null;
 
+  function rowSaved(id: string) {
+    return saved?.id === id ? (
+      <p className="dash-ok dash-row-ok" role="status">
+        {saved.text}
+      </p>
+    ) : null;
+  }
+
   function rowError(id: string) {
     return error?.id.endsWith(id) ? (
       <p className="dash-err" role="alert">
@@ -158,7 +169,11 @@ export function Guests({
     const key = `rv${s.id}`;
     if (confirming !== s.id) {
       return (
-        <button type="button" className="dash-textbtn dash-danger" disabled={busy !== null} onClick={() => setConfirming(s.id)}>
+        <button type="button" className="dash-textbtn dash-danger" disabled={busy !== null} onClick={() => {
+            setSaved(null);
+            setConfirming(s.id);
+          }}
+        >
           {verb}
         </button>
       );
@@ -189,7 +204,11 @@ export function Guests({
           >
             {busy === key ? (verb === 'Deny' ? 'Denying…' : 'Revoking…') : `Yes, ${verb.toLowerCase()}`}
           </button>
-          <button type="button" className="dash-textbtn" disabled={busy === key} onClick={() => setConfirming(null)}>
+          <button type="button" className="dash-textbtn" disabled={busy === key} onClick={() => {
+              setSaved(null);
+              setConfirming(null);
+            }}
+          >
             Cancel
           </button>
         </div>
@@ -210,6 +229,7 @@ export function Guests({
             aria-label={`Change daily limit for ${who(s)}`}
             onClick={() => {
               setError(null);
+              setSaved(null);
               setTaskEdit(null);
               setEditing({ id: s.id, value: String(s.daily_cap) });
             }}
@@ -226,6 +246,7 @@ export function Guests({
           e.preventDefault();
           const cap = Number(editing.value);
           if (!Number.isInteger(cap) || cap < 1 || cap > MAX_CAP) {
+            setSaved(null);
             setError({ id: `cp${s.id}`, text: `Enter a whole number from 1 to ${MAX_CAP.toLocaleString('en-US')}.` });
             return;
           }
@@ -233,6 +254,7 @@ export function Guests({
             const r = await api<{ share: Share }>(`${base}/shares/${s.id}`, { method: 'PATCH', body: { daily_cap: cap } });
             put(r.share);
             setEditing(null);
+            setSaved({ id: s.id, text: `Daily limit saved: ${r.share.daily_cap.toLocaleString('en-US')} tasks a day.` });
           });
         }}
       >
@@ -250,7 +272,11 @@ export function Guests({
         <button type="submit" className="dash-textbtn" disabled={busy !== null}>
           {busy === `cp${s.id}` ? 'Saving…' : 'Save'}
         </button>
-        <button type="button" className="dash-textbtn" disabled={busy === `cp${s.id}`} onClick={() => setEditing(null)}>
+        <button type="button" className="dash-textbtn" disabled={busy === `cp${s.id}`} onClick={() => {
+            setSaved(null);
+            setEditing(null);
+          }}
+        >
           Cancel
         </button>
       </form>
@@ -270,6 +296,7 @@ export function Guests({
               aria-label={`Edit tasks for ${who(s)}`}
               onClick={() => {
                 setError(null);
+                setSaved(null);
                 setEditing(null);
                 setTaskEdit({ id: s.id, names: s.offers.map((o) => o.name) });
               }}
@@ -287,6 +314,7 @@ export function Guests({
         onSubmit={(e) => {
           e.preventDefault();
           if (names.length === 0) {
+            setSaved(null);
             setError({ id: `tk${s.id}`, text: 'Pick at least one task.' });
             return;
           }
@@ -294,7 +322,7 @@ export function Guests({
             const r = await api<{ share: Share }>(`${base}/shares/${s.id}`, { method: 'PATCH', body: { offers: names } });
             put(r.share);
             setTaskEdit(null);
-            setNotice(`Saved tasks for ${who(s)}.`);
+            setSaved({ id: s.id, text: 'Tasks saved.' });
           });
         }}
       >
@@ -317,7 +345,11 @@ export function Guests({
           <button type="submit" className="dash-textbtn" disabled={busy !== null}>
             {busy === `tk${s.id}` ? 'Saving…' : 'Save tasks'}
           </button>
-          <button type="button" className="dash-textbtn" disabled={busy === `tk${s.id}`} onClick={() => setTaskEdit(null)}>
+          <button type="button" className="dash-textbtn" disabled={busy === `tk${s.id}`} onClick={() => {
+              setSaved(null);
+              setTaskEdit(null);
+            }}
+          >
             Cancel
           </button>
         </div>
@@ -403,7 +435,7 @@ export function Guests({
                         run(`ap${s.id}`, async () => {
                           const r = await api<{ share: Share }>(`${base}/shares/${s.id}/approve`, { method: 'POST' });
                           put(r.share);
-                          setNotice(`Approved ${who(s)}. They can send tasks now.`);
+                          setSaved({ id: s.id, text: `Approved. ${who(s)} can send tasks now.` });
                         })
                       }
                     >
@@ -415,6 +447,7 @@ export function Guests({
                   {revokeButtons(s, 'Deny', `Deny ${who(s)}? They won’t get access.`)}
                 </div>
                 {rowError(s.id)}
+                {rowSaved(s.id)}
               </li>
             ))}
           </ul>
@@ -438,6 +471,7 @@ export function Guests({
                   {revokeButtons(s, 'Revoke', `Revoke ${who(s)}? Open tasks from this guest will fail with “access revoked”.`)}
                 </div>
                 {rowError(s.id)}
+                {rowSaved(s.id)}
               </li>
             ))}
           </ul>

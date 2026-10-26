@@ -176,6 +176,8 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-guest-main{min-width:0;flex:1 1 260px;display:grid;gap:2px}
 .dash-guest-name{font-weight:500;overflow-wrap:anywhere}
 .dash-guest>.dash-err{flex-basis:100%;margin:0}
+.dash-guest>.dash-row-ok{flex-basis:100%;margin:0}
+.dash-row-ok{margin:4px 0 0;font-size:var(--s-small);font-weight:500}
 .dash-btn-sm{height:34px;padding:0 14px}
 .dash-confirm{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;padding:8px 12px;background:#f7f8f9;border:1px solid #c4c9ce;border-radius:4px;font-size:var(--s-small);max-width:34rem}
 .dash-confirm p{margin:0}
