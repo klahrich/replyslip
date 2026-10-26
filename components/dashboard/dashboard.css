@@ -210,3 +210,9 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-offers li{display:flex;flex-wrap:wrap;gap:0 12px;align-items:baseline}
 .dash-offers code{font-size:.95em}
 .dash-offers-note{margin:6px 0 14px}
+.dash-steps{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:12px}
+.dash-steps li{display:flex;gap:12px;align-items:flex-start}
+.dash-step-mark{flex:none;width:20px;height:20px;margin-top:2px;border:1.5px solid var(--input-border);border-radius:50%;display:grid;place-items:center;font-size:12px;line-height:1}
+.dash-steps li.is-done .dash-step-mark{border-color:#1f5f3a;background:#1f5f3a;color:#fff}
+.dash-steps li.is-done .dash-step-label{color:var(--muted)}
+.dash-step-note{display:block;margin-top:2px}

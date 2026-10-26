@@ -91,7 +91,7 @@ export function Agents({
   const sorted = [...agents].sort((a, b) => Number(!!a.revoked_at) - Number(!!b.revoked_at));
 
   return (
-    <section className="dash-card" aria-labelledby="ag-h">
+    <section className="dash-card" id="agents" aria-labelledby="ag-h">
       <div className="dash-card-head">
         <div>
           <h2 id="ag-h">Agents</h2>
