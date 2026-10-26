@@ -206,8 +206,7 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-sharing code{font-size:.95em}
 .dash-sharing>.dash-err{flex-basis:100%;margin:0}
 .dash-sharing+.dash-guests{border-top:0;margin-top:10px;padding-top:0}
-.dash-offers{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:var(--s-small)}
+.dash-offers{list-style:none;margin:0;padding:0;display:grid;gap:8px;font-size:var(--s-small)}
 .dash-offers li{display:flex;flex-wrap:wrap;gap:0 12px;align-items:baseline}
-.dash-offers{gap:8px}
 .dash-offers code{font-size:.95em}
 .dash-offers-note{margin:6px 0 14px}
