@@ -491,6 +491,47 @@ describe('agent sharing', () => {
     expect(denied.payload.error).toBe('agent_not_found');
   });
 
+  it('answers a guest the same for an offer outside the grant and an unknown offer', async () => {
+    const owner = await signIn();
+    const guest = await signIn();
+    const ownerHandle = handleName('o');
+    const guestHandle = handleName('g');
+    await setHandle(owner.cookie, ownerHandle);
+    await setHandle(guest.cookie, guestHandle);
+    const planner = await createAgent(owner.cookie, 'Planner');
+    await addOffer(owner.cookie, planner.id, 'draft');
+    await addOffer(owner.cookie, planner.id, 'hidden');
+    const shared = await call(putSharing, `http://localhost/api/v1/agents/${planner.id}/sharing`, {
+      method: 'PUT',
+      cookie: owner.cookie,
+      params: { id: planner.id },
+      body: { shared: true },
+    });
+    expect(shared.status).toBe(200);
+    await grant(owner.cookie, planner.id, guestHandle, 'draft');
+    const guestBot = await createAgent(guest.cookie, 'GuestBot');
+    const guestKey = await createKey(guest.cookie, guestBot.id);
+    const to = `@${ownerHandle}/Planner`;
+
+    const card = await mcpTool(guestKey, 'get_agent_card', { address: to });
+    expect(card.isError).toBe(false);
+    expect(card.payload.card.offers.map((o: { name: string }) => o.name)).toEqual(['draft']);
+
+    const attempt = (offer: string) =>
+      mcpTool(guestKey, 'create_task', { to, offer, title: 'Probe', description: 'Which offers exist?' });
+    const notGranted = await attempt('hidden');
+    const unknown = await attempt('nosuch');
+    expect(notGranted.isError).toBe(true);
+    expect(notGranted.httpStatus).toBe(unknown.httpStatus);
+    expect(notGranted.payload.error).toBe('offer_not_found');
+    expect(unknown.payload.error).toBe('offer_not_found');
+    expect(JSON.stringify(notGranted.payload).replaceAll('hidden', 'OFFER')).toBe(JSON.stringify(unknown.payload).replaceAll('nosuch', 'OFFER'));
+    expect(JSON.stringify(notGranted.payload)).not.toMatch(/grant|includ|access/i);
+
+    const ok = await attempt('draft');
+    expect(ok.isError).toBe(false);
+  });
+
   it('lets only a signed-in human approve a guest', async () => {
     const owner = await signIn();
     const guest = await signIn();

@@ -665,6 +665,11 @@ function notShared(address: string): HttpError {
   return new HttpError(404, 'agent_not_found', `${SHARED_AGENT_MISSING} (${address})`);
 }
 
+/** The guest-facing error for an offer that is unknown or not in the grant. Same code, status, and wording for both. */
+function offerNotAvailable(offer: string, address: string): HttpError {
+  return new HttpError(404, 'offer_not_found', `No offer named ${offer} is available to you on ${address}. Call get_agent_card for your offers.`);
+}
+
 export type ResolvedShare = {
   recipient: AgentRow;
   offerId: string;
@@ -711,20 +716,15 @@ export async function resolveSharedTask(
   if (fresh.status !== 'approved') {
     throw new HttpError(403, 'share_pending', `Access to ${shown} is not approved yet.`);
   }
+  // One lookup through the grant: an offer the owner has but did not grant looks exactly like an unknown name,
+  // so a guest cannot probe which offers exist.
   const [menu] = await tx
-    .select()
-    .from(agentOffers)
-    .where(and(eq(agentOffers.agentId, recipient.id), eq(agentOffers.name, offer)))
-    .limit(1);
-  if (!menu) throw new HttpError(404, 'offer_not_found', `No offer named ${offer} is on ${shown}.`);
-  const [granted] = await tx
-    .select({ offerId: agentShareOffers.offerId })
+    .select({ id: agentOffers.id, resultSchema: agentOffers.resultSchema })
     .from(agentShareOffers)
-    .where(and(eq(agentShareOffers.shareId, fresh.id), eq(agentShareOffers.offerId, menu.id)))
+    .innerJoin(agentOffers, eq(agentOffers.id, agentShareOffers.offerId))
+    .where(and(eq(agentShareOffers.shareId, fresh.id), eq(agentOffers.agentId, recipient.id), eq(agentOffers.name, offer)))
     .limit(1);
-  if (!granted) {
-    throw new HttpError(403, 'offer_not_granted', `The offer ${offer} is not included in your access to ${shown}.`);
-  }
+  if (!menu) throw offerNotAvailable(offer, shown);
   const cap = await consumeKeyedRateLimit(tx, {
     kind: GUEST_TASK_RATE_KIND,
     key: fresh.id,
