@@ -43,6 +43,13 @@
       "when": 1762400000000,
       "tag": "0005_marketing_consent",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1762500000000,
+      "tag": "0006_signup_source",
+      "breakpoints": true
     }
   ]
 }

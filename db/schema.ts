@@ -41,6 +41,8 @@ export const users = pgTable(
     marketingConsentText: text('marketing_consent_text'),
     /** When they withdrew consent. Null while they are opted in. */
     marketingUnsubscribedAt: ts('marketing_unsubscribed_at'),
+    /** Set once, on the request that creates the user. Later sign-ins do not replace it. */
+    signupSource: text('signup_source'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (table) => [uniqueIndex('users_email_unique').on(table.email)],
