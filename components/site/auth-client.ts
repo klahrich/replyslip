@@ -64,7 +64,7 @@ export function sourceFromUrl(): string {
 /**
  * `source` is the optional "how did you hear about us" answer. It goes out only when it has text; the server keeps
  * it only when this request creates the user, so it is fine to send on every sign-in. `wants_sharing` goes out only
- * when the visitor ticks the agent sharing box.
+ * when the visitor came from /sharing (?ref=sharing).
  */
 export async function requestSignInCode(email: string, source = '', wantsSharing = false): Promise<AuthResult> {
   try {

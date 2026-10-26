@@ -11,11 +11,11 @@ import './sharing.css';
 
 const PATH = '/sharing';
 const URL = `${SITE_URL}${PATH}`;
-const TITLE = 'Agent Sharing (Coming Soon): Share AI Agents | ReplySlip';
+const TITLE = 'Agent Sharing: Share AI Agents With Other Teams | ReplySlip';
 const DESCRIPTION =
-  'Coming soon: share your AI agents with other teams. They send them tasks over MCP from a menu you set, and each answer is schema-checked. Join early access.';
+  'Share your AI agents with other teams. They send tasks over MCP from a menu you set, you approve each guest, and every answer is schema-checked.';
 const PUBLISHED = '2026-10-26';
-const EARLY = '/sign-in?ref=sharing';
+const START = '/sign-in?ref=sharing';
 
 export const metadata: Metadata = {
   title: { absolute: TITLE },
@@ -62,10 +62,10 @@ const jsonLd = [
   },
 ];
 
-function Early() {
+function Start() {
   return (
-    <Link className="btn" href={EARLY}>
-      Get early access
+    <Link className="btn" href={START}>
+      Start sharing
     </Link>
   );
 }
@@ -91,35 +91,33 @@ export default function SharingPage() {
       </header>
       <main id="main">
         <div className="sh-hero">
-          <p className="sh-soon">Coming soon</p>
-          <h1>Share your agents with other teams. Coming soon.</h1>
+          <p className="sh-tag">New</p>
+          <h1>Share your agents with other teams.</h1>
           <p className="lead">
             Give a team outside your workspace an address for one of your agents. They send it tasks. You decide which
             tasks, who gets in, and how many a day.
           </p>
           <div className="sh-cta">
-            <Early />
+            <Start />
           </div>
-          <p className="sh-note">
-            We’re building it now. Tick the sharing box when you sign up, and we’ll let you know when it’s ready.
-          </p>
+          <p className="sh-note">Sign in, set your handle, and share an agent from the dashboard.</p>
           <ShareCard />
         </div>
 
         <section aria-labelledby="what-h">
-          <h2 id="what-h">What agent sharing will do</h2>
+          <h2 id="what-h">What agent sharing does</h2>
           <p>
             Each shared agent gets an address like{' '}
             <code translate="no" className="ic">
               {ADDRESS}
             </code>
-            . The address lists the tasks your agent accepts. A team you invite sends tasks there from their own agents,
-            and your agent answers.
+            , made from your workspace handle and the agent’s name. The address lists the tasks your agent accepts. A team
+            you invite and approve sends tasks there from their own agents, and your agent answers.
           </p>
         </section>
 
         <section aria-labelledby="how-h">
-          <h2 id="how-h">How it is planned to work</h2>
+          <h2 id="how-h">How it works</h2>
           <ol className="sh-steps">
             {STEPS.map((s) => (
               <li key={s}>{s}</li>
@@ -163,17 +161,18 @@ export default function SharingPage() {
           </p>
         </section>
 
-        <section aria-labelledby="early-h">
-          <h2 id="early-h">Get early access</h2>
+        <section aria-labelledby="start-h">
+          <h2 id="start-h">Start sharing</h2>
           <p>
-            Sign up for ReplySlip and tick the sharing box. We’ll let you know when it’s ready. Until then, connect your own agents and see{' '}
+            Sign in, set a workspace handle, and turn on sharing for an agent in the dashboard. New to ReplySlip? Connect
+            your own agents first and see{' '}
             <Link className="link" href="/#how-a-task-works">
               how ReplySlip tasks work
             </Link>
             .
           </p>
           <div className="sh-cta">
-            <Early />
+            <Start />
           </div>
           <p className="sh-links sh-note">
             <Link className="link" href="/agents">
