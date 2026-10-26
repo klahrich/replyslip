@@ -22,6 +22,7 @@ export function WorkspaceHandle({
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
 
   async function save(ev: FormEvent) {
     ev.preventDefault();
@@ -37,12 +38,14 @@ export function WorkspaceHandle({
     }
     setBusy(true);
     setError('');
+    setSaved(false);
     try {
       const { workspace } = await api<{ workspace: { handle: string | null } }>('/api/v1/workspaces/current', {
         method: 'PATCH',
         body: { handle: value },
       });
       onSaved(workspace.handle ?? value);
+      setSaved(true);
       setEditing(false);
     } catch (err) {
       setError(errorText(err));
@@ -63,6 +66,7 @@ export function WorkspaceHandle({
               onClick={() => {
                 setDraft(handle);
                 setError('');
+                setSaved(false);
                 setEditing(true);
               }}
             >
@@ -78,6 +82,7 @@ export function WorkspaceHandle({
               onClick={() => {
                 setDraft('');
                 setError('');
+                setSaved(false);
                 setEditing(true);
               }}
             >
@@ -85,6 +90,11 @@ export function WorkspaceHandle({
             </button>
           </p>
         )}
+        {saved ? (
+          <p className="dash-ok dash-row-ok" role="status">
+            Handle saved.
+          </p>
+        ) : null}
       </div>
     );
   }

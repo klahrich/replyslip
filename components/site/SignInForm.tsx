@@ -18,7 +18,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 type Step = 'email' | 'code';
 
 const noSubscribe = () => () => {};
-/** Visitors from /sharing arrive with ?ref=sharing. Their sign-in sends wants_sharing, which feeds the source stats. */
+/** Visitors from /sharing arrive with ?ref=sharing. Their sign-in sends wants_sharing: true, which feeds the wants_sharing count, separate from source. */
 const fromSharing = () => new URLSearchParams(window.location.search).get('ref') === 'sharing';
 
 /** `sent` means the landing form already asked for a code; the email itself comes from sessionStorage. */

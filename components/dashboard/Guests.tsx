@@ -46,6 +46,8 @@ export function Guests({
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
   const [taskEdit, setTaskEdit] = useState<{ id: string; names: string[] } | null>(null);
   const [notice, setNotice] = useState('');
+  /** Confirmation shown on the row that just changed, so it's next to the button you pressed. */
+  const [saved, setSaved] = useState<{ id: string; text: string } | null>(null);
   const [inviteHandle, setInviteHandle] = useState('');
   const [picked, setPicked] = useState<string[] | null>(null);
 
@@ -94,6 +96,7 @@ export function Guests({
     setBusy(id);
     setError(null);
     setNotice('');
+    setSaved(null);
     try {
       await fn();
       setConfirming(null);
@@ -145,6 +148,14 @@ export function Guests({
   const chosen = picked ?? data.offers.map((o) => o.name);
 
   if (!shared && used === 0) return null;
+
+  function rowSaved(id: string) {
+    return saved?.id === id ? (
+      <p className="dash-ok dash-row-ok" role="status">
+        {saved.text}
+      </p>
+    ) : null;
+  }
 
   function rowError(id: string) {
     return error?.id.endsWith(id) ? (
@@ -233,6 +244,7 @@ export function Guests({
             const r = await api<{ share: Share }>(`${base}/shares/${s.id}`, { method: 'PATCH', body: { daily_cap: cap } });
             put(r.share);
             setEditing(null);
+            setSaved({ id: s.id, text: `Daily limit saved: ${cap.toLocaleString('en-US')} tasks a day.` });
           });
         }}
       >
@@ -294,7 +306,7 @@ export function Guests({
             const r = await api<{ share: Share }>(`${base}/shares/${s.id}`, { method: 'PATCH', body: { offers: names } });
             put(r.share);
             setTaskEdit(null);
-            setNotice(`Saved tasks for ${who(s)}.`);
+            setSaved({ id: s.id, text: 'Tasks saved.' });
           });
         }}
       >
@@ -403,7 +415,7 @@ export function Guests({
                         run(`ap${s.id}`, async () => {
                           const r = await api<{ share: Share }>(`${base}/shares/${s.id}/approve`, { method: 'POST' });
                           put(r.share);
-                          setNotice(`Approved ${who(s)}. They can send tasks now.`);
+                          setSaved({ id: s.id, text: `Approved. ${who(s)} can send tasks now.` });
                         })
                       }
                     >
@@ -415,6 +427,7 @@ export function Guests({
                   {revokeButtons(s, 'Deny', `Deny ${who(s)}? They won’t get access.`)}
                 </div>
                 {rowError(s.id)}
+                {rowSaved(s.id)}
               </li>
             ))}
           </ul>
@@ -438,6 +451,7 @@ export function Guests({
                   {revokeButtons(s, 'Revoke', `Revoke ${who(s)}? Open tasks from this guest will fail with “access revoked”.`)}
                 </div>
                 {rowError(s.id)}
+                {rowSaved(s.id)}
               </li>
             ))}
           </ul>
