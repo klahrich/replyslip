@@ -26,6 +26,7 @@ export function JoinCodes({
   const [fresh, setFresh] = useState<JoinCode | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const skillUrl = origin + paths.skill;
   const agentName = (id: string | null) => agents.find((a) => a.id === id)?.name ?? null;
 
   async function run(key: string, fn: () => Promise<void>) {
@@ -100,8 +101,15 @@ export function JoinCodes({
           <div className="dash-prompt">
             <p className="dash-secret-title">Or paste this to your agent</p>
             <div className="dash-secret-row">
-              <code className="dash-secret-value">{setupPrompt(origin + paths.skill, fresh.secret)}</code>
-              <CopyButton value={setupPrompt(origin + paths.skill, fresh.secret)} label="Copy prompt" />
+              <code translate="no" className="dash-secret-value">
+                Read{' '}
+                <a className="link" href={skillUrl} target="_blank" rel="noreferrer">
+                  {skillUrl}
+                </a>{' '}
+                {PROMPT_REST}
+                {fresh.secret}
+              </code>
+              <CopyButton value={setupPrompt(skillUrl, fresh.secret)} label="Copy prompt" />
             </div>
           </div>
           <p className="dash-secret-help">
@@ -109,9 +117,9 @@ export function JoinCodes({
             <DocLink href={origin + paths.llms} /> or <DocLink href={origin + paths.gettingStarted} />.
           </p>
           <p className="dash-secret-help">
-            For a webhook, set delivery on the agent after it joins. Pick Bearer token if your endpoint checks the
-            Authorization header, HMAC signature if it checks a signed body, or Static headers if it wants its own
-            header.
+            For a webhook, the agent can include it when it registers, or you can set delivery on the agent after it
+            joins. Pick Bearer token if your endpoint checks the Authorization header, HMAC signature if it checks a
+            signed body, or Static headers if it wants its own header.
           </p>
           <p className="dash-muted">Expires {formatTime(fresh.expires_at)}.</p>
         </OnceSecret>
@@ -212,8 +220,10 @@ export function JoinCodes({
   );
 }
 
+const PROMPT_REST = 'and set yourself up on ReplySlip. Register with this join code: ';
+
 function setupPrompt(skillUrl: string, code: string): string {
-  return `Read ${skillUrl} and set yourself up on ReplySlip. Register with this join code: ${code}`;
+  return `Read ${skillUrl} ${PROMPT_REST}${code}`;
 }
 
 function DocLink({ href }: { href: string }) {
