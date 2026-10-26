@@ -169,7 +169,11 @@ export function Guests({
     const key = `rv${s.id}`;
     if (confirming !== s.id) {
       return (
-        <button type="button" className="dash-textbtn dash-danger" disabled={busy !== null} onClick={() => setConfirming(s.id)}>
+        <button type="button" className="dash-textbtn dash-danger" disabled={busy !== null} onClick={() => {
+            setSaved(null);
+            setConfirming(s.id);
+          }}
+        >
           {verb}
         </button>
       );
@@ -200,7 +204,11 @@ export function Guests({
           >
             {busy === key ? (verb === 'Deny' ? 'Denying…' : 'Revoking…') : `Yes, ${verb.toLowerCase()}`}
           </button>
-          <button type="button" className="dash-textbtn" disabled={busy === key} onClick={() => setConfirming(null)}>
+          <button type="button" className="dash-textbtn" disabled={busy === key} onClick={() => {
+              setSaved(null);
+              setConfirming(null);
+            }}
+          >
             Cancel
           </button>
         </div>
@@ -221,6 +229,7 @@ export function Guests({
             aria-label={`Change daily limit for ${who(s)}`}
             onClick={() => {
               setError(null);
+              setSaved(null);
               setTaskEdit(null);
               setEditing({ id: s.id, value: String(s.daily_cap) });
             }}
@@ -237,6 +246,7 @@ export function Guests({
           e.preventDefault();
           const cap = Number(editing.value);
           if (!Number.isInteger(cap) || cap < 1 || cap > MAX_CAP) {
+            setSaved(null);
             setError({ id: `cp${s.id}`, text: `Enter a whole number from 1 to ${MAX_CAP.toLocaleString('en-US')}.` });
             return;
           }
@@ -244,7 +254,7 @@ export function Guests({
             const r = await api<{ share: Share }>(`${base}/shares/${s.id}`, { method: 'PATCH', body: { daily_cap: cap } });
             put(r.share);
             setEditing(null);
-            setSaved({ id: s.id, text: `Daily limit saved: ${cap.toLocaleString('en-US')} tasks a day.` });
+            setSaved({ id: s.id, text: `Daily limit saved: ${r.share.daily_cap.toLocaleString('en-US')} tasks a day.` });
           });
         }}
       >
@@ -262,7 +272,11 @@ export function Guests({
         <button type="submit" className="dash-textbtn" disabled={busy !== null}>
           {busy === `cp${s.id}` ? 'Saving…' : 'Save'}
         </button>
-        <button type="button" className="dash-textbtn" disabled={busy === `cp${s.id}`} onClick={() => setEditing(null)}>
+        <button type="button" className="dash-textbtn" disabled={busy === `cp${s.id}`} onClick={() => {
+            setSaved(null);
+            setEditing(null);
+          }}
+        >
           Cancel
         </button>
       </form>
@@ -282,6 +296,7 @@ export function Guests({
               aria-label={`Edit tasks for ${who(s)}`}
               onClick={() => {
                 setError(null);
+                setSaved(null);
                 setEditing(null);
                 setTaskEdit({ id: s.id, names: s.offers.map((o) => o.name) });
               }}
@@ -299,6 +314,7 @@ export function Guests({
         onSubmit={(e) => {
           e.preventDefault();
           if (names.length === 0) {
+            setSaved(null);
             setError({ id: `tk${s.id}`, text: 'Pick at least one task.' });
             return;
           }
@@ -329,7 +345,11 @@ export function Guests({
           <button type="submit" className="dash-textbtn" disabled={busy !== null}>
             {busy === `tk${s.id}` ? 'Saving…' : 'Save tasks'}
           </button>
-          <button type="button" className="dash-textbtn" disabled={busy === `tk${s.id}`} onClick={() => setTaskEdit(null)}>
+          <button type="button" className="dash-textbtn" disabled={busy === `tk${s.id}`} onClick={() => {
+              setSaved(null);
+              setTaskEdit(null);
+            }}
+          >
             Cancel
           </button>
         </div>
