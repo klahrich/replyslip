@@ -7,7 +7,7 @@ import { POST as verifyCode } from '@/app/api/v1/auth/verify-code/route';
 import { POST as createAgentRoute } from '@/app/api/v1/agents/route';
 import { POST as registerRoute } from '@/app/api/v1/agents/register/route';
 import { getDb } from '@/db';
-import { messages, tasks, users } from '@/db/schema';
+import { agents, messages, tasks, users } from '@/db/schema';
 import { firstAgentAlertText, setEmailSenderForTests } from '@/lib/email';
 import {
   flushFirstAgentAlerts,
@@ -80,6 +80,85 @@ describe('signup source', () => {
     const session = await signInWithSource('landing-hero');
     expect(JSON.stringify(session.user)).not.toContain('landing-hero');
     expect(JSON.stringify(session.user)).not.toContain('signup_source');
+  });
+});
+
+async function requestWith(body: Record<string, unknown>) {
+  const res = await call(requestCode, 'http://localhost/api/v1/auth/request-code', { body });
+  expect(res.status).toBe(200);
+  return res;
+}
+
+async function wantsSharingOf(email: string) {
+  const [row] = await getDb().select().from(users).where(eq(users.email, email.toLowerCase()));
+  return row?.wantsSharing;
+}
+
+describe('wants_sharing', () => {
+  it('records true for a new user, defaults to false otherwise', async () => {
+    const yes = emailAddress('share-new');
+    await requestWith({ email: yes, wants_sharing: true });
+    expect(await wantsSharingOf(yes)).toBe(true);
+
+    const no = emailAddress('share-none');
+    await requestWith({ email: no });
+    expect(await wantsSharingOf(no)).toBe(false);
+  });
+
+  it('records true for an existing user and never flips it back', async () => {
+    const email = emailAddress('share-later');
+    await requestWith({ email, wants_sharing: false });
+    expect(await wantsSharingOf(email)).toBe(false);
+
+    await requestWith({ email, wants_sharing: true });
+    expect(await wantsSharingOf(email)).toBe(true);
+
+    await requestWith({ email, wants_sharing: false });
+    await requestWith({ email });
+    expect(await wantsSharingOf(email)).toBe(true);
+  });
+
+  it('ignores values that are not boolean true', async () => {
+    for (const value of ['true', 1, 'yes', null, {}, []]) {
+      const email = emailAddress('share-odd');
+      await requestWith({ email, wants_sharing: value });
+      expect(await wantsSharingOf(email)).toBe(false);
+    }
+  });
+
+  it('is counted in admin stats for outside users only, and not returned to the user', async () => {
+    process.env.STATS_API_KEY = KEY;
+    delete process.env.STATS_EXCLUDE_WORKSPACE_IDS;
+    const before = await stats(1, KEY);
+    expect(typeof before.data.wants_sharing).toBe('number');
+    expect(typeof before.data.wants_sharing_with_agent).toBe('number');
+
+    const email = emailAddress('share-stats');
+    await requestWith({ email, wants_sharing: true });
+    const verified = await call(verifyCode, 'http://localhost/api/v1/auth/verify-code', {
+      body: { email, code: latestCode(email) },
+    });
+    expect(verified.status).toBe(200);
+    expect(JSON.stringify(verified.data.user)).not.toContain('sharing');
+
+    const mid = await stats(1, KEY);
+    expect(mid.data.wants_sharing).toBe(before.data.wants_sharing + 1);
+    expect(mid.data.wants_sharing_with_agent).toBe(before.data.wants_sharing_with_agent);
+
+    const agent = await createAgent(verified.cookie!, 'ShareBot');
+    const withAgent = await stats(1, KEY);
+    expect(withAgent.data.wants_sharing).toBe(mid.data.wants_sharing);
+    expect(withAgent.data.wants_sharing_with_agent).toBe(before.data.wants_sharing_with_agent + 1);
+
+    // A revoked agent still counts: the workspace registered one.
+    await getDb().update(agents).set({ revokedAt: new Date() }).where(eq(agents.id, agent.id));
+    const revoked = await stats(1, KEY);
+    expect(revoked.data.wants_sharing_with_agent).toBe(withAgent.data.wants_sharing_with_agent);
+
+    process.env.STATS_EXCLUDE_WORKSPACE_IDS = verified.data.workspace.id;
+    const after = await stats(1, KEY);
+    expect(after.data.wants_sharing).toBe(before.data.wants_sharing);
+    expect(after.data.wants_sharing_with_agent).toBe(before.data.wants_sharing_with_agent);
   });
 });
 

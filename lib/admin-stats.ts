@@ -25,6 +25,10 @@ export type UsageStats = {
   to: string;
   totals: Omit<UsageDay, 'date'>;
   series: UsageDay[];
+  /** All-time count of users outside excluded workspaces who asked for agent sharing. Not limited to the window. */
+  wants_sharing: number;
+  /** Subset of `wants_sharing` whose workspace has ever registered an agent, revoked or not. All-time. */
+  wants_sharing_with_agent: number;
 };
 
 export type StatsAuth = 'off' | 'unauthorized' | 'ok';
@@ -97,7 +101,7 @@ export async function loadUsageStats(options: { days: number; now?: Date }): Pro
   const userWorkspace = sql`(workspace_id is null or ${notExcluded(sql`workspace_id`)})`;
   const inWindow = (column: SQL) => sql`${column} >= ${startIso}::timestamptz and ${column} < ${untilIso}::timestamptz`;
 
-  const [signupRows, workspaceRows, agentRows, activeRows, activeTotalRows, createdRows, completedRows, failedRows, messageRows] =
+  const [signupRows, workspaceRows, agentRows, activeRows, activeTotalRows, createdRows, completedRows, failedRows, messageRows, wantsSharingRows, wantsSharingAgentRows] =
     await Promise.all([
       rowsOf<SourceCount>(sql`
         select ${dayOf(sql`created_at`)} as day,
@@ -170,6 +174,18 @@ export async function loadUsageStats(options: { days: number; now?: Date }): Pro
         where ${inWindow(sql`created_at`)} and ${notExcluded(sql`workspace_id`)}
         group by 1
       `),
+      rowsOf<{ n: number | string }>(sql`
+        select count(*)::int as n
+        from users
+        where wants_sharing and ${userWorkspace}
+      `),
+      rowsOf<{ n: number | string }>(sql`
+        select count(*)::int as n
+        from users u
+        where u.wants_sharing
+          and ${notExcluded(sql`u.workspace_id`)}
+          and exists (select 1 from agents a where a.workspace_id = u.workspace_id)
+      `),
     ]);
 
   const signups = countMap(
@@ -232,5 +248,7 @@ export async function loadUsageStats(options: { days: number; now?: Date }): Pro
       signups_by_source: sortedSources(signupsBySource),
     },
     series,
+    wants_sharing: Number(wantsSharingRows[0]?.n ?? 0),
+    wants_sharing_with_agent: Number(wantsSharingAgentRows[0]?.n ?? 0),
   };
 }

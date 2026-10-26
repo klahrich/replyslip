@@ -43,6 +43,8 @@ export const users = pgTable(
     marketingUnsubscribedAt: ts('marketing_unsubscribed_at'),
     /** Set once, on the request that creates the user. Later sign-ins do not replace it. */
     signupSource: text('signup_source'),
+    /** Asked for early access to agent sharing. Set by request-code; once true, never cleared by it. */
+    wantsSharing: boolean('wants_sharing').notNull().default(false),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (table) => [uniqueIndex('users_email_unique').on(table.email)],

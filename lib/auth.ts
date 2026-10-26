@@ -59,10 +59,16 @@ export function normalizeSignupSource(value: string | null | undefined): string 
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/** True only for a JSON boolean true. Anything else, including "true" or 1, is ignored. */
+export function normalizeWantsSharing(value: unknown): boolean {
+  return value === true;
+}
+
 export async function requestLoginCode(
   emailInput: string,
   req: Request,
   sourceInput?: string | null,
+  options: { wantsSharing?: boolean } = {},
 ): Promise<{ limited: true; retryAfterSeconds: number } | { limited: false }> {
   const email = normalizeEmail(emailInput);
   const limit = await consumeRateLimit({
@@ -74,8 +80,12 @@ export async function requestLoginCode(
 
   const db = getDb();
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  const wantsSharing = options.wantsSharing === true;
   if (existing.length === 0) {
-    await db.insert(users).values({ email, signupSource: normalizeSignupSource(sourceInput) });
+    await db.insert(users).values({ email, signupSource: normalizeSignupSource(sourceInput), wantsSharing });
+  } else if (wantsSharing) {
+    // Sticky: an existing user can opt in later. Nothing here sets it back to false.
+    await db.update(users).set({ wantsSharing: true }).where(and(eq(users.email, email), eq(users.wantsSharing, false)));
   }
 
   const code = randomLoginCode();
