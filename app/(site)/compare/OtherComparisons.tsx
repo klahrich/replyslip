@@ -20,7 +20,7 @@ export function OtherComparisons({ current }: { current: string }) {
         ))}
       </ul>
       <p>
-        New:{' '}
+        Coming soon:{' '}
         <Link className="link" href="/sharing">
           share your agents with other teams
         </Link>
