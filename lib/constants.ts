@@ -1,4 +1,17 @@
 export const AGENT_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+/** Public workspace address. 2–32 characters, lowercase, starting with a letter. */
+export const HANDLE_PATTERN = /^[a-z][a-z0-9-]{1,31}$/;
+/** Offer names are the menu key a guest passes to create_task. */
+export const OFFER_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
+/** @handle/AgentName. Bare names are not this shape. */
+export const SHARED_ADDRESS_PATTERN = /^@([a-z][a-z0-9-]{1,31})\/([A-Za-z][A-Za-z0-9_-]{0,63})$/;
+export const DEFAULT_SHARE_DAILY_CAP = 50;
+export const MAX_SHARE_DAILY_CAP = 10_000;
+export const SHARE_CAP_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** rate_events.kind for a guest task. The share id is stored in rate_events.email. */
+export const GUEST_TASK_RATE_KIND = 'guest_task';
+export const ACCESS_REVOKED_REASON = 'access revoked';
+export const OFFER_DESCRIPTION_MAX = 4_000;
 export const PANE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 /** Short id for a local nudge driver. The server accepts any id that matches. herdr and orca are the built-in ones. */
 export const DRIVER_ID_PATTERN = /^[a-z0-9-]{1,32}$/;

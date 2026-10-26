@@ -1,0 +1,36 @@
+import { z } from 'zod';
+import { requireUser } from '@/lib/auth';
+import { handle, json, parseBody, readJson, requireUuid } from '@/lib/http';
+import { createOffer, listOffers } from '@/lib/sharing';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+const bodySchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  result_schema: z.record(z.string(), z.json()),
+});
+
+export function GET(req: Request, context: { params: Promise<{ id: string }> }) {
+  return handle(async () => {
+    const user = await requireUser(req);
+    const { id } = await context.params;
+    const offers = await listOffers(user.workspace.id, requireUuid(id, 'agent'));
+    return json({ offers });
+  });
+}
+
+export function POST(req: Request, context: { params: Promise<{ id: string }> }) {
+  return handle(async () => {
+    const user = await requireUser(req);
+    const { id } = await context.params;
+    const body = parseBody(bodySchema, await readJson(req));
+    const offer = await createOffer(user.workspace.id, requireUuid(id, 'agent'), {
+      name: body.name,
+      description: body.description,
+      resultSchema: body.result_schema,
+    });
+    return json({ offer }, 201);
+  });
+}

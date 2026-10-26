@@ -1,5 +1,5 @@
 import { and, asc, eq, gte, sql } from 'drizzle-orm';
-import { getDb } from '@/db';
+import { getDb, type Db } from '@/db';
 import { rateEvents } from '@/db/schema';
 import { RATE_LIMITS } from './constants';
 
@@ -73,6 +73,36 @@ export async function consumeRateLimit(input: {
     });
     return { limited: false, retryAfterSeconds: 0 };
   });
+}
+
+/**
+ * Sliding window for a per-row cap, such as a share's daily guest-task limit.
+ * The caller holds the row lock. `key` is stored in rate_events.email. A full window inserts nothing.
+ */
+export async function consumeKeyedRateLimit(
+  tx: Db,
+  input: { kind: string; key: string; limit: number; windowMs: number },
+): Promise<{ limited: boolean; retryAfterSeconds: number }> {
+  const since = new Date(Date.now() - input.windowMs);
+  await tx
+    .delete(rateEvents)
+    .where(and(eq(rateEvents.kind, input.kind), sql`${rateEvents.createdAt} < now() - interval '1 day'`));
+  const rows = await tx
+    .select({ createdAt: rateEvents.createdAt })
+    .from(rateEvents)
+    .where(and(eq(rateEvents.kind, input.kind), eq(rateEvents.email, input.key), gte(rateEvents.createdAt, since)))
+    .orderBy(asc(rateEvents.createdAt));
+  if (rows.length >= input.limit) {
+    const retryMs = retryDelayMs(
+      rows.map((row) => row.createdAt),
+      input.limit,
+      input.windowMs,
+      Date.now(),
+    );
+    return { limited: true, retryAfterSeconds: Math.max(1, Math.ceil((retryMs || input.windowMs) / 1000)) };
+  }
+  await tx.insert(rateEvents).values({ kind: input.kind, email: input.key, ip: null });
+  return { limited: false, retryAfterSeconds: 0 };
 }
 
 /** Milliseconds until a sliding window of `limit` events drops below the limit. 0 when another event still fits. */

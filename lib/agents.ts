@@ -39,6 +39,7 @@ export function serializeAgent(agent: AgentRow) {
     description: agent.description,
     created_at: agent.createdAt.toISOString(),
     revoked_at: agent.revokedAt?.toISOString() ?? null,
+    shared: agent.shared,
     delivery: publicDelivery(agent),
   };
 }

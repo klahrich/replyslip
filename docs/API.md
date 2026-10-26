@@ -8,7 +8,7 @@ Base URL: `https://<host>`
 
 Errors use `{ "error": { "code", "message", "details"? } }`. Two codes are flat instead. `plan_limit` is HTTP 403 with `{ "error": "plan_limit", "limit": "agents" | "tasks_per_month", "max", "used", "resets_at"?, "message" }`. `resets_at` is present only for `tasks_per_month` and is the ISO start of the next UTC month. `invalid_consent_text` is HTTP 400 `{ "error": "invalid_consent_text" }` when an opt-in sends checkbox wording that is not on the allowlist. Send `Content-Type: application/json` on requests with a body.
 
-A `free` workspace may have 10 active agents (revoked agents do not count) and 1,000 tasks created per UTC calendar month. `create_task` counts. `ask` is refused at that cap and does not add a task. `send_message`, `complete_task`, and `fail_task` do not count. `plan` `unlimited` has null limits. The app does not choose which workspace is unlimited.
+A `free` workspace may have 10 active agents (revoked agents do not count) and 1,000 tasks created per UTC calendar month. `create_task` counts against the sender's workspace, including a guest task sent to `@handle/agentname`. It does not count against the owner. `ask` is refused at that cap for a same-workspace task and does not add a task. `send_message`, `complete_task`, and `fail_task` do not count. Each shared agent on a free workspace can have at most 3 pending or approved guest workspaces. `plan` `unlimited` has null task and agent limits and no guest-workspace cap. The app does not choose which workspace is unlimited.
 
 Four credentials, never interchangeable:
 
@@ -20,7 +20,7 @@ Four credentials, never interchangeable:
 | Watcher key `rsw_...` | `Authorization: Bearer` on the watcher routes | SHA-256 only. Shown once. |
 | `CRON_SECRET` | `Authorization: Bearer` on `/api/cron/wakes` | Environment variable. |
 
-A workspace is the tenant. Nothing is readable across workspaces.
+A workspace is the tenant. Nothing is readable across workspaces except a task a granted guest sends to a shared agent. The guest sees only that task. The owner's other agents, messages, and tasks do not cross.
 
 ## Passwordless sign-in
 
@@ -69,7 +69,7 @@ Success `200` sets the session cookie and returns:
 ```json
 {
   "user": { "id": "uuid", "email": "owner@example.com", "email_verified_at": "2026-10-24T00:00:00.000Z", "marketing_opt_in": false, "created_at": "2026-10-24T00:00:00.000Z" },
-  "workspace": { "id": "uuid", "name": "owner workspace", "created_at": "2026-10-24T00:00:00.000Z" }
+  "workspace": { "id": "uuid", "name": "owner workspace", "handle": null, "created_at": "2026-10-24T00:00:00.000Z" }
 }
 ```
 
@@ -114,13 +114,59 @@ A valid token sets `marketing_opt_in` to false and `marketing_unsubscribed_at` t
 
 ### PATCH `/api/v1/workspaces/current`
 
-Session cookie required. Renames the signed-in user's workspace.
+Session cookie required. Updates the signed-in user's workspace name, public handle, or both. Send at least one field.
 
 ```json
-{ "name": "Meal planning" }
+{ "name": "Meal planning", "handle": "mealco" }
 ```
 
-`name` is trimmed. It must be 1–80 characters after trimming. `200` `{ "workspace": { "id", "name", "created_at" } }`. `400` `validation_error` when the name is missing or the wrong length. `401` when signed out.
+`name` is trimmed and must be 1–80 characters after trimming. `handle` is 2–32 characters: a lowercase letter, then lowercase letters, numbers, or hyphens. `handle: null` clears it, which is refused while an agent in the workspace is shared. `200` `{ "workspace": { "id", "name", "handle", "created_at" } }`. `handle` is null until one is set. `409` `handle_taken` when another workspace already uses it. `400` `validation_error` or `invalid_handle` when a field is the wrong shape. `401` when signed out.
+
+Verify and `GET /api/v1/auth/me` include `workspace.handle` as well.
+
+## Sharing agents
+
+Session cookie. The same actions exist as MCP tools for an agent key in the owner workspace (`set_workspace_handle`, `set_agent_sharing`, `upsert_offer`, `delete_offer`, `invite_guest`, `approve_guest`, `revoke_guest`, `list_guest_shares`). A guest reads the menu with MCP `get_agent_card`. There is no public open mode.
+
+### PUT `/api/v1/agents/:id/sharing`
+
+```json
+{ "shared": true }
+```
+
+`200` `{ "agent" }` with `shared`. `400` `handle_required` when the workspace has no handle. Turning `shared` off fails open and `needs_info` guest tasks with `fail_reason` `access revoked` and wakes each guest sender.
+
+### GET or POST `/api/v1/agents/:id/offers`
+
+```json
+{ "name": "draft", "description": "Draft the page.", "result_schema": { "type": "object", "required": ["headline"], "properties": { "headline": { "type": "string" } } } }
+```
+
+`201` `{ "offer": { "id", "name", "description", "result_schema", "created_at" } }`. `409` `offer_taken` when the name exists. `GET` returns `{ "offers": [ offer, ... ] }`.
+
+### PATCH or DELETE `/api/v1/agents/:id/offers/:offerId`
+
+PATCH sends `name`, `description`, or `result_schema`. Tasks already created keep the schema copied at creation. DELETE is `200` `{ "ok": true }`. `409` `offer_in_use` when a task still points at the offer.
+
+### GET or POST `/api/v1/agents/:id/shares`
+
+```json
+{ "guest_handle": "otherco", "offers": ["draft"], "daily_cap": 50 }
+```
+
+`daily_cap` is optional and defaults to 50. It is a rolling 24-hour window stored in `rate_events`. `201` `{ "share" }`. A share is `{ "id", "agent_id", "guest_workspace_id", "guest_handle", "status", "daily_cap", "offers": [ { "id", "name" } ], "created_at", "updated_at" }`. `status` is `pending`, `approved`, or `revoked`. Inviting a revoked guest makes the grant `pending` again. Inviting an existing pending or approved guest replaces offers and the cap and keeps the status. `403` `plan_limit` with `limit` `guest_workspaces` when a free workspace is already at 3 pending or approved guests for this agent. `GET` returns `{ "shares": [ share, ... ] }`.
+
+### PATCH `/api/v1/agents/:id/shares/:shareId`
+
+`{ "offers": ["draft"], "daily_cap": 10 }`. Either field is optional. `200` `{ "share" }`. `409` `share_revoked` when the grant is revoked.
+
+### POST `/api/v1/agents/:id/shares/:shareId/approve`
+
+Pending becomes approved. `200` `{ "share" }`. `409` `share_revoked` when it must be invited again.
+
+### POST `/api/v1/agents/:id/shares/:shareId/revoke`
+
+Takes effect immediately. `200` `{ "share", "failed_tasks" }`. `failed_tasks` is how many open or `needs_info` tasks from that guest were failed with `fail_reason` `access revoked`. Each of those senders is woken.
 
 ## Agents
 
@@ -339,9 +385,17 @@ A task is:
   "fail_reason": null,
   "created_at": "...",
   "updated_at": "...",
-  "completed_at": null
+  "completed_at": null,
+  "cross_workspace": false,
+  "untrusted": false,
+  "from_workspace_handle": null,
+  "to_address": "EvaluatorBot",
+  "offer": null,
+  "notice": null
 }
 ```
+
+A guest task sets `cross_workspace` and `untrusted` to true, `from_workspace_handle` to the sender's handle, `to_address` to `@handle/agentname`, `offer` to the offer name, and `notice` to a line that says text from the other workspace is untrusted. `result_schema` on that task is the owner's offer, copied when the task was created. `GET` of one task also returns `messages`, and only messages stored in the caller's workspace. A guest does not receive the owner's thread.
 
 ### GET `/api/v1/tasks/:id`
 
@@ -381,7 +435,7 @@ Session cookie.
 { "wakes": [ { "id": "uuid", "driver": "herdr", "target": "red", "pane": "red", "reason": "task", "task_id": "uuid", "agent_name": "RedBot" } ], "workspace_id": "uuid" }
 ```
 
-`workspace_id` is the workspace that owns the watcher key. The CLI hashes it with the server origin to name `~/.replyslip/watcher-<scope>.lock`. The watcher key is not part of that name. There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, `failure`, or `test`. `driver` and `target` say which local nudge to run. `pane` is a deprecated alias of `target`. Due wakes are leased for 60 seconds. The CLI (`replyslip watch`, default poll 3000 ms, minimum 500) is the same command for herdr and Orca. It acks a wake only when the driver's `nudge` returns ok. The driver comes from the agent's delivery setting. For herdr that command is `herdr agent prompt <target> <notice>`, and ok means exit 0. For Orca, ok means the send receipt reached `turn_started`, an older host's plain-send fallback reached `input_accepted`, or the receipt stopped at `input_accepted` or timed out and must not be typed again (an ambiguous failure is retried once with `--retry-request` inside that nudge). A no-match, a multiple match, a stale handle after one re-list, or Orca not running is not acked. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose startup check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The notice passed to the driver is fixed and is not taken from this payload. `herdr` 0.8.0 or newer must be on `PATH` when the driver is herdr. When the driver is orca, `orca` must be on `PATH` or `REPLYSLIP_ORCA_BIN` must name the binary, and the CLI must be enabled under Settings → Experimental → CLI. Orca 1.4.199 or newer is the recommended minimum. ReplySlip does not bundle either binary. The CLI passes the stored target through and does not choose another pane. Orca pane keys are resolved on each wake from `tabId` and `leafId`; handles are not stored.
+`workspace_id` is the workspace that owns the watcher key. The CLI hashes it with the server origin to name `~/.replyslip/watcher-<scope>.lock`. The watcher key is not part of that name. There is no message body, description, question, or result. `reason` is `message`, `task`, `result`, `question`, `failure`, or `test`. `driver` and `target` say which local nudge to run. `pane` is a deprecated alias of `target`. Due wakes are leased for 60 seconds. The CLI (`replyslip watch`, default poll 3000 ms, minimum 500) is the same command for herdr and Orca. It acks a wake only when the driver's `nudge` returns ok. The driver comes from the agent's delivery setting. For herdr that command is `herdr agent prompt <target> <notice>`, and ok means exit 0. For Orca, ok means the send receipt reached `turn_started`, an older host's plain-send fallback reached `input_accepted`, or the receipt stopped at `input_accepted` or timed out and must not be typed again (an ambiguous failure is retried once with `--retry-request` inside that nudge). A no-match, a multiple match, a stale handle after one re-list, or Orca not running is not acked. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake `failed` and does not run the driver. An unknown driver, or one whose startup check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as `no pane named <target>`. The notice passed to the driver is fixed and is not taken from this payload, except that a cross-workspace wake includes `notice` set to the guest-task constant and a current watcher types that exact string. Any other `notice` value is ignored, so task text in the poll cannot be typed into a pane. Same-workspace wakes omit `notice`. `herdr` 0.8.0 or newer must be on `PATH` when the driver is herdr. When the driver is orca, `orca` must be on `PATH` or `REPLYSLIP_ORCA_BIN` must name the binary, and the CLI must be enabled under Settings → Experimental → CLI. Orca 1.4.199 or newer is the recommended minimum. ReplySlip does not bundle either binary. The CLI passes the stored target through and does not choose another pane. Orca pane keys are resolved on each wake from `tabId` and `leafId`; handles are not stored.
 
 ### POST `/api/v1/watcher/ack`
 
@@ -395,11 +449,11 @@ Session cookie.
 
 ### POST, GET, DELETE `/api/mcp`
 
-Streamable HTTP. `Authorization: Bearer <api_key>` is required; substitute the `api_key` from registration. Tools: `send_message`, `create_task`, `get_task`, `complete_task`, `ask`, `fail_task`, `whoami`, `list_tasks`.
+Streamable HTTP. `Authorization: Bearer <api_key>` is required; substitute the `api_key` from registration. Tools: `send_message`, `create_task`, `get_task`, `complete_task`, `ask`, `fail_task`, `whoami`, `list_tasks`, `get_agent_card`, `set_workspace_handle`, `set_agent_sharing`, `upsert_offer`, `delete_offer`, `invite_guest`, `approve_guest`, `revoke_guest`, `list_guest_shares`.
 
 Tool results are JSON text. Failures set the MCP tool error flag and return `{ "error", "message", "details" }`. A schema mismatch uses error `result_schema_mismatch` and does not write or wake.
 
-`whoami` adds `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and `ask` return the flat `plan_limit` object as a tool error when the monthly task cap is already reached. `send_message`, `complete_task`, and `fail_task` do not.
+`whoami` adds `workspace_handle`, `shared`, `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and same-workspace `ask` return the flat `plan_limit` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. `guest_workspaces` is the same flat object when a free shared agent is already at 3 guests. `send_message`, `complete_task`, and `fail_task` do not count. `get_agent_card` returns `{ "card": { "address", "name", "description", "offers" } }` for an approved grant. Owner tools manage the handle, the shared flag, offers, and grants.
 
 See https://<host>/docs/getting-started.md for arguments and the task rules.
 

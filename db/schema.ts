@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -21,9 +22,15 @@ export const workspaces = pgTable(
     name: text('name').notNull(),
     /** free or unlimited. A person sets unlimited with one UPDATE; the app does not name that workspace. */
     plan: text('plan').notNull().default('free'),
+    /** Public address for shared agents: @handle/agentname. Null until the workspace sets one. */
+    handle: text('handle'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
-  (table) => [check('workspaces_plan_check', sql`${table.plan} in ('free', 'unlimited')`)],
+  (table) => [
+    check('workspaces_plan_check', sql`${table.plan} in ('free', 'unlimited')`),
+    uniqueIndex('workspaces_handle_unique').on(table.handle).where(sql`${table.handle} is not null`),
+    check('workspaces_handle_check', sql`${table.handle} is null or ${table.handle} ~ '^[a-z][a-z0-9-]{1,31}$'`),
+  ],
 );
 
 export const users = pgTable(
@@ -109,6 +116,8 @@ export const agents = pgTable(
     localDriver: text('local_driver'),
     localTarget: text('local_target'),
     revokedAt: ts('revoked_at'),
+    /** When true, other workspaces can be granted tasks to this agent at @handle/name. */
+    shared: boolean('shared').notNull().default(false),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -174,6 +183,24 @@ export const watcherKeys = pgTable(
   (table) => [uniqueIndex('watcher_keys_token_hash_unique').on(table.tokenHash)],
 );
 
+export const agentOffers = pgTable(
+  'agent_offers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    resultSchema: jsonb('result_schema').$type<Record<string, unknown>>().notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('agent_offers_agent_name_unique').on(table.agentId, table.name),
+    check('agent_offers_name_check', sql`${table.name} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
+  ],
+);
+
 export const tasks = pgTable(
   'tasks',
   {
@@ -194,6 +221,10 @@ export const tasks = pgTable(
     result: jsonb('result').$type<unknown>(),
     question: text('question'),
     failReason: text('fail_reason'),
+    /** Workspace that sent the task. Null on rows created before sharing existed. */
+    fromWorkspaceId: uuid('from_workspace_id').references(() => workspaces.id),
+    /** Set when the task used a shared-agent offer. The stored result_schema is a copy of that offer. */
+    offerId: uuid('offer_id').references(() => agentOffers.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     completedAt: ts('completed_at'),
@@ -203,7 +234,43 @@ export const tasks = pgTable(
     index('tasks_workspace_created_idx').on(table.workspaceId, table.createdAt),
     index('tasks_to_agent_idx').on(table.toAgentId, table.status),
     index('tasks_from_agent_idx').on(table.fromAgentId, table.status),
+    index('tasks_from_workspace_idx').on(table.fromWorkspaceId, table.createdAt),
   ],
+);
+
+export const agentShares = pgTable(
+  'agent_shares',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    guestWorkspaceId: uuid('guest_workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    status: text('status').notNull().default('pending'),
+    dailyCap: integer('daily_cap').notNull().default(50),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('agent_shares_agent_guest_unique').on(table.agentId, table.guestWorkspaceId),
+    check('agent_shares_status_check', sql`${table.status} in ('pending', 'approved', 'revoked')`),
+    check('agent_shares_daily_cap_check', sql`${table.dailyCap} >= 1 and ${table.dailyCap} <= 10000`),
+  ],
+);
+
+export const agentShareOffers = pgTable(
+  'agent_share_offers',
+  {
+    shareId: uuid('share_id')
+      .notNull()
+      .references(() => agentShares.id, { onDelete: 'cascade' }),
+    offerId: uuid('offer_id')
+      .notNull()
+      .references(() => agentOffers.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.shareId, table.offerId] })],
 );
 
 export const messages = pgTable(

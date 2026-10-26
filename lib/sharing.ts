@@ -1,0 +1,787 @@
+import { and, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import { getDb, type Db } from '@/db';
+import {
+  agentOffers,
+  agentShareOffers,
+  agentShares,
+  agents,
+  tasks,
+  workspaces,
+  type AgentRow,
+} from '@/db/schema';
+import type { AgentPrincipal } from './agents';
+import {
+  ACCESS_REVOKED_REASON,
+  AGENT_NAME_PATTERN,
+  DEFAULT_SHARE_DAILY_CAP,
+  GUEST_TASK_RATE_KIND,
+  HANDLE_PATTERN,
+  MAX_SHARE_DAILY_CAP,
+  OFFER_DESCRIPTION_MAX,
+  OFFER_NAME_PATTERN,
+  SHARE_CAP_WINDOW_MS,
+  SHARED_ADDRESS_PATTERN,
+} from './constants';
+import { HttpError, isForeignKeyViolation, isUniqueViolation } from './errors';
+import { assertGuestWorkspaceLimit } from './plans';
+import { consumeKeyedRateLimit } from './rate-limit';
+import { assertResultSchema } from './validate';
+import { deliverWebhookWake, enqueueWake } from './wakes';
+
+export type RecipientAddress =
+  | { kind: 'workspace'; name: string }
+  | { kind: 'shared'; handle: string; agentName: string };
+
+const SHARED_AGENT_MISSING = 'No shared agent was found at that address.';
+
+export function parseRecipient(to: string): RecipientAddress {
+  if (!to.includes('/') && !to.startsWith('@')) {
+    if (!AGENT_NAME_PATTERN.test(to)) {
+      throw new HttpError(
+        400,
+        'invalid_name',
+        'Agent name must start with a letter and contain only letters, numbers, underscores, or hyphens (max 64).',
+      );
+    }
+    return { kind: 'workspace', name: to };
+  }
+  const match = SHARED_ADDRESS_PATTERN.exec(to);
+  if (!match?.[1] || !match[2]) {
+    throw new HttpError(400, 'invalid_address', 'A shared agent is addressed as @handle/agentname.');
+  }
+  return { kind: 'shared', handle: match[1], agentName: match[2] };
+}
+
+export function assertHandle(value: string): string {
+  const handle = value.trim();
+  if (!HANDLE_PATTERN.test(handle)) {
+    throw new HttpError(
+      400,
+      'invalid_handle',
+      'A handle is 2–32 characters: a lowercase letter, then lowercase letters, numbers, or hyphens.',
+    );
+  }
+  return handle;
+}
+
+function assertOfferName(value: string): string {
+  const name = value.trim();
+  if (!OFFER_NAME_PATTERN.test(name)) {
+    throw new HttpError(
+      400,
+      'invalid_offer',
+      'An offer name is 1–64 characters: a lowercase letter, then lowercase letters, numbers, underscores, or hyphens.',
+    );
+  }
+  return name;
+}
+
+export function assertDailyCap(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > MAX_SHARE_DAILY_CAP) {
+    throw new HttpError(400, 'validation_error', `daily_cap must be an integer from 1 to ${MAX_SHARE_DAILY_CAP}.`);
+  }
+  return value;
+}
+
+function assertOfferDescription(value: string): string {
+  const description = value.trim();
+  if (description.length < 1 || description.length > OFFER_DESCRIPTION_MAX) {
+    throw new HttpError(400, 'validation_error', `Offer description must be 1–${OFFER_DESCRIPTION_MAX} characters.`);
+  }
+  return description;
+}
+
+export type PublicWorkspace = {
+  id: string;
+  name: string;
+  handle: string | null;
+  created_at: string;
+};
+
+export function publicWorkspace(workspace: { id: string; name: string; handle: string | null; createdAt: Date }): PublicWorkspace {
+  return {
+    id: workspace.id,
+    name: workspace.name,
+    handle: workspace.handle,
+    created_at: workspace.createdAt.toISOString(),
+  };
+}
+
+export async function setWorkspaceHandle(workspaceId: string, handle: string | null): Promise<PublicWorkspace> {
+  const db = getDb();
+  try {
+    const updated = await db.transaction(async (tx) => {
+      await tx.execute(sql`select id from workspaces where id = ${workspaceId} for update`);
+      if (handle === null) {
+        const [sharedAgent] = await tx
+          .select({ id: agents.id })
+          .from(agents)
+          .where(and(eq(agents.workspaceId, workspaceId), eq(agents.shared, true), isNull(agents.revokedAt)))
+          .limit(1);
+        if (sharedAgent) {
+          throw new HttpError(409, 'handle_in_use', 'Turn off sharing before clearing the handle.');
+        }
+      }
+      const next = handle === null ? null : assertHandle(handle);
+      const [row] = await tx
+        .update(workspaces)
+        .set({ handle: next })
+        .where(eq(workspaces.id, workspaceId))
+        .returning({
+          id: workspaces.id,
+          name: workspaces.name,
+          handle: workspaces.handle,
+          createdAt: workspaces.createdAt,
+        });
+      if (!row) throw new HttpError(404, 'not_found', 'No workspace was found.');
+      return row;
+    });
+    return publicWorkspace(updated);
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new HttpError(409, 'handle_taken', 'That handle is already in use.');
+    }
+    throw err;
+  }
+}
+
+async function lockOwnerAgent(tx: Db, workspaceId: string, agentId: string): Promise<AgentRow> {
+  await tx.execute(sql`select id from agents where id = ${agentId} and workspace_id = ${workspaceId} for update`);
+  const [agent] = await tx
+    .select()
+    .from(agents)
+    .where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId)))
+    .limit(1);
+  if (!agent || agent.revokedAt) throw new HttpError(404, 'not_found', 'No agent was found.');
+  return agent;
+}
+
+export async function agentInWorkspaceByName(workspaceId: string, name: string): Promise<AgentRow> {
+  if (!AGENT_NAME_PATTERN.test(name)) {
+    throw new HttpError(
+      400,
+      'invalid_name',
+      'Agent name must start with a letter and contain only letters, numbers, underscores, or hyphens (max 64).',
+    );
+  }
+  const [agent] = await getDb()
+    .select()
+    .from(agents)
+    .where(and(eq(agents.workspaceId, workspaceId), eq(agents.name, name)))
+    .limit(1);
+  if (!agent || agent.revokedAt) throw new HttpError(404, 'not_found', `No active agent named ${name} is in this workspace.`);
+  return agent;
+}
+
+async function deliverWakeIds(wakeIds: string[]): Promise<void> {
+  for (const wakeId of wakeIds) {
+    await deliverWebhookWake(wakeId);
+  }
+}
+
+async function failGuestTasks(
+  tx: Db,
+  agent: AgentRow,
+  guestWorkspaceId: string | null,
+): Promise<{ wakeIds: string[]; failed: number }> {
+  const conditions = [
+    eq(tasks.toAgentId, agent.id),
+    isNotNull(tasks.fromWorkspaceId),
+    ne(tasks.fromWorkspaceId, agent.workspaceId),
+    inArray(tasks.status, ['open', 'needs_info']),
+  ];
+  if (guestWorkspaceId) conditions.push(eq(tasks.fromWorkspaceId, guestWorkspaceId));
+  const closed = await tx
+    .update(tasks)
+    .set({
+      status: 'failed',
+      failReason: ACCESS_REVOKED_REASON,
+      updatedAt: new Date(),
+      completedAt: new Date(),
+    })
+    .where(and(...conditions))
+    .returning();
+  const wakeIds: string[] = [];
+  for (const task of closed) {
+    const wakeId = await enqueueWake(tx, {
+      workspaceId: task.workspaceId,
+      agentId: task.fromAgentId,
+      reason: 'failure',
+      taskId: task.id,
+    });
+    if (wakeId) wakeIds.push(wakeId);
+  }
+  return { wakeIds, failed: closed.length };
+}
+
+export async function setAgentShared(workspaceId: string, agentId: string, shared: boolean): Promise<AgentRow> {
+  const written = await getDb().transaction(async (tx) => {
+    const agent = await lockOwnerAgent(tx, workspaceId, agentId);
+    if (shared) {
+      const [workspace] = await tx
+        .select({ handle: workspaces.handle })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId))
+        .limit(1);
+      if (!workspace?.handle) {
+        throw new HttpError(400, 'handle_required', 'Set a workspace handle before sharing an agent.');
+      }
+    }
+    const [updated] = await tx.update(agents).set({ shared }).where(eq(agents.id, agent.id)).returning();
+    if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    const closed = shared ? { wakeIds: [] as string[], failed: 0 } : await failGuestTasks(tx, updated, null);
+    return { agent: updated, wakeIds: closed.wakeIds };
+  });
+  await deliverWakeIds(written.wakeIds);
+  return written.agent;
+}
+
+export function serializeOffer(offer: typeof agentOffers.$inferSelect) {
+  return {
+    id: offer.id,
+    name: offer.name,
+    description: offer.description,
+    result_schema: offer.resultSchema,
+    created_at: offer.createdAt.toISOString(),
+  };
+}
+
+export async function listOffers(workspaceId: string, agentId: string) {
+  await lockOwnerAgent(getDb(), workspaceId, agentId);
+  const rows = await getDb()
+    .select()
+    .from(agentOffers)
+    .where(eq(agentOffers.agentId, agentId))
+    .orderBy(agentOffers.createdAt);
+  return rows.map(serializeOffer);
+}
+
+export async function createOffer(
+  workspaceId: string,
+  agentId: string,
+  input: { name: string; description: string; resultSchema: unknown },
+) {
+  const name = assertOfferName(input.name);
+  const description = assertOfferDescription(input.description);
+  const resultSchema = assertResultSchema(input.resultSchema);
+  try {
+    const [offer] = await getDb().transaction(async (tx) => {
+      const agent = await lockOwnerAgent(tx, workspaceId, agentId);
+      return tx
+        .insert(agentOffers)
+        .values({ agentId: agent.id, name, description, resultSchema })
+        .returning();
+    });
+    if (!offer) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    return serializeOffer(offer);
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new HttpError(409, 'offer_taken', `An offer named ${name} already exists on this agent.`);
+    throw err;
+  }
+}
+
+export async function updateOffer(
+  workspaceId: string,
+  agentId: string,
+  offerId: string,
+  input: { name?: string; description?: string; resultSchema?: unknown },
+) {
+  if (input.name === undefined && input.description === undefined && input.resultSchema === undefined) {
+    throw new HttpError(400, 'validation_error', 'Send a name, description, or result_schema to update.');
+  }
+  const name = input.name === undefined ? undefined : assertOfferName(input.name);
+  const description = input.description === undefined ? undefined : assertOfferDescription(input.description);
+  const resultSchema = input.resultSchema === undefined ? undefined : assertResultSchema(input.resultSchema);
+  try {
+    const offer = await getDb().transaction(async (tx) => {
+      const agent = await lockOwnerAgent(tx, workspaceId, agentId);
+      const [existing] = await tx
+        .select()
+        .from(agentOffers)
+        .where(and(eq(agentOffers.id, offerId), eq(agentOffers.agentId, agent.id)))
+        .limit(1);
+      if (!existing) throw new HttpError(404, 'not_found', 'No offer was found.');
+      const [updated] = await tx
+        .update(agentOffers)
+        .set({
+          ...(name !== undefined ? { name } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(resultSchema !== undefined ? { resultSchema } : {}),
+        })
+        .where(eq(agentOffers.id, existing.id))
+        .returning();
+      return updated ?? null;
+    });
+    if (!offer) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    return serializeOffer(offer);
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new HttpError(409, 'offer_taken', 'An offer with that name already exists on this agent.');
+    throw err;
+  }
+}
+
+export async function deleteOffer(workspaceId: string, agentId: string, offerId: string): Promise<void> {
+  try {
+    const removed = await getDb().transaction(async (tx) => {
+      const agent = await lockOwnerAgent(tx, workspaceId, agentId);
+      const rows = await tx
+        .delete(agentOffers)
+        .where(and(eq(agentOffers.id, offerId), eq(agentOffers.agentId, agent.id)))
+        .returning({ id: agentOffers.id });
+      return rows.length;
+    });
+    if (removed === 0) throw new HttpError(404, 'not_found', 'No offer was found.');
+  } catch (err) {
+    if (isForeignKeyViolation(err)) {
+      throw new HttpError(409, 'offer_in_use', 'This offer is on a task and cannot be deleted.');
+    }
+    throw err;
+  }
+}
+
+export async function upsertOfferByName(
+  workspaceId: string,
+  agentId: string,
+  input: { name: string; description: string; resultSchema: unknown },
+) {
+  const name = assertOfferName(input.name);
+  const description = assertOfferDescription(input.description);
+  const resultSchema = assertResultSchema(input.resultSchema);
+  const written = await getDb().transaction(async (tx) => {
+    const agent = await lockOwnerAgent(tx, workspaceId, agentId);
+    const [existing] = await tx
+      .select()
+      .from(agentOffers)
+      .where(and(eq(agentOffers.agentId, agent.id), eq(agentOffers.name, name)))
+      .limit(1);
+    if (!existing) {
+      const [created] = await tx
+        .insert(agentOffers)
+        .values({ agentId: agent.id, name, description, resultSchema })
+        .returning();
+      if (!created) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+      return { offer: created, created: true };
+    }
+    const [updated] = await tx
+      .update(agentOffers)
+      .set({ description, resultSchema })
+      .where(eq(agentOffers.id, existing.id))
+      .returning();
+    if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    return { offer: updated, created: false };
+  });
+  return { offer: serializeOffer(written.offer), created: written.created };
+}
+
+export async function deleteOfferByName(workspaceId: string, agentId: string, name: string): Promise<void> {
+  const offerName = assertOfferName(name);
+  const [offer] = await getDb()
+    .select({ id: agentOffers.id })
+    .from(agentOffers)
+    .innerJoin(agents, eq(agents.id, agentOffers.agentId))
+    .where(and(eq(agents.workspaceId, workspaceId), eq(agents.id, agentId), eq(agentOffers.name, offerName)))
+    .limit(1);
+  if (!offer) throw new HttpError(404, 'not_found', 'No offer was found.');
+  await deleteOffer(workspaceId, agentId, offer.id);
+}
+
+type ShareRow = typeof agentShares.$inferSelect;
+
+async function offersForShares(db: Db, shareIds: string[]) {
+  const map = new Map<string, { id: string; name: string }[]>();
+  if (shareIds.length === 0) return map;
+  const rows = await db
+    .select({ shareId: agentShareOffers.shareId, id: agentOffers.id, name: agentOffers.name })
+    .from(agentShareOffers)
+    .innerJoin(agentOffers, eq(agentOffers.id, agentShareOffers.offerId))
+    .where(inArray(agentShareOffers.shareId, shareIds));
+  for (const row of rows) {
+    const list = map.get(row.shareId) ?? [];
+    list.push({ id: row.id, name: row.name });
+    map.set(row.shareId, list);
+  }
+  for (const list of map.values()) list.sort((a, b) => a.name.localeCompare(b.name));
+  return map;
+}
+
+async function serializeShare(db: Db, share: ShareRow, guestHandle: string | null) {
+  const offers = await offersForShares(db, [share.id]);
+  return {
+    id: share.id,
+    agent_id: share.agentId,
+    guest_workspace_id: share.guestWorkspaceId,
+    guest_handle: guestHandle,
+    status: share.status,
+    daily_cap: share.dailyCap,
+    offers: offers.get(share.id) ?? [],
+    created_at: share.createdAt.toISOString(),
+    updated_at: share.updatedAt.toISOString(),
+  };
+}
+
+async function loadOffersByName(tx: Db, agentId: string, names: string[]) {
+  const rows = await tx
+    .select()
+    .from(agentOffers)
+    .where(and(eq(agentOffers.agentId, agentId), inArray(agentOffers.name, names)));
+  if (rows.length !== names.length) {
+    const found = new Set(rows.map((row) => row.name));
+    const missing = names.find((name) => !found.has(name));
+    throw new HttpError(404, 'offer_not_found', `No offer named ${missing ?? 'that'} is on this agent.`);
+  }
+  return rows;
+}
+
+async function replaceShareOffers(tx: Db, shareId: string, offerIds: string[]) {
+  await tx.delete(agentShareOffers).where(eq(agentShareOffers.shareId, shareId));
+  if (offerIds.length === 0) return;
+  await tx.insert(agentShareOffers).values(offerIds.map((offerId) => ({ shareId, offerId })));
+}
+
+function dedupeOfferNames(names: string[]): string[] {
+  if (names.length < 1 || names.length > 50) {
+    throw new HttpError(400, 'validation_error', 'Send between 1 and 50 offer names.');
+  }
+  return [...new Set(names.map((name) => assertOfferName(name)))];
+}
+
+export async function listShares(workspaceId: string, agentId: string) {
+  const db = getDb();
+  await lockOwnerAgent(db, workspaceId, agentId);
+  const rows = await db
+    .select({ share: agentShares, guestHandle: workspaces.handle })
+    .from(agentShares)
+    .innerJoin(workspaces, eq(workspaces.id, agentShares.guestWorkspaceId))
+    .where(eq(agentShares.agentId, agentId))
+    .orderBy(agentShares.createdAt);
+  const offers = await offersForShares(
+    db,
+    rows.map((row) => row.share.id),
+  );
+  return rows.map((row) => ({
+    id: row.share.id,
+    agent_id: row.share.agentId,
+    guest_workspace_id: row.share.guestWorkspaceId,
+    guest_handle: row.guestHandle,
+    status: row.share.status,
+    daily_cap: row.share.dailyCap,
+    offers: offers.get(row.share.id) ?? [],
+    created_at: row.share.createdAt.toISOString(),
+    updated_at: row.share.updatedAt.toISOString(),
+  }));
+}
+
+async function guestWorkspaceByHandle(tx: Db, handle: string, ownerWorkspaceId: string) {
+  const [guest] = await tx.select().from(workspaces).where(eq(workspaces.handle, handle)).limit(1);
+  if (!guest) throw new HttpError(404, 'not_found', 'No workspace has that handle.');
+  if (guest.id === ownerWorkspaceId) {
+    throw new HttpError(400, 'invalid_guest', 'You cannot share an agent with its own workspace.');
+  }
+  return guest;
+}
+
+export async function inviteGuest(
+  workspaceId: string,
+  agentId: string,
+  input: { guestHandle: string; offerNames: string[]; dailyCap?: number },
+) {
+  const guestHandle = assertHandle(input.guestHandle);
+  const dailyCap = input.dailyCap === undefined ? DEFAULT_SHARE_DAILY_CAP : assertDailyCap(input.dailyCap);
+  const offerNames = dedupeOfferNames(input.offerNames);
+  const db = getDb();
+  const share = await db.transaction(async (tx) => {
+    const agent = await lockOwnerAgent(tx, workspaceId, agentId);
+    const guest = await guestWorkspaceByHandle(tx, guestHandle, workspaceId);
+    const offers = await loadOffersByName(tx, agent.id, offerNames);
+    const [existing] = await tx
+      .select()
+      .from(agentShares)
+      .where(and(eq(agentShares.agentId, agent.id), eq(agentShares.guestWorkspaceId, guest.id)))
+      .limit(1);
+    const needsSlot = !existing || existing.status === 'revoked';
+    if (needsSlot) {
+      const [countRow] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(agentShares)
+        .where(and(eq(agentShares.agentId, agent.id), inArray(agentShares.status, ['pending', 'approved'])));
+      const used = typeof countRow?.count === 'number' ? countRow.count : Number(countRow?.count ?? 0);
+      await assertGuestWorkspaceLimit(workspaceId, Number.isFinite(used) ? used : 0, tx);
+    }
+    const now = new Date();
+    let saved: ShareRow | undefined;
+    if (!existing) {
+      const [created] = await tx
+        .insert(agentShares)
+        .values({
+          agentId: agent.id,
+          guestWorkspaceId: guest.id,
+          status: 'pending',
+          dailyCap,
+          updatedAt: now,
+        })
+        .returning();
+      saved = created;
+    } else {
+      const [updated] = await tx
+        .update(agentShares)
+        .set({
+          status: existing.status === 'revoked' ? 'pending' : existing.status,
+          dailyCap,
+          updatedAt: now,
+        })
+        .where(eq(agentShares.id, existing.id))
+        .returning();
+      saved = updated;
+    }
+    if (!saved) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    await replaceShareOffers(
+      tx,
+      saved.id,
+      offers.map((offer) => offer.id),
+    );
+    return { share: saved, guestHandle: guest.handle };
+  });
+  return serializeShare(db, share.share, share.guestHandle);
+}
+
+async function shareInWorkspace(tx: Db, workspaceId: string, agentId: string, shareId: string) {
+  const agent = await lockOwnerAgent(tx, workspaceId, agentId);
+  await tx.execute(sql`select id from agent_shares where id = ${shareId} and agent_id = ${agent.id} for update`);
+  const [row] = await tx
+    .select({ share: agentShares, guestHandle: workspaces.handle })
+    .from(agentShares)
+    .innerJoin(workspaces, eq(workspaces.id, agentShares.guestWorkspaceId))
+    .where(and(eq(agentShares.id, shareId), eq(agentShares.agentId, agent.id)))
+    .limit(1);
+  if (!row) throw new HttpError(404, 'not_found', 'No share was found.');
+  return { agent, ...row };
+}
+
+export async function approveShare(workspaceId: string, agentId: string, shareId: string) {
+  const db = getDb();
+  const saved = await db.transaction(async (tx) => {
+    const current = await shareInWorkspace(tx, workspaceId, agentId, shareId);
+    if (current.share.status === 'revoked') {
+      throw new HttpError(409, 'share_revoked', 'This grant was revoked. Invite the guest again.');
+    }
+    if (current.share.status === 'approved') return current;
+    const [updated] = await tx
+      .update(agentShares)
+      .set({ status: 'approved', updatedAt: new Date() })
+      .where(eq(agentShares.id, current.share.id))
+      .returning();
+    if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    return { ...current, share: updated };
+  });
+  return serializeShare(db, saved.share, saved.guestHandle);
+}
+
+export async function updateShare(
+  workspaceId: string,
+  agentId: string,
+  shareId: string,
+  input: { offerNames?: string[]; dailyCap?: number },
+) {
+  if (input.offerNames === undefined && input.dailyCap === undefined) {
+    throw new HttpError(400, 'validation_error', 'Send offers or daily_cap to update.');
+  }
+  const dailyCap = input.dailyCap === undefined ? undefined : assertDailyCap(input.dailyCap);
+  const offerNames = input.offerNames === undefined ? undefined : dedupeOfferNames(input.offerNames);
+  const db = getDb();
+  const saved = await db.transaction(async (tx) => {
+    const current = await shareInWorkspace(tx, workspaceId, agentId, shareId);
+    if (current.share.status === 'revoked') {
+      throw new HttpError(409, 'share_revoked', 'This grant was revoked. Invite the guest again.');
+    }
+    const [updated] = await tx
+      .update(agentShares)
+      .set({
+        ...(dailyCap !== undefined ? { dailyCap } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(agentShares.id, current.share.id))
+      .returning();
+    if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    if (offerNames) {
+      const offers = await loadOffersByName(tx, current.agent.id, offerNames);
+      await replaceShareOffers(
+        tx,
+        updated.id,
+        offers.map((offer) => offer.id),
+      );
+    }
+    return { share: updated, guestHandle: current.guestHandle };
+  });
+  return serializeShare(db, saved.share, saved.guestHandle);
+}
+
+export async function revokeShare(workspaceId: string, agentId: string, shareId: string) {
+  const db = getDb();
+  const saved = await db.transaction(async (tx) => {
+    const current = await shareInWorkspace(tx, workspaceId, agentId, shareId);
+    if (current.share.status === 'revoked') {
+      return { share: current.share, guestHandle: current.guestHandle, wakeIds: [] as string[], failed: 0 };
+    }
+    const [updated] = await tx
+      .update(agentShares)
+      .set({ status: 'revoked', updatedAt: new Date() })
+      .where(eq(agentShares.id, current.share.id))
+      .returning();
+    if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    const closed = await failGuestTasks(tx, current.agent, updated.guestWorkspaceId);
+    return { share: updated, guestHandle: current.guestHandle, wakeIds: closed.wakeIds, failed: closed.failed };
+  });
+  await deliverWakeIds(saved.wakeIds);
+  const share = await serializeShare(db, saved.share, saved.guestHandle);
+  return { share, failed_tasks: saved.failed };
+}
+
+async function shareIdForGuest(workspaceId: string, agentId: string, guestHandle: string): Promise<string> {
+  const handle = assertHandle(guestHandle);
+  const agent = await agentInWorkspaceByName(workspaceId, (await lockOwnerAgent(getDb(), workspaceId, agentId)).name);
+  const [row] = await getDb()
+    .select({ id: agentShares.id })
+    .from(agentShares)
+    .innerJoin(workspaces, eq(workspaces.id, agentShares.guestWorkspaceId))
+    .where(and(eq(agentShares.agentId, agent.id), eq(workspaces.handle, handle)))
+    .limit(1);
+  if (!row) throw new HttpError(404, 'not_found', 'No share was found for that handle.');
+  return row.id;
+}
+
+export async function approveGuestByHandle(workspaceId: string, agentId: string, guestHandle: string) {
+  const shareId = await shareIdForGuest(workspaceId, agentId, guestHandle);
+  return approveShare(workspaceId, agentId, shareId);
+}
+
+export async function revokeGuestByHandle(workspaceId: string, agentId: string, guestHandle: string) {
+  const shareId = await shareIdForGuest(workspaceId, agentId, guestHandle);
+  return revokeShare(workspaceId, agentId, shareId);
+}
+
+function addressOf(handle: string, agentName: string): string {
+  return `@${handle}/${agentName}`;
+}
+
+function notShared(address: string): HttpError {
+  return new HttpError(404, 'agent_not_found', `${SHARED_AGENT_MISSING} (${address})`);
+}
+
+export type ResolvedShare = {
+  recipient: AgentRow;
+  offerId: string;
+  resultSchema: Record<string, unknown>;
+  ownerHandle: string;
+};
+
+export async function resolveSharedTask(
+  tx: Db,
+  caller: AgentPrincipal,
+  address: { handle: string; agentName: string },
+  offerName: string,
+): Promise<ResolvedShare> {
+  const shown = addressOf(address.handle, address.agentName);
+  const offer = assertOfferName(offerName);
+  const [owner] = await tx.select().from(workspaces).where(eq(workspaces.handle, address.handle)).limit(1);
+  if (!owner) throw notShared(shown);
+  await tx.execute(sql`select id from agents where workspace_id = ${owner.id} and name = ${address.agentName} for update`);
+  const [recipient] = await tx
+    .select()
+    .from(agents)
+    .where(and(eq(agents.workspaceId, owner.id), eq(agents.name, address.agentName), isNull(agents.revokedAt)))
+    .limit(1);
+  if (!recipient || !recipient.shared) throw notShared(shown);
+  if (recipient.workspaceId === caller.workspaceId) {
+    throw new HttpError(400, 'invalid_recipient', 'Use the bare agent name for an agent in your workspace.');
+  }
+  if (recipient.id === caller.agentId) {
+    throw new HttpError(400, 'invalid_recipient', 'A task needs a different agent. There is no hand-off of your own task.');
+  }
+  const [share] = await tx
+    .select()
+    .from(agentShares)
+    .where(and(eq(agentShares.agentId, recipient.id), eq(agentShares.guestWorkspaceId, caller.workspaceId)))
+    .limit(1);
+  if (!share) {
+    throw new HttpError(403, 'share_required', `This workspace does not have access to ${shown}.`);
+  }
+  await tx.execute(sql`select id from agent_shares where id = ${share.id} for update`);
+  const [fresh] = await tx.select().from(agentShares).where(eq(agentShares.id, share.id)).limit(1);
+  if (!fresh || fresh.status === 'revoked') {
+    throw new HttpError(403, 'share_revoked', `Access to ${shown} was revoked.`);
+  }
+  if (fresh.status !== 'approved') {
+    throw new HttpError(403, 'share_pending', `Access to ${shown} is not approved yet.`);
+  }
+  const [menu] = await tx
+    .select()
+    .from(agentOffers)
+    .where(and(eq(agentOffers.agentId, recipient.id), eq(agentOffers.name, offer)))
+    .limit(1);
+  if (!menu) throw new HttpError(404, 'offer_not_found', `No offer named ${offer} is on ${shown}.`);
+  const [granted] = await tx
+    .select({ offerId: agentShareOffers.offerId })
+    .from(agentShareOffers)
+    .where(and(eq(agentShareOffers.shareId, fresh.id), eq(agentShareOffers.offerId, menu.id)))
+    .limit(1);
+  if (!granted) {
+    throw new HttpError(403, 'offer_not_granted', `The offer ${offer} is not included in your access to ${shown}.`);
+  }
+  const cap = await consumeKeyedRateLimit(tx, {
+    kind: GUEST_TASK_RATE_KIND,
+    key: fresh.id,
+    limit: fresh.dailyCap,
+    windowMs: SHARE_CAP_WINDOW_MS,
+  });
+  if (cap.limited) {
+    throw new HttpError(429, 'rate_limited', 'This share is at its daily task cap.', {
+      retry_after_seconds: cap.retryAfterSeconds,
+      daily_cap: fresh.dailyCap,
+    });
+  }
+  return { recipient, offerId: menu.id, resultSchema: menu.resultSchema, ownerHandle: address.handle };
+}
+
+export async function getAgentCard(caller: AgentPrincipal, to: string) {
+  const address = parseRecipient(to);
+  if (address.kind !== 'shared') {
+    throw new HttpError(400, 'invalid_address', 'get_agent_card takes a shared address, @handle/agentname.');
+  }
+  const shown = addressOf(address.handle, address.agentName);
+  const db = getDb();
+  const [owner] = await db.select().from(workspaces).where(eq(workspaces.handle, address.handle)).limit(1);
+  if (!owner) throw notShared(shown);
+  const [recipient] = await db
+    .select()
+    .from(agents)
+    .where(and(eq(agents.workspaceId, owner.id), eq(agents.name, address.agentName), isNull(agents.revokedAt), eq(agents.shared, true)))
+    .limit(1);
+  if (!recipient) throw notShared(shown);
+  if (recipient.workspaceId === caller.workspaceId) {
+    throw new HttpError(400, 'invalid_address', 'Use your workspace tools for an agent in your own workspace.');
+  }
+  const [share] = await db
+    .select()
+    .from(agentShares)
+    .where(and(eq(agentShares.agentId, recipient.id), eq(agentShares.guestWorkspaceId, caller.workspaceId)))
+    .limit(1);
+  if (!share) throw new HttpError(403, 'share_required', `This workspace does not have access to ${shown}.`);
+  if (share.status === 'revoked') throw new HttpError(403, 'share_revoked', `Access to ${shown} was revoked.`);
+  if (share.status !== 'approved') throw new HttpError(403, 'share_pending', `Access to ${shown} is not approved yet.`);
+  const offers = await db
+    .select({ name: agentOffers.name, description: agentOffers.description, resultSchema: agentOffers.resultSchema })
+    .from(agentShareOffers)
+    .innerJoin(agentOffers, eq(agentOffers.id, agentShareOffers.offerId))
+    .where(eq(agentShareOffers.shareId, share.id))
+    .orderBy(agentOffers.name);
+  return {
+    address: shown,
+    name: recipient.name,
+    description: recipient.description,
+    offers: offers.map((offer) => ({
+      name: offer.name,
+      description: offer.description,
+      result_schema: offer.resultSchema,
+    })),
+  };
+}

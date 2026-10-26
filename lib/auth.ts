@@ -31,7 +31,7 @@ export type SessionUser = {
   emailVerifiedAt: Date | null;
   marketingOptIn: boolean;
   createdAt: Date;
-  workspace: { id: string; name: string; createdAt: Date } | null;
+  workspace: { id: string; name: string; handle: string | null; createdAt: Date } | null;
 };
 
 export type MarketingOptIn = { consentText: string };
@@ -107,6 +107,7 @@ export async function requestLoginCode(
 export async function renameWorkspace(workspaceId: string, name: string): Promise<{
   id: string;
   name: string;
+  handle: string | null;
   createdAt: Date;
 }> {
   const trimmed = name.trim();
@@ -117,7 +118,7 @@ export async function renameWorkspace(workspaceId: string, name: string): Promis
     .update(workspaces)
     .set({ name: trimmed })
     .where(eq(workspaces.id, workspaceId))
-    .returning({ id: workspaces.id, name: workspaces.name, createdAt: workspaces.createdAt });
+    .returning({ id: workspaces.id, name: workspaces.name, handle: workspaces.handle, createdAt: workspaces.createdAt });
   if (!updated) throw new HttpError(404, 'not_found', 'No workspace was found.');
   return updated;
 }
@@ -200,7 +201,7 @@ export async function verifyLoginCode(
     }
 
     let workspaceId = row.workspaceId;
-    let workspace: { id: string; name: string; createdAt: Date } | null = null;
+    let workspace: { id: string; name: string; handle: string | null; createdAt: Date } | null = null;
     if (!workspaceId) {
       const [created] = await tx
         .insert(workspaces)
@@ -208,7 +209,7 @@ export async function verifyLoginCode(
         .returning();
       if (!created) throw new HttpError(500, 'internal_error', 'Something went wrong.');
       workspaceId = created.id;
-      workspace = { id: created.id, name: created.name, createdAt: created.createdAt };
+      workspace = { id: created.id, name: created.name, handle: created.handle, createdAt: created.createdAt };
       await tx
         .update(users)
         .set({ workspaceId, emailVerifiedAt: new Date() })
@@ -223,6 +224,7 @@ export async function verifyLoginCode(
       workspace = {
         id: existingWorkspace.id,
         name: existingWorkspace.name,
+        handle: existingWorkspace.handle,
         createdAt: existingWorkspace.createdAt,
       };
       if (!row.emailVerifiedAt) {
@@ -271,7 +273,7 @@ export async function sessionUser(req: Request): Promise<SessionUser | null> {
   let workspace: SessionUser['workspace'] = null;
   if (user.workspaceId) {
     const [row] = await db.select().from(workspaces).where(eq(workspaces.id, user.workspaceId)).limit(1);
-    if (row) workspace = { id: row.id, name: row.name, createdAt: row.createdAt };
+    if (row) workspace = { id: row.id, name: row.name, handle: row.handle, createdAt: row.createdAt };
   }
   return {
     id: user.id,
@@ -296,6 +298,7 @@ export function serializeUser(user: SessionUser) {
       ? {
           id: user.workspace.id,
           name: user.workspace.name,
+          handle: user.workspace.handle,
           created_at: user.workspace.createdAt.toISOString(),
         }
       : null,
