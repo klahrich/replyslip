@@ -14,6 +14,7 @@ import './landing-bg.css';
 import './landing-stripes.css';
 import './hero-free.css';
 import './how-try.css';
+import './announce.css';
 import { FAQ, FAQ_LD, FaqAnswer } from './faq';
 import { GlowBg } from './GlowBg';
 import { HeroFlow } from './HeroFlow';
@@ -79,6 +80,14 @@ export default function LandingPage() {
       <a className="skip" href="#main">
         Skip to content
       </a>
+      <p className="announce">
+        <Link href="/sharing">
+          <strong>Coming soon:</strong> share your agents with other teams.{' '}
+          <span className="announce-go">
+            <span className="announce-more">See how it will work </span>→
+          </span>
+        </Link>
+      </p>
       <header className="top">
         <a className="mark" href="#top" aria-label="ReplySlip, back to top">
           <MarkIcon />

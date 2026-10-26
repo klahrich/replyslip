@@ -1,0 +1,9 @@
+/* landing: one-line strip above the header, linking to /sharing */
+.lp .announce{margin:0;padding:9px var(--m);background:#22332a;font-size:var(--s-small);line-height:1.4}
+.lp .announce a{color:var(--ink);text-decoration:none}
+.lp .announce strong{font-weight:600;color:var(--accent)}
+.lp .announce-go{white-space:nowrap;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 40%,transparent);text-underline-offset:.22em}
+@media (hover:hover) and (pointer:fine){.lp .announce a:hover .announce-go{text-decoration-color:currentColor}}
+/* phones: keep it to one line; the link text stays for screen readers */
+@media (max-width:599px){.lp .announce{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lp .announce-more{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}}
+@media (max-width:379px){.lp .announce{font-size:.75rem}}

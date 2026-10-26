@@ -63,12 +63,17 @@ export function sourceFromUrl(): string {
 
 /**
  * `source` is the optional "how did you hear about us" answer. It goes out only when it has text; the server keeps
- * it only when this request creates the user, so it is fine to send on every sign-in.
+ * it only when this request creates the user, so it is fine to send on every sign-in. `wants_sharing` goes out only
+ * when the visitor ticks the agent sharing box.
  */
-export async function requestSignInCode(email: string, source = ''): Promise<AuthResult> {
+export async function requestSignInCode(email: string, source = '', wantsSharing = false): Promise<AuthResult> {
   try {
     const src = source.trim().slice(0, SOURCE_MAX);
-    const { status, data, retryAfter } = await post('/api/v1/auth/request-code', src ? { email, source: src } : { email });
+    const { status, data, retryAfter } = await post('/api/v1/auth/request-code', {
+      email,
+      ...(src ? { source: src } : {}),
+      ...(wantsSharing ? { wants_sharing: true } : {}),
+    });
     // Older backends answer 200 even when rate-limited; that still reads as "maybe sent".
     if (status === 200) return { ok: true, message: (data as { message?: string } | null)?.message };
     if (status === 429) {
