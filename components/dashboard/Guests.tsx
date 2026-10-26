@@ -394,20 +394,24 @@ export function Guests({
                   {capEditor(s, 'Up to ')}
                 </div>
                 <div className="dash-actions">
-                  <button
-                    type="button"
-                    className="dash-btn dash-btn-ink dash-btn-sm"
-                    disabled={busy !== null || confirming === s.id}
-                    onClick={() =>
-                      run(`ap${s.id}`, async () => {
-                        const r = await api<{ share: Share }>(`${base}/shares/${s.id}/approve`, { method: 'POST' });
-                        put(r.share);
-                        setNotice(`Approved ${who(s)}. They can send tasks now.`);
-                      })
-                    }
-                  >
-                    {busy === `ap${s.id}` ? 'Approving…' : 'Approve'}
-                  </button>
+                  {shared ? (
+                    <button
+                      type="button"
+                      className="dash-btn dash-btn-ink dash-btn-sm"
+                      disabled={busy !== null || confirming === s.id}
+                      onClick={() =>
+                        run(`ap${s.id}`, async () => {
+                          const r = await api<{ share: Share }>(`${base}/shares/${s.id}/approve`, { method: 'POST' });
+                          put(r.share);
+                          setNotice(`Approved ${who(s)}. They can send tasks now.`);
+                        })
+                      }
+                    >
+                      {busy === `ap${s.id}` ? 'Approving…' : 'Approve'}
+                    </button>
+                  ) : (
+                    <p className="dash-muted">Turn sharing on to approve guests.</p>
+                  )}
                   {revokeButtons(s, 'Deny', `Deny ${who(s)}? They won’t get access.`)}
                 </div>
                 {rowError(s.id)}
