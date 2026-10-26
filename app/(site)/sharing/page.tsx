@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { SignInLink } from '@/components/site/SignInLink';
 import { agentDocs } from '@/lib/agent-docs';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { OG_IMAGE, OG_IMAGE_ALT, SITE_URL, openGraph } from '@/components/site/seo';
@@ -85,9 +86,7 @@ export default function SharingPage() {
       </a>
       <header className="top">
         <Mark />
-        <Link className="top-link" href="/sign-in">
-          Sign in
-        </Link>
+        <SignInLink className="top-link">Sign in</SignInLink>
       </header>
       <main id="main">
         <div className="sh-hero">
