@@ -91,11 +91,17 @@
 @keyframes flow-stamp{from{transform:scale(.6);opacity:.3}}
 @container (max-width:560px){.flow-dot{animation-name:flow-go-v !important}}
 
-/* video loop (HeroLoop): a 2x capture of the wide card at 546x340, so from 1100px (where the card is always the wide
-   row) the card is held at exactly that size, right edge still on the column edge. The video covers the border box
-   (inset -1px past the border; while it is there, overflow clips it inside the card's own border) and fades in over
-   the still card; once it is opaque the card's ink and CSS motion are switched off underneath it. */
+/* video loop (HeroLoop): a 2x capture of the wide card at 546x340, so wherever the card is the wide row (from 1100px,
+   and on tablets and narrow desktops whose stage is wider than 560px) the card is held at exactly that size. Phones
+   keep the narrow top-to-bottom card and no loop: the wide loop scaled to a phone-width card puts its text near 8px.
+   The video covers the border box (inset -1px past the border; while it is
+   there, overflow clips it inside the card's own border) and fades in over the still card once it is playing; once it
+   is opaque the card's ink and CSS motion are switched off underneath it. */
 @media (min-width:1100px){.lp .hero-stage>.flow{width:546px;max-width:100%;margin-left:auto}}
+@container (min-width:561px){.lp .hero-stage>.flow{width:546px;max-width:100%}}
+/* beside the form the card keeps its right edge on the column edge; under it (single column, below 900px) it lines up
+   with the copy on the left */
+@media (min-width:900px){@container (min-width:561px){.lp .hero-stage>.flow{margin-left:auto}}}
 .lp .hero-stage>.flow:has(>.flow-loop){overflow:hidden}
 .flow-loop{position:absolute;inset:-1px;z-index:2;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:fill;opacity:0;pointer-events:none;transition:opacity 300ms var(--ease-out)}
 .flow[data-loop] .flow-loop{opacity:1}
