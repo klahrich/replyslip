@@ -72,6 +72,8 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-agent-head{display:flex;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;margin-bottom:8px}
 .dash-agent h3{font-size:var(--s-body);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
 .dash-agent-desc{margin-top:2px}
+.dash-agent-danger{margin-top:16px;padding-top:12px;border-top:1px solid #c4c9ce;display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center}
+@media (max-width:640px){.dash-agent-head .dash-textbtn,.dash-agent-danger .dash-textbtn{min-height:44px}}
 .dash-filter{display:flex;align-items:center;gap:10px;font-size:var(--s-small)}
 .dash-filter select{height:40px;padding:0 10px;font:inherit;color:var(--ink);background:#f7f8f9;border:1px solid #8a9097;border-radius:4px}
 .dash-tasks{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr);gap:4px}
