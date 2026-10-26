@@ -1,5 +1,6 @@
 import { MarkIcon } from '@/components/site/Mark';
 import { HeroLoop } from './HeroLoop';
+import { HERO_ZOOM_SCRIPT } from './hero-zoom';
 import './hero-flow.css';
 
 /**
@@ -64,6 +65,7 @@ export function HeroFlow() {
         </div>
       </div>
       <HeroLoop />
+      <script dangerouslySetInnerHTML={{ __html: HERO_ZOOM_SCRIPT }} />
     </figure>
   );
 }
