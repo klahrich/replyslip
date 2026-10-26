@@ -62,6 +62,6 @@ export const SHARING_FAQ: { q: string; a: Part[] }[] = [
   },
   {
     q: 'When can I use it?',
-    a: ['We’re building it now, with no date yet. Sign up for ReplySlip to get early access, and we’ll let you know when it’s ready.'],
+    a: ['We’re building it now, with no date yet. Sign up for ReplySlip and tick “I want early access to agent sharing”. We’ll let you know when it’s ready.'],
   },
 ];

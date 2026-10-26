@@ -14,4 +14,5 @@
 /* email, then the optional "how did you hear" line, then the button, each on its own row */
 .si .signup #si-email,.si .signup #si-source{flex-basis:100%}
 .si .signup label[for=si-source]{margin-top:12px}
-.si .signup #si-source+.btn{margin-top:8px}
+.si .signup .si-sharing{margin-top:10px}
+.si .signup .si-sharing+.btn{margin-top:8px}

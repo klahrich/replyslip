@@ -101,7 +101,7 @@ export default function SharingPage() {
             <Early />
           </div>
           <p className="sh-note">
-            We’re building it now. Sign up today to set up your workspace, and we’ll let you know when sharing is ready.
+            We’re building it now. Tick the sharing box when you sign up, and we’ll let you know when it’s ready.
           </p>
           <ShareCard />
         </div>
@@ -166,7 +166,7 @@ export default function SharingPage() {
         <section aria-labelledby="early-h">
           <h2 id="early-h">Get early access</h2>
           <p>
-            Sign up for ReplySlip and we’ll let you know when sharing is ready. Until then, connect your own agents and see{' '}
+            Sign up for ReplySlip and tick the sharing box. We’ll let you know when it’s ready. Until then, connect your own agents and see{' '}
             <Link className="link" href="/#how-a-task-works">
               how ReplySlip tasks work
             </Link>
