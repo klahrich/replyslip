@@ -11,3 +11,7 @@
 .si .si-consent{flex-basis:100%;display:flex;align-items:flex-start;gap:10px;margin-top:6px;font-size:var(--s-small);color:var(--muted)}
 .si .si-consent input{flex:none;width:16px;height:16px;margin:3px 0 0;padding:0;accent-color:var(--accent);cursor:pointer}
 .si .si-consent label{flex:1 1 auto;flex-basis:auto;cursor:pointer}
+/* email, then the optional "how did you hear" line, then the button, each on its own row */
+.si .signup #si-email,.si .signup #si-source{flex-basis:100%}
+.si .signup label[for=si-source]{margin-top:12px}
+.si .signup #si-source+.btn{margin-top:8px}

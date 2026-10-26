@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useId, useState, type FormEvent } from 'react';
-import { rememberSignInEmail, requestSignInCode } from './auth-client';
+import { rememberSignInEmail, requestSignInCode, sourceFromUrl } from './auth-client';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -28,7 +28,7 @@ export function EmailStart({ id, label = 'Your email' }: { id: string; label?: s
     }
     setBusy(true);
     setError('');
-    const res = await requestSignInCode(value);
+    const res = await requestSignInCode(value, sourceFromUrl());
     if (!res.ok) {
       setBusy(false);
       setError(res.message);
