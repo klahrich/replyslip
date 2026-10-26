@@ -48,9 +48,27 @@ export function retryMessage(seconds: number | undefined): string {
   return `Too many requests, try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`;
 }
 
-export async function requestSignInCode(email: string): Promise<AuthResult> {
+/** The server caps `source` at the same length. */
+export const SOURCE_MAX = 200;
+
+/** `?ref=` or `?utm_source=` on the current page, for `source` when the visitor leaves the field empty. */
+export function sourceFromUrl(): string {
   try {
-    const { status, data, retryAfter } = await post('/api/v1/auth/request-code', { email });
+    const q = new URLSearchParams(window.location.search);
+    return (q.get('ref') || q.get('utm_source') || '').trim().slice(0, SOURCE_MAX);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * `source` is the optional "how did you hear about us" answer. It goes out only when it has text; the server keeps
+ * it only when this request creates the user, so it is fine to send on every sign-in.
+ */
+export async function requestSignInCode(email: string, source = ''): Promise<AuthResult> {
+  try {
+    const src = source.trim().slice(0, SOURCE_MAX);
+    const { status, data, retryAfter } = await post('/api/v1/auth/request-code', src ? { email, source: src } : { email });
     // Older backends answer 200 even when rate-limited; that still reads as "maybe sent".
     if (status === 200) return { ok: true, message: (data as { message?: string } | null)?.message };
     if (status === 429) {
