@@ -177,6 +177,7 @@ describe('passwordless auth', () => {
     expect(renamed.data.workspace).toEqual({
       id: session.workspace.id,
       name: 'Meal planning',
+      handle: null,
       created_at: session.workspace.created_at,
     });
     const who = await call(me, 'http://localhost/api/v1/auth/me', { cookie: session.cookie });

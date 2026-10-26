@@ -1,12 +1,12 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { getDb, type DbTx } from '@/db';
-import { agents, wakes, type AgentRow } from '@/db/schema';
+import { getDb, type Db } from '@/db';
+import { agents, tasks, wakes, type AgentRow } from '@/db/schema';
 import { WAKE_MAX_ATTEMPTS, WEBHOOK_TIMEOUT_MS } from './constants';
 import { HttpError } from './errors';
 import { safeEqualString } from './crypto';
 import { buildWebhookCall, localNudgeOf } from './delivery';
 import { assertPublicWebhookUrl } from './webhook-url';
-import { WAKE_NOTICE } from './wake-notice';
+import { GUEST_WAKE_NOTICE, WAKE_NOTICE } from './wake-notice';
 
 export type WakeReason = 'message' | 'task' | 'result' | 'question' | 'failure' | 'test';
 
@@ -24,13 +24,13 @@ type WakeInsert = {
   messageId?: string | null;
 };
 
-export async function enqueueWake(tx: DbTx, input: WakeInsert): Promise<string | null> {
+export async function enqueueWake(tx: Db, input: WakeInsert): Promise<string | null> {
   const [agent] = await tx.select().from(agents).where(eq(agents.id, input.agentId)).limit(1);
   if (!agent || agent.revokedAt || agent.deliveryMode === 'none') return null;
   const [wake] = await tx
     .insert(wakes)
     .values({
-      workspaceId: input.workspaceId,
+      workspaceId: agent.workspaceId,
       agentId: input.agentId,
       reason: input.reason,
       taskId: input.taskId ?? null,
@@ -46,6 +46,7 @@ export function wakeNoticeBody(input: {
   reason: string;
   taskId: string | null;
   createdAt: Date;
+  notice?: string;
 }): string {
   return JSON.stringify({
     id: input.id,
@@ -53,9 +54,20 @@ export function wakeNoticeBody(input: {
     agent: input.agentName,
     reason: input.reason,
     task_id: input.taskId,
-    notice: WAKE_NOTICE,
+    notice: input.notice ?? WAKE_NOTICE,
     created_at: input.createdAt.toISOString(),
   });
+}
+
+async function noticeForTask(db: Db, taskId: string | null): Promise<string> {
+  if (!taskId) return WAKE_NOTICE;
+  const [task] = await db
+    .select({ fromWorkspaceId: tasks.fromWorkspaceId, workspaceId: tasks.workspaceId })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .limit(1);
+  if (task?.fromWorkspaceId && task.fromWorkspaceId !== task.workspaceId) return GUEST_WAKE_NOTICE;
+  return WAKE_NOTICE;
 }
 
 function backoffSeconds(attempts: number): number {
@@ -152,6 +164,7 @@ export async function deliverWebhookWake(wakeId: string): Promise<WebhookAttempt
       reason: claimed.reason,
       taskId: claimed.taskId,
       createdAt: claimed.createdAt,
+      notice: await noticeForTask(db, claimed.taskId),
     });
     const call = buildWebhookCall(agent, body, claimed.id);
     const response = await fetch(call.url, {
@@ -275,10 +288,22 @@ export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
         .set({ status: 'failed', lastError: 'Herdr watcher did not acknowledge the wake.' })
         .where(inArray(wakes.id, exhausted));
     }
+    const taskIds = rows.flatMap((row) => (row.taskId ? [row.taskId] : []));
+    const guestTaskIds = new Set<string>();
+    if (taskIds.length > 0) {
+      const found = await tx
+        .select({ id: tasks.id, fromWorkspaceId: tasks.fromWorkspaceId, workspaceId: tasks.workspaceId })
+        .from(tasks)
+        .where(inArray(tasks.id, taskIds));
+      for (const task of found) {
+        if (task.fromWorkspaceId && task.fromWorkspaceId !== task.workspaceId) guestTaskIds.add(task.id);
+      }
+    }
     return rows.flatMap((row) => {
       if (exhausted.includes(row.id)) return [];
       const nudge = localNudgeOf(row);
       if (!nudge) return [];
+      const guest = row.taskId != null && guestTaskIds.has(row.taskId);
       return [
         {
           id: row.id,
@@ -288,6 +313,7 @@ export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
           reason: row.reason,
           task_id: row.taskId,
           agent_name: row.agentName,
+          ...(guest ? { notice: GUEST_WAKE_NOTICE } : {}),
         },
       ];
     });

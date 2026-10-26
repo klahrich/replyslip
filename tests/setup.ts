@@ -3,10 +3,12 @@ import { closeDb, getDb } from '@/db';
 import { rateEvents } from '@/db/schema';
 import { setEmailSenderForTests } from '@/lib/email';
 import { setFirstAgentAlertSchedulerForTests } from '@/lib/first-agent-alert';
+import { setGuestWorkspaceLimitForTests } from '@/lib/plans';
 import { installInbox } from './inbox';
 
 beforeEach(async () => {
   installInbox();
+  setGuestWorkspaceLimitForTests(null);
   await getDb().delete(rateEvents);
 });
 

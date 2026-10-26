@@ -57,6 +57,13 @@
       "when": 1762600000000,
       "tag": "0007_wants_sharing",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1762700000000,
+      "tag": "0008_agent_sharing",
+      "breakpoints": true
     }
   ]
 }

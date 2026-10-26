@@ -39,6 +39,7 @@ export function serializeAgent(agent: AgentRow) {
     description: agent.description,
     created_at: agent.createdAt.toISOString(),
     revoked_at: agent.revokedAt?.toISOString() ?? null,
+    shared: agent.shared,
     delivery: publicDelivery(agent),
   };
 }
@@ -184,13 +185,18 @@ export async function setAgentDelivery(workspaceId: string, agentId: string, inp
   return updated;
 }
 
-export async function authenticateAgentKey(token: string): Promise<AgentPrincipal | null> {
+export async function authenticateAgentKey(
+  token: string,
+  options?: { recordUse?: boolean },
+): Promise<AgentPrincipal | null> {
   const db = getDb();
   const [key] = await db.select().from(agentKeys).where(eq(agentKeys.tokenHash, sha256(token))).limit(1);
   if (!key || key.revokedAt) return null;
   const [agent] = await db.select().from(agents).where(eq(agents.id, key.agentId)).limit(1);
   if (!agent || agent.revokedAt) return null;
-  await db.update(agentKeys).set({ lastUsedAt: new Date() }).where(eq(agentKeys.id, key.id));
+  if (options?.recordUse !== false) {
+    await db.update(agentKeys).set({ lastUsedAt: new Date() }).where(eq(agentKeys.id, key.id));
+  }
   return {
     workspaceId: agent.workspaceId,
     agentId: agent.id,
