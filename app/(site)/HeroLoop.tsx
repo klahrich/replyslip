@@ -1,31 +1,46 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { setHeroZoom } from './hero-zoom';
 
-// The loop is a 2x capture of the wide card's border box at 546x340, so it only fits a card of that shape. hero-flow.css
-// holds the card at that shape wherever it is the wide row (desktop and tablets); phones keep the narrow card.
-const LOOP_ASPECT = 1092 / 680;
+// Two loops, each a 2x capture of one card layout's border box: the wide row at 546x340 and the narrow top-to-bottom
+// card at 338x351. hero-flow.css holds the card at the matching shape in each layout (the narrow one zoomed down on
+// small phones), so a loop is only shown on a card of its own shape.
+const LOOPS = {
+  wide: { aspect: 1092 / 680, name: 'hero-loop', poster: 'hero-poster' },
+  tall: { aspect: 676 / 702, name: 'hero-loop-portrait', poster: 'hero-poster-portrait' },
+} as const;
+type Shape = keyof typeof LOOPS;
 const FIT = 0.01;
 
 /**
  * Progressive enhancement for HeroFlow: once the page has loaded, lays a short video loop of the same card over it.
  * The still card stays underneath and is all you get without JS, with reduced motion, with Save-Data on, until the
- * video is actually playing (autoplay can be refused, e.g. by a data saver), if it fails, or when the card is not the
- * wide 546x340 shape the loop was drawn at (the narrow top-to-bottom layout, phones).
+ * video is actually playing (autoplay can be refused, e.g. by a data saver), if it fails, or while the card is
+ * neither of the shapes the loops were drawn at (mid-resize).
  */
 export function HeroLoop() {
   const ref = useRef<HTMLVideoElement>(null);
-  const [load, setLoad] = useState(false);
+  const [shape, setShape] = useState<Shape | null>(null);
 
-  // fetch nothing until the page has loaded (never competes with LCP), and only for a card the loop fits
+  // keeps the narrow card's zoom in step with its stage (the inline script in the card set it for the first paint)
+  useEffect(() => {
+    const stage = document.querySelector<HTMLElement>('[data-hero-card]')?.parentElement;
+    if (!stage) return;
+    const ro = new ResizeObserver(() => setHeroZoom(stage));
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, []);
+
+  // fetch nothing until the page has loaded (never competes with LCP), then the loop for the card's current shape;
+  // a layout change (rotating a tablet) swaps it
   useEffect(() => {
     const card = document.querySelector<HTMLElement>('[data-hero-card]');
     if (!card || matchMedia('(prefers-reduced-motion: reduce)').matches || saveData()) return;
     let wait = 0;
     const ro = new ResizeObserver(() => {
-      if (!fits(card)) return;
-      ro.disconnect();
-      setLoad(true);
+      const now = shapeOf(card);
+      if (now) setShape(now);
     });
     const start = () => {
       wait = window.setTimeout(() => ro.observe(card), 200);
@@ -42,12 +57,12 @@ export function HeroLoop() {
   useEffect(() => {
     const video = ref.current;
     const card = video?.parentElement;
-    if (!load || !video || !card) return;
+    if (!shape || !video || !card) return;
     let playing = false;
     let dead = false;
     // shown only while it is really playing, so a refused or stalled autoplay leaves the still card in place
     const sync = () => {
-      if (dead || !fits(card)) {
+      if (dead || shapeOf(card) !== shape) {
         delete card.dataset.loop;
         video.pause();
         return;
@@ -92,11 +107,13 @@ export function HeroLoop() {
       last?.removeEventListener('error', onError);
       delete card.dataset.loop;
     };
-  }, [load]);
+  }, [shape]);
 
-  if (!load) return null;
+  if (!shape) return null;
+  const loop = LOOPS[shape];
   return (
     <video
+      key={shape}
       ref={ref}
       className='flow-loop'
       aria-hidden='true'
@@ -106,13 +123,13 @@ export function HeroLoop() {
       loop
       playsInline
       preload='auto'
-      poster='/hero/hero-poster.png'
+      poster={`/hero/${loop.poster}.png`}
       disablePictureInPicture
       disableRemotePlayback
     >
       {/* WebM is half the size; Safari gets the H.264 MP4 it decodes in hardware */}
-      {apple() ? null : <source src='/hero/hero-loop.webm' type='video/webm' />}
-      <source src='/hero/hero-loop.mp4' type='video/mp4' />
+      {apple() ? null : <source src={`/hero/${loop.name}.webm`} type='video/webm' />}
+      <source src={`/hero/${loop.name}.mp4`} type='video/mp4' />
     </video>
   );
 }
@@ -125,7 +142,9 @@ function apple() {
   return navigator.vendor.startsWith('Apple');
 }
 
-function fits(card: HTMLElement) {
+function shapeOf(card: HTMLElement): Shape | null {
   const r = card.getBoundingClientRect();
-  return r.height > 0 && Math.abs(r.width / r.height / LOOP_ASPECT - 1) < FIT;
+  if (!r.height) return null;
+  const k = r.width / r.height;
+  return (Object.keys(LOOPS) as Shape[]).find((s) => Math.abs(k / LOOPS[s].aspect - 1) < FIT) ?? null;
 }
