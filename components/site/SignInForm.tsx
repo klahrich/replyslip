@@ -18,7 +18,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 type Step = 'email' | 'code';
 
 const noSubscribe = () => () => {};
-/** Visitors from /sharing arrive with ?ref=sharing and get the sharing box ticked. */
+/** Visitors from /sharing arrive with ?ref=sharing. Their sign-in sends wants_sharing, which feeds the source stats. */
 const fromSharing = () => new URLSearchParams(window.location.search).get('ref') === 'sharing';
 
 /** `sent` means the landing form already asked for a code; the email itself comes from sessionStorage. */
@@ -36,9 +36,7 @@ export function SignInForm({ sent }: { sent: boolean }) {
   const [resent, setResent] = useState(false);
   const [marketing, setMarketing] = useState(false);
   const [source, setSource] = useState('');
-  const sharingDefault = useSyncExternalStore(noSubscribe, fromSharing, () => false);
-  const [sharingChoice, setSharing] = useState<boolean | null>(null);
-  const wantsSharing = sharingChoice ?? sharingDefault;
+  const wantsSharing = useSyncExternalStore(noSubscribe, fromSharing, () => false);
   const codeRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
 
@@ -127,16 +125,6 @@ export function SignInForm({ sent }: { sent: boolean }) {
             value={source}
             onChange={(e) => setSource(e.target.value)}
           />
-          <div className="si-consent si-sharing">
-            <input
-              id="si-sharing"
-              name="wants_sharing"
-              type="checkbox"
-              checked={wantsSharing}
-              onChange={(e) => setSharing(e.target.checked)}
-            />
-            <label htmlFor="si-sharing">I want early access to agent sharing</label>
-          </div>
           <button className="btn" type="submit" disabled={busy}>
             {busy ? 'Sending…' : 'Send code'}
           </button>
