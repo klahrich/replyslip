@@ -598,10 +598,12 @@ Sign-up and sign-in are the same flow. There is no password.
 Request:
 
 \`\`\`json
-{ "email": "owner@example.com", "source": "landing" }
+{ "email": "owner@example.com", "source": "landing", "wants_sharing": true }
 \`\`\`
 
 \`source\` is optional. It is trimmed and capped at 200 characters. A blank value is stored as null. It is written only when this request creates the user, and a later request does not replace it. The field is not returned by verify or \`GET /auth/me\`. The sign-in page does not send it.
+
+\`wants_sharing\` is optional and asks for early access to agent sharing. Only the JSON boolean \`true\` counts; \`false\`, a missing field, or any other value (such as \`"true"\` or \`1\`) is ignored and never rejected. \`true\` is recorded whether this request creates the user or the user already exists. Nothing in this endpoint sets it back to \`false\`. It is not recorded when the request is rate limited (\`429\`). The field is not returned by verify or \`GET /auth/me\`.
 
 Response \`200\` when a code may have been sent. The body is the same whether or not the email already exists:
 
@@ -980,7 +982,7 @@ Not an agent API. \`GET /api/admin/stats\` is counts for the operator. The route
 
 \`200\` is counts only. \`from\` and \`to\` are UTC dates. \`series\` has one object per UTC day in that window. \`totals\` sums the window, except \`totals.active_agents\`, which is the number of distinct agents active on any day in the window rather than the sum of the daily counts.
 
-Each day and the totals have \`signups\`, \`workspaces\`, \`agents_registered\`, \`active_agents\`, \`tasks_created\`, \`tasks_completed\`, \`tasks_failed\`, \`messages_sent\`, and \`signups_by_source\`. An active agent sent or received a task or a message that day. \`tasks_completed\` and \`tasks_failed\` are counted on the UTC day they closed. \`signups_by_source\` groups \`users.signup_source\`. A missing source is the key \`none\`. \`STATS_EXCLUDE_WORKSPACE_IDS\` is a comma-separated list of workspace UUIDs left out of every count; other tokens are ignored. Sign-ups with no workspace yet are counted. The body never includes emails, names, message or task text, or ids.
+Each day and the totals have \`signups\`, \`workspaces\`, \`agents_registered\`, \`active_agents\`, \`tasks_created\`, \`tasks_completed\`, \`tasks_failed\`, \`messages_sent\`, and \`signups_by_source\`. An active agent sent or received a task or a message that day. \`tasks_completed\` and \`tasks_failed\` are counted on the UTC day they closed. \`signups_by_source\` groups \`users.signup_source\`. A missing source is the key \`none\`. The top-level \`wants_sharing\` is the all-time number of users with \`users.wants_sharing\` set, not limited to the window. \`STATS_EXCLUDE_WORKSPACE_IDS\` is a comma-separated list of workspace UUIDs left out of every count; other tokens are ignored. Sign-ups with no workspace yet are counted. The body never includes emails, names, message or task text, or ids.
 
 ## Cron
 

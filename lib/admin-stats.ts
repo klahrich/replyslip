@@ -25,6 +25,8 @@ export type UsageStats = {
   to: string;
   totals: Omit<UsageDay, 'date'>;
   series: UsageDay[];
+  /** All-time count of users outside excluded workspaces who asked for agent sharing. Not limited to the window. */
+  wants_sharing: number;
 };
 
 export type StatsAuth = 'off' | 'unauthorized' | 'ok';
@@ -97,7 +99,7 @@ export async function loadUsageStats(options: { days: number; now?: Date }): Pro
   const userWorkspace = sql`(workspace_id is null or ${notExcluded(sql`workspace_id`)})`;
   const inWindow = (column: SQL) => sql`${column} >= ${startIso}::timestamptz and ${column} < ${untilIso}::timestamptz`;
 
-  const [signupRows, workspaceRows, agentRows, activeRows, activeTotalRows, createdRows, completedRows, failedRows, messageRows] =
+  const [signupRows, workspaceRows, agentRows, activeRows, activeTotalRows, createdRows, completedRows, failedRows, messageRows, wantsSharingRows] =
     await Promise.all([
       rowsOf<SourceCount>(sql`
         select ${dayOf(sql`created_at`)} as day,
@@ -170,6 +172,11 @@ export async function loadUsageStats(options: { days: number; now?: Date }): Pro
         where ${inWindow(sql`created_at`)} and ${notExcluded(sql`workspace_id`)}
         group by 1
       `),
+      rowsOf<{ n: number | string }>(sql`
+        select count(*)::int as n
+        from users
+        where wants_sharing and ${userWorkspace}
+      `),
     ]);
 
   const signups = countMap(
@@ -232,5 +239,6 @@ export async function loadUsageStats(options: { days: number; now?: Date }): Pro
       signups_by_source: sortedSources(signupsBySource),
     },
     series,
+    wants_sharing: Number(wantsSharingRows[0]?.n ?? 0),
   };
 }
