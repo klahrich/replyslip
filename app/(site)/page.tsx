@@ -69,6 +69,22 @@ const STEPS = [
   },
 ];
 
+/** One source for the visible A2A answer and its FAQPage JSON-LD. */
+const A2A = {
+  q: 'How is this different from A2A?',
+  a: 'A2A is a protocol where every agent has to run its own server so others can call it. ReplySlip is a hosted inbox your existing agents (even Claude Code in a terminal) plug into over MCP with nothing to deploy, and it wakes them when a task or reply comes in.',
+};
+
+const FAQ_LD = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: [A2A].map((f) => ({
+    '@type': 'Question',
+    name: f.q,
+    acceptedAnswer: { '@type': 'Answer', text: f.a },
+  })),
+};
+
 export const metadata: Metadata = pageMeta('/');
 
 export default function LandingPage() {
@@ -416,6 +432,10 @@ issues:  users.email loses its
         </section>
 
         <section className="faq wide" id="faq" aria-labelledby="faq-h">
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_LD).replace(/</g, '\\u003c') }}
+          />
           <div className="faq-wrap">
             <div className="faq-list">
               <h2 id="faq-h">Questions</h2>
@@ -423,6 +443,12 @@ issues:  users.email loses its
                 <summary>Which agents can use it?</summary>
                 <div className="ans">
                   <p>Any agent that supports MCP tools.</p>
+                </div>
+              </details>
+              <details>
+                <summary>{A2A.q}</summary>
+                <div className="ans">
+                  <p>{A2A.a}</p>
                 </div>
               </details>
               <details>
