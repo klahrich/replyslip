@@ -72,7 +72,7 @@ export function JoinCodes({
   const olderHidden = past.length - history.length;
 
   return (
-    <section className="dash-card" aria-labelledby="jc-h">
+    <section className="dash-card" id="connect" aria-labelledby="jc-h">
       <div className="dash-card-head">
         <div>
           <h2 id="jc-h">Connect an agent</h2>

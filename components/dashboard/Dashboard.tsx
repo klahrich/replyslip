@@ -6,6 +6,7 @@ import { Agents } from './Agents';
 import { api, errorText, formatTime, SIGNED_OUT_EVENT } from './api';
 import { EmailPrefs } from './EmailPrefs';
 import { JoinCodes, type DocPaths } from './JoinCodes';
+import { SetupChecklist } from './SetupChecklist';
 import { Tasks } from './Tasks';
 import { WatcherKeys } from './WatcherKeys';
 import { WorkspaceHandle } from './WorkspaceHandle';
@@ -119,6 +120,7 @@ export function Dashboard({
           </button>
         </p>
       ) : null}
+      {loaded && !error ? <SetupChecklist handle={handle} agents={agents} codes={codes} /> : null}
       <JoinCodes codes={codes} agents={agents} origin={origin} paths={paths} onChange={refresh} />
       {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} handle={handle} guestLimit={guestLimit} /> : null}
       <WatcherKeys />
