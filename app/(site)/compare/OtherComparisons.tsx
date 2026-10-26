@@ -22,7 +22,7 @@ export function OtherComparisons({ current }: { current: string }) {
       <p>
         Coming soon:{' '}
         <Link className="link" href="/sharing">
-          share one agent with another team
+          share your agents with other teams
         </Link>
         .
       </p>
