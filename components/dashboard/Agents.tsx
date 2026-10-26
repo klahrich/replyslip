@@ -23,7 +23,7 @@ function deliveryLabel(a: Agent): string {
     const target = a.delivery.target ?? a.delivery.pane;
     return `Local${driver ? ` · ${driver}` : ''}${target ? ` · ${target}` : ''}`;
   }
-  return 'Checks the relay itself';
+  return 'Checks ReplySlip for new tasks (no webhook)';
 }
 
 /** Last wake outcome per agent, from GET /api/v1/agents. Shows nothing until a wake has been attempted. */
@@ -148,34 +148,6 @@ export function Agents({
                       >
                         {busy === a.id + 'k' ? 'Creating…' : 'New key'}
                       </button>
-                      {confirming === a.id ? (
-                        <>
-                          <button
-                            type="button"
-                            className="dash-textbtn dash-danger"
-                            disabled={busy !== null}
-                            onClick={() =>
-                              run(a.id, async () => {
-                                await api(`/api/v1/agents/${a.id}/revoke`, { method: 'POST' });
-                              })
-                            }
-                          >
-                            {busy === a.id ? 'Revoking…' : `Yes, revoke ${a.name}`}
-                          </button>
-                          <button type="button" className="dash-textbtn" onClick={() => setConfirming(null)}>
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          className="dash-textbtn dash-danger"
-                          disabled={busy !== null}
-                          onClick={() => setConfirming(a.id)}
-                        >
-                          Revoke agent
-                        </button>
-                      )}
                     </div>
                   ) : null}
                 </div>
@@ -184,7 +156,7 @@ export function Agents({
                   <DeliveryPanel agent={a} onSaved={onChange} onClose={() => setEditing(null)} />
                 ) : null}
 
-                {error?.id.startsWith(a.id) ? (
+                {error && error.id !== a.id && error.id.startsWith(a.id) ? (
                   <p className="dash-err" role="alert">
                     {error.text}
                   </p>
@@ -250,6 +222,43 @@ export function Agents({
                 {!revoked ? <SharingToggle agent={a} handle={handle} onChange={onChange} /> : null}
                 {!revoked ? (
                   <Guests agentId={a.id} agentName={a.name} handle={handle} shared={!!a.shared} guestLimit={guestLimit} />
+                ) : null}
+                {!revoked ? (
+                  <div className="dash-agent-danger">
+                    {confirming === a.id ? (
+                      <>
+                        <button
+                          type="button"
+                          className="dash-textbtn dash-danger"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            run(a.id, async () => {
+                              await api(`/api/v1/agents/${a.id}/revoke`, { method: 'POST' });
+                            })
+                          }
+                        >
+                          {busy === a.id ? 'Revoking…' : `Yes, revoke ${a.name}`}
+                        </button>
+                        <button type="button" className="dash-textbtn" onClick={() => setConfirming(null)}>
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="dash-textbtn dash-danger"
+                        disabled={busy !== null}
+                        onClick={() => setConfirming(a.id)}
+                      >
+                        Revoke agent
+                      </button>
+                    )}
+                    {error?.id === a.id ? (
+                      <p className="dash-err" role="alert">
+                        {error.text}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </li>
             );
