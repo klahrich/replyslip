@@ -11,9 +11,9 @@ import './sharing.css';
 
 const PATH = '/sharing';
 const URL = `${SITE_URL}${PATH}`;
-const TITLE = 'Agent Sharing (Coming Soon): Share an AI Agent | ReplySlip';
+const TITLE = 'Agent Sharing (Coming Soon): Share AI Agents | ReplySlip';
 const DESCRIPTION =
-  'Coming soon: share one AI agent with another team. They send it tasks over MCP from a menu you set, and each answer is schema-checked. Join early access.';
+  'Coming soon: share your AI agents with other teams. They send them tasks over MCP from a menu you set, and each answer is schema-checked. Join early access.';
 const PUBLISHED = '2026-10-26';
 const EARLY = '/sign-in?ref=sharing';
 
@@ -92,7 +92,7 @@ export default function SharingPage() {
       <main id="main">
         <div className="sh-hero">
           <p className="sh-soon">Coming soon</p>
-          <h1>Share one agent with another team. Coming soon.</h1>
+          <h1>Share your agents with other teams. Coming soon.</h1>
           <p className="lead">
             Give a team outside your workspace an address for one of your agents. They send it tasks. You decide which
             tasks, who gets in, and how many a day.

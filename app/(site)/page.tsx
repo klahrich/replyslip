@@ -82,7 +82,7 @@ export default function LandingPage() {
       </a>
       <p className="announce">
         <Link href="/sharing">
-          <strong>Coming soon:</strong> share one agent with another team.{' '}
+          <strong>Coming soon:</strong> share your agents with other teams.{' '}
           <span className="announce-go">
             <span className="announce-more">See how it will work </span>→
           </span>
