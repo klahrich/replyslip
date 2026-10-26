@@ -25,12 +25,15 @@ export function Guests({
   agentId,
   agentName,
   handle,
+  shared,
   guestLimit,
 }: {
   agentId: string;
   agentName: string;
   /** This workspace's handle, for the @handle/agent address. */
   handle: string | null;
+  /** Whether the agent is shared. When it isn't, this lists leftover guests so they can be revoked, and hides the invite form. */
+  shared: boolean;
   /** Pending plus approved guests allowed per shared agent on this plan. Null when the plan has no cap. */
   guestLimit: number | null;
 }) {
@@ -41,6 +44,7 @@ export function Guests({
   const [error, setError] = useState<{ id: string; text: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
+  const [taskEdit, setTaskEdit] = useState<{ id: string; names: string[] } | null>(null);
   const [notice, setNotice] = useState('');
   const [inviteHandle, setInviteHandle] = useState('');
   const [picked, setPicked] = useState<string[] | null>(null);
@@ -98,6 +102,7 @@ export function Guests({
       if (id !== 'invite' && err instanceof ApiError && (err.status === 404 || err.status === 409)) {
         setConfirming(null);
         setEditing(null);
+        setTaskEdit(null);
         setError({ id: 'list', text: `${errorText(err)} The list is up to date now.` });
         await load();
       } else {
@@ -112,6 +117,8 @@ export function Guests({
   const address = handle ? `@${handle}/${agentName}` : null;
 
   if (!data) {
+    // An unshared agent shows Guests only when it has some, so stay quiet until we know.
+    if (!shared && !loadError) return null;
     return (
       <section className="dash-guests" aria-labelledby={headingId}>
         <h4 id={headingId}>Guests</h4>
@@ -136,6 +143,8 @@ export function Guests({
   const used = pending.length + active.length;
   const full = guestLimit !== null && used >= guestLimit;
   const chosen = picked ?? data.offers.map((o) => o.name);
+
+  if (!shared && used === 0) return null;
 
   function rowError(id: string) {
     return error?.id.endsWith(id) ? (
@@ -188,21 +197,172 @@ export function Guests({
     );
   }
 
+  function capEditor(s: Share, lead: string) {
+    if (editing?.id !== s.id) {
+      return (
+        <p className="dash-muted">
+          {lead}
+          {s.daily_cap.toLocaleString('en-US')} tasks a day{' '}
+          <button
+            type="button"
+            className="dash-textbtn"
+            disabled={busy !== null}
+            aria-label={`Change daily limit for ${who(s)}`}
+            onClick={() => {
+              setError(null);
+              setTaskEdit(null);
+              setEditing({ id: s.id, value: String(s.daily_cap) });
+            }}
+          >
+            Change
+          </button>
+        </p>
+      );
+    }
+    return (
+      <form
+        className="dash-cap-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const cap = Number(editing.value);
+          if (!Number.isInteger(cap) || cap < 1 || cap > MAX_CAP) {
+            setError({ id: `cp${s.id}`, text: `Enter a whole number from 1 to ${MAX_CAP.toLocaleString('en-US')}.` });
+            return;
+          }
+          void run(`cp${s.id}`, async () => {
+            const r = await api<{ share: Share }>(`${base}/shares/${s.id}`, { method: 'PATCH', body: { daily_cap: cap } });
+            put(r.share);
+            setEditing(null);
+          });
+        }}
+      >
+        <label htmlFor={`cap-${s.id}`}>Tasks a day</label>
+        <input
+          id={`cap-${s.id}`}
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={MAX_CAP}
+          step={1}
+          value={editing.value}
+          onChange={(e) => setEditing({ id: s.id, value: e.target.value })}
+        />
+        <button type="submit" className="dash-textbtn" disabled={busy !== null}>
+          {busy === `cp${s.id}` ? 'Saving…' : 'Save'}
+        </button>
+        <button type="button" className="dash-textbtn" disabled={busy === `cp${s.id}`} onClick={() => setEditing(null)}>
+          Cancel
+        </button>
+      </form>
+    );
+  }
+
+  function tasksEditor(s: Share) {
+    if (taskEdit?.id !== s.id) {
+      return (
+        <p className="dash-muted">
+          Tasks: <span translate="no">{taskList(s)}</span>{' '}
+          {data && data.offers.length ? (
+            <button
+              type="button"
+              className="dash-textbtn"
+              disabled={busy !== null}
+              aria-label={`Edit tasks for ${who(s)}`}
+              onClick={() => {
+                setError(null);
+                setEditing(null);
+                setTaskEdit({ id: s.id, names: s.offers.map((o) => o.name) });
+              }}
+            >
+              Edit tasks
+            </button>
+          ) : null}
+        </p>
+      );
+    }
+    const names = taskEdit.names;
+    return (
+      <form
+        className="dash-task-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (names.length === 0) {
+            setError({ id: `tk${s.id}`, text: 'Pick at least one task.' });
+            return;
+          }
+          void run(`tk${s.id}`, async () => {
+            const r = await api<{ share: Share }>(`${base}/shares/${s.id}`, { method: 'PATCH', body: { offers: names } });
+            put(r.share);
+            setTaskEdit(null);
+            setNotice(`Saved tasks for ${who(s)}.`);
+          });
+        }}
+      >
+        <fieldset className="dash-guest-offers">
+          <legend>Tasks {who(s)} can send</legend>
+          {data?.offers.map((o) => (
+            <label key={o.id}>
+              <input
+                type="checkbox"
+                checked={names.includes(o.name)}
+                onChange={(e) =>
+                  setTaskEdit({ id: s.id, names: e.target.checked ? [...names, o.name] : names.filter((n) => n !== o.name) })
+                }
+              />
+              <span translate="no">{o.name}</span>
+            </label>
+          ))}
+        </fieldset>
+        <div className="dash-actions">
+          <button type="submit" className="dash-textbtn" disabled={busy !== null}>
+            {busy === `tk${s.id}` ? 'Saving…' : 'Save tasks'}
+          </button>
+          <button type="button" className="dash-textbtn" disabled={busy === `tk${s.id}`} onClick={() => setTaskEdit(null)}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    );
+  }
+
   return (
     <section className="dash-guests" aria-labelledby={headingId}>
       <div className="dash-guests-head">
         <h4 id={headingId}>Guests</h4>
-        {address ? (
+        {address && shared ? (
           <p className="dash-muted">
             Address <code translate="no">{address}</code>
           </p>
         ) : null}
         {guestLimit !== null ? (
           <p className="dash-muted">
-            Free plan: {used} of {guestLimit} guest workspaces
+            Free plan: {guestLimit} guest workspaces per agent · {used} used
           </p>
         ) : null}
       </div>
+
+      {!shared ? (
+        <p className="dash-muted dash-guest-invite-note">
+          Sharing is off, so these guests can’t send tasks. Revoke anyone you don’t want back when you share again.
+        </p>
+      ) : null}
+
+      {shared && data.offers.length ? (
+        <>
+          <h5 className="dash-guests-sub">Task menu</h5>
+          <ul className="dash-offers">
+            {data.offers.map((o) => (
+              <li key={o.id}>
+                <code translate="no">{o.name}</code>
+                <span className="dash-muted">{o.description}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="dash-muted dash-offers-note">
+            Your agent adds and changes tasks with <code translate="no">upsert_offer</code>.
+          </p>
+        </>
+      ) : null}
 
       {error?.id === 'list' ? (
         <p className="dash-err dash-guest-notice" role="alert">
@@ -229,8 +389,9 @@ export function Guests({
                     {who(s)}
                   </p>
                   <p className="dash-muted">
-                    Tasks: <span translate="no">{taskList(s)}</span> · up to {s.daily_cap.toLocaleString('en-US')} a day
+                    Tasks: <span translate="no">{taskList(s)}</span>
                   </p>
+                  {capEditor(s, 'Up to ')}
                 </div>
                 <div className="dash-actions">
                   <button
@@ -266,60 +427,8 @@ export function Guests({
                   <p className="dash-guest-name" translate="no">
                     {who(s)}
                   </p>
-                  <p className="dash-muted">
-                    Tasks: <span translate="no">{taskList(s)}</span>
-                  </p>
-                  {editing?.id === s.id ? (
-                    <form
-                      className="dash-cap-form"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        const cap = Number(editing.value);
-                        if (!Number.isInteger(cap) || cap < 1 || cap > MAX_CAP) {
-                          setError({ id: `cp${s.id}`, text: `Enter a whole number from 1 to ${MAX_CAP.toLocaleString('en-US')}.` });
-                          return;
-                        }
-                        void run(`cp${s.id}`, async () => {
-                          const r = await api<{ share: Share }>(`${base}/shares/${s.id}`, { method: 'PATCH', body: { daily_cap: cap } });
-                          put(r.share);
-                          setEditing(null);
-                        });
-                      }}
-                    >
-                      <label htmlFor={`cap-${s.id}`}>Tasks a day</label>
-                      <input
-                        id={`cap-${s.id}`}
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        max={MAX_CAP}
-                        step={1}
-                        value={editing.value}
-                        onChange={(e) => setEditing({ id: s.id, value: e.target.value })}
-                      />
-                      <button type="submit" className="dash-textbtn" disabled={busy !== null}>
-                        {busy === `cp${s.id}` ? 'Saving…' : 'Save'}
-                      </button>
-                      <button type="button" className="dash-textbtn" disabled={busy === `cp${s.id}`} onClick={() => setEditing(null)}>
-                        Cancel
-                      </button>
-                    </form>
-                  ) : (
-                    <p className="dash-muted">
-                      Up to {s.daily_cap.toLocaleString('en-US')} tasks a day{' '}
-                      <button
-                        type="button"
-                        className="dash-textbtn"
-                        disabled={busy !== null}
-                        onClick={() => {
-                          setError(null);
-                          setEditing({ id: s.id, value: String(s.daily_cap) });
-                        }}
-                      >
-                        Change
-                      </button>
-                    </p>
-                  )}
+                  {tasksEditor(s)}
+                  {capEditor(s, 'Up to ')}
                 </div>
                 <div className="dash-actions">
                   {revokeButtons(s, 'Revoke', `Revoke ${who(s)}? Open tasks from this guest will fail with “access revoked”.`)}
@@ -331,7 +440,7 @@ export function Guests({
         </>
       ) : null}
 
-      {data.offers.length === 0 ? (
+      {!shared ? null : data.offers.length === 0 ? (
         <p className="dash-muted dash-guest-invite-note">
           Add a task to this agent’s menu before you invite anyone. Your agent can add one with{' '}
           <code translate="no">upsert_offer</code>.
@@ -387,7 +496,7 @@ export function Guests({
             </div>
             <p className="dash-hint">
               {full
-                ? `This agent has ${guestLimit} guest workspaces, the free plan limit. Revoke one to invite another.`
+                ? `This agent has ${guestLimit} guest workspaces, the free plan limit per agent. Revoke one to invite another.`
                 : 'The workspace needs a ReplySlip account with a handle set.'}
             </p>
           </div>
