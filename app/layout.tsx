@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   // Public pages are indexable. Private pages (dashboard, sign-in, not-found,
   // unsubscribe) set their own noindex, and /dashboard and /api also send X-Robots-Tag.
   robots: { index: true, follow: true },
-  icons: { icon: favicon },
+  icons: { icon: favicon, apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }] },
   openGraph,
   twitter: { card: 'summary_large_image', title, description: shareDescription, images: [{ url: OG_IMAGE, alt: OG_IMAGE_ALT }] },
 };
