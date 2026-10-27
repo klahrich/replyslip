@@ -28,11 +28,11 @@ export function HiHn() {
     <div className="hi-hn">
       <p>
         <span>
-          Hi HN. It’s open source (AGPL), so you can{' '}
+          Hi HN. It’s open source (AGPL), and{' '}
           <a className="link" href="https://github.com/klahrich/replyslip">
-            read the code on GitHub
-          </a>{' '}
-          or run your own copy.
+            the code is on GitHub
+          </a>
+          .
         </span>
         <button type="button" className="hi-hn-x" onClick={close} aria-label="Close the note for HN visitors">
           ×
