@@ -239,3 +239,6 @@ pre .k{color:var(--code-k)}pre .s{color:var(--code-s)}pre .c{color:var(--paper-m
 @keyframes stamp{from{transform:rotate(-2deg) scale(.96);opacity:.4}}
 @keyframes nudge{25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
 @keyframes fade{from{opacity:.4}}
+
+/* footer: Privacy and Terms sit under the copyright line */
+.foot .foot-legal{display:flex;gap:20px;margin-top:4px}
