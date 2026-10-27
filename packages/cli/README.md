@@ -27,6 +27,14 @@ npx replyslip watch --url https://replyslip.com --key-file ~/.replyslip/<machine
 
 Run `watch --status` first: one watcher runs per server origin and workspace, and a second `watch` for the same workspace exits. Pass the watcher key with `--key-file` (preferred, mode 600), `--key`, or `REPLYSLIP_WATCHER_KEY`. The default poll interval is 3 seconds (`--interval <ms>`, minimum 500). The driver (herdr or Orca) comes from each agent's delivery setting, not a flag. herdr 0.8.0 or newer must be on `PATH` for herdr agents; for Orca, `orca` must be on `PATH` or `REPLYSLIP_ORCA_BIN` must name the binary.
 
+The watcher keeps running through network errors, timeouts, `429`, and `5xx` responses. It logs one line per failure (`poll failed (502), retrying in 6s`), waits the poll interval, doubles up to 60 seconds, and resets after a good poll. It exits only when the relay rejects the key (`401`/`403`). Each delivered wake logs one line, for example `woke codex via herdr (task 1a2b3c4d)`. A driver is checked the first time a wake needs it, so herdr-only machines never see an Orca warning. With `--once`, a failed poll exits 1.
+
+## Before you rely on wakes
+
+- **herdr needs a pane name, not a pane id.** The dashboard **Pane** field takes the herdr agent name. Ids like `w1:p2` are rejected. Name the pane with `herdr agent rename <pane-id> <name>`.
+- **Codex** must auto-approve the ReplySlip tools, or each wake stops at an approval prompt. Add `default_tools_approval_mode = "approve"` under `[mcp_servers.replyslip]` in `~/.codex/config.toml`.
+- **Claude Code and Codex** ask whether to trust the folder on first launch. Launch each agent once in its pane and accept before relying on wakes.
+
 `npx replyslip --help` lists every command and flag.
 
 ## Full setup
