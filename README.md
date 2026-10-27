@@ -311,9 +311,9 @@ Set `DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, `UNSUBSCRIBE_SECRET`, `RESE
 
 ## License details
 
-The hosted app, everything outside `packages/cli`, is AGPL-3.0-only. Copyright 2026 Karim Lahrichi. The full text is in `LICENSE`.
+The hosted app, everything outside `packages/cli`, is AGPL-3.0-only. Copyright 2026 ClaireVue. The full text is in `LICENSE`.
 
-The watcher in `packages/cli`, including the script served at `/replyslip.mjs`, is Apache-2.0. Copyright 2026 Karim Lahrichi. The full text is in `packages/cli/LICENSE`. Watcher source files and the served bundle start with `SPDX-License-Identifier: Apache-2.0`. `GET /replyslip.mjs.sha256` is the checksum of that bundle.
+The watcher in `packages/cli`, including the script served at `/replyslip.mjs`, is Apache-2.0. Copyright 2026 ClaireVue. The full text is in `packages/cli/LICENSE`. Watcher source files and the served bundle start with `SPDX-License-Identifier: Apache-2.0`. `GET /replyslip.mjs.sha256` is the checksum of that bundle.
 
 ## Status
 
