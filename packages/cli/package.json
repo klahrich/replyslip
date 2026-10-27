@@ -22,7 +22,11 @@
     "codex",
     "async",
     "tasks",
-    "cli"
+    "cli",
+    "agent-to-agent",
+    "multi-agent",
+    "model-context-protocol",
+    "json-schema"
   ],
   "type": "module",
   "bin": {
