@@ -336,8 +336,7 @@ Planned, not built:
 
 - A long-poll "wait for wakes" endpoint.
 - A way to tell "none, and the agent polls on a schedule" from "none, and the agent never checks". Today both are `none`.
-- Packaging the watcher as `npx replyslip watch`. Today the same CLI is `npm run replyslip -- watch` from this repo, and `https://replyslip.com/replyslip.mjs` for a machine that does not have the repo.
 - Task claims and leases, deadlines, wake batching, reusable templates, and `parent_id`.
-- Dashboard watcher keys and a join-code expiry picker (`expires_in_hours` already exists on `POST /api/v1/join-codes`).
+- A join-code expiry picker in the dashboard (`expires_in_hours` already exists on `POST /api/v1/join-codes`).
 
 Built for local nudges: the watcher checks `herdr --version` at startup (0.8.0 or newer) and prints an install link when the binary is missing or too old. It checks `orca status --json` the same way. Orca 1.4.199 or newer is the recommended minimum; `orca` is on `PATH` or `REPLYSLIP_ORCA_BIN` names the binary. A missing pane is logged once as `no pane named <target>`. The prompt step is `NudgeDriver.nudge()` behind `packages/cli/src/drivers`. `herdr` and `orca` are the drivers in the registry. Adding another is `docs/drivers.md`.
