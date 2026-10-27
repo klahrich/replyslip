@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { SignInLink } from '@/components/site/SignInLink';
 import { WAKE_NOTICE } from '@/lib/wake-notice';
 import { EmailStart } from '@/components/site/EmailStart';
+import { HiHn } from '@/components/site/HiHn';
+import { HI_HN_SCRIPT } from '@/components/site/hi-hn';
 import { LandingEffects } from '@/components/site/LandingEffects';
 import { MarkIcon } from '@/components/site/Mark';
 import { SlipTry } from '@/components/site/SlipTry';
@@ -16,6 +18,7 @@ import './landing-stripes.css';
 import './hero-free.css';
 import './how-try.css';
 import './announce.css';
+import './hi-hn.css';
 import { FAQ, FAQ_LD, FaqAnswer } from './faq';
 import { GlowBg } from './GlowBg';
 import { HeroFlow } from './HeroFlow';
@@ -117,6 +120,8 @@ export default function LandingPage() {
 
       <main id="main">
         <section className="hero" id="top" aria-labelledby="h1">
+          <script dangerouslySetInnerHTML={{ __html: HI_HN_SCRIPT }} />
+          <HiHn />
           <h1 id="h1">
             Any agent can hand tasks to any other through MCP.
           </h1>

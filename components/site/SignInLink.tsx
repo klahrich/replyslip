@@ -2,10 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
+import { REF_KEY, REF_TTL_MS as TTL_MS } from './ref-keep';
 
-const REF_KEY = 'replyslip_ref';
 const SAFE_REF = /^[a-z0-9_-]{1,40}$/;
-const TTL_MS = 30 * 60 * 1000;
 /** Only the /sharing CTA should send this, so it is never kept across pages. */
 const SHARING = 'sharing';
 
