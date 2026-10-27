@@ -1,18 +1,23 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
-const root = process.cwd();
+// Repo root, so `npm run build` in packages/cli and `node scripts/...` at the root both work.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outfile = path.join(root, 'packages/cli/replyslip.mjs');
 const check = process.argv.includes('--check');
+const { version } = JSON.parse(readFileSync(path.join(root, 'packages/cli/package.json'), 'utf8'));
 
 const result = await build({
   entryPoints: [path.join(root, 'packages/cli/src/index.ts')],
+  absWorkingDir: root,
   bundle: true,
   platform: 'node',
   format: 'esm',
   target: 'node18',
+  define: { __REPLYSLIP_VERSION__: JSON.stringify(version) },
   banner: { js: '#!/usr/bin/env node\n// SPDX-License-Identifier: Apache-2.0' },
   legalComments: 'none',
   logLevel: 'silent',

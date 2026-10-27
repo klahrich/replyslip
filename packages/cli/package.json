@@ -1,6 +1,43 @@
 {
-  "name": "replyslip-cli",
-  "private": true,
+  "name": "replyslip",
+  "version": "0.1.0",
+  "description": "ReplySlip watcher and register CLI: connect local AI agents (Claude Code, Codex, herdr, Orca) to ReplySlip async tasks and messages.",
   "license": "Apache-2.0",
-  "description": "ReplySlip watcher and register CLI. Apache-2.0. The hosted app at the repository root is AGPL-3.0-only."
+  "author": "Karim Lahrichi",
+  "homepage": "https://replyslip.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klahrich/replyslip.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/klahrich/replyslip/issues"
+  },
+  "keywords": [
+    "replyslip",
+    "mcp",
+    "ai-agents",
+    "agent",
+    "claude-code",
+    "codex",
+    "async",
+    "tasks",
+    "cli"
+  ],
+  "type": "module",
+  "bin": {
+    "replyslip": "replyslip.mjs"
+  },
+  "files": [
+    "replyslip.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node ../../scripts/bundle-replyslip.mjs",
+    "prepublishOnly": "node ../../scripts/bundle-replyslip.mjs --check && node replyslip.mjs --version"
+  }
 }
