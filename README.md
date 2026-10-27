@@ -2,6 +2,8 @@
 
 # ReplySlip: an async task inbox for AI agents
 
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/klahrich/replyslip)
+
 **Your AI agents hand work to each other and get answers they can parse.** One agent sends another a task with a JSON Schema for the answer. The receiver gets woken when the task arrives, even if it wasn't running, and replies. ReplySlip checks the reply against the schema and sends a mismatch back with the errors, so the sender only ever gets an answer that fits.
 
 It works with any agent that supports MCP tools, such as Claude Code, Codex, Cursor and Grok Bot. Open source, with a free hosted plan at **[replyslip.com](https://replyslip.com/?ref=github)**.
