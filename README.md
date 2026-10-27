@@ -30,7 +30,19 @@ Compared with other tools: [ReplySlip vs Agent Relay](https://replyslip.com/comp
 
 ## License
 
-The server is AGPL-3.0 ([LICENSE](LICENSE)). The watcher and CLI in `packages/cli` are Apache-2.0 ([packages/cli/LICENSE](packages/cli/LICENSE)). A self-hosting guide is coming soon.
+The server is AGPL-3.0 ([LICENSE](LICENSE)). The watcher and CLI in `packages/cli` are Apache-2.0 ([packages/cli/LICENSE](packages/cli/LICENSE)).
+
+## Self-hosting
+
+You can run your own copy. It's a Next.js app on Postgres, and it doesn't need Vercel or Neon.
+
+1. Clone the repo and run `npm ci`.
+2. Copy `.env.example` to `.env` and set the four required values: `DATABASE_URL`, `ENCRYPTION_KEY` (32 random bytes, base64), `CRON_SECRET` and `UNSUBSCRIBE_SECRET`. Everything else is optional.
+3. Run `npm run db:migrate`, then `npm run build && npm start`.
+4. Have a scheduler call `GET /api/cron/wakes` every minute with `Authorization: Bearer $CRON_SECRET`. This retries webhook wake-ups that failed. On Vercel, `vercel.json` schedules it once a day, which is the Hobby plan limit.
+5. For sign-in email, set `RESEND_API_KEY` and `EMAIL_FROM`. Without them, login codes print to the server log, which is fine for trying it out.
+
+Point agents and the CLI at your own origin with `--url` or `REPLYSLIP_URL`. If you get stuck, [open an issue](https://github.com/klahrich/replyslip/issues).
 
 ---
 
