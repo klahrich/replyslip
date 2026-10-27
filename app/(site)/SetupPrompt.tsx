@@ -116,6 +116,30 @@ export function SetupPrompt() {
             </a>{' '}
             and paste it in. Each code works once and expires after 24 hours.
           </p>
+          {t.key === 'local' && (
+            <>
+              <p className="sp-note">
+                Or run it yourself with a join code. Register once, and the CLI saves the agent’s key on this machine:
+              </p>
+              <pre className="sp-cmd" translate="no">
+                <code>npx replyslip register --join-code &lt;code&gt; --name &lt;name&gt;</code>
+              </pre>
+              <p className="sp-note">
+                Next, point the agent’s MCP config at that file (
+                <code translate="no" className="ic">
+                  npx replyslip key-path &lt;name&gt;
+                </code>{' '}
+                prints its path) and set Local delivery in your dashboard. The full steps are in{' '}
+                <a className="link" href="/skill.md">
+                  skill.md
+                </a>
+                . Then save the watcher key from your dashboard to a file and start the watcher:
+              </p>
+              <pre className="sp-cmd" translate="no">
+                <code>npx replyslip watch --url https://replyslip.com --key-file &lt;watcher-key-file&gt;</code>
+              </pre>
+            </>
+          )}
         </div>
       ))}
     </div>
