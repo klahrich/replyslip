@@ -1,0 +1,11 @@
+/* landing: one muted line above the h1, only for visitors from ?ref=hn. Shown before paint, so nothing shifts on load. */
+.lp .hi-hn{display:none}
+.hi-hn-on .lp .hi-hn{display:grid;grid-template-rows:1fr;margin:-10px 0 18px;transition:grid-template-rows 220ms var(--ease-out,ease),margin 220ms var(--ease-out,ease),opacity 160ms ease,visibility 0s 220ms}
+.lp .hi-hn>p{min-height:0;overflow:hidden;margin:0;display:flex;align-items:center;gap:4px;max-width:46em;font-size:var(--s-small);line-height:1.5;color:var(--muted)}
+.lp .hi-hn a{color:var(--ink)}
+.lp .hi-hn-x{flex:none;width:44px;height:44px;margin:-10px 0 -10px auto;background:none;border:0;border-radius:var(--r);color:var(--muted);font:400 1.25rem/1 var(--font);cursor:pointer}
+@media (hover:hover) and (pointer:fine){.lp .hi-hn-x:hover{color:var(--ink)}}
+.lp .hi-hn-x:focus-visible{outline:2px solid var(--focus);outline-offset:-4px}
+/* closing folds the line up instead of snapping */
+.hi-hn-on.hi-hn-off .lp .hi-hn{grid-template-rows:0fr;margin:0;opacity:0;visibility:hidden}
+@media (prefers-reduced-motion:reduce){.hi-hn-on .lp .hi-hn{transition:none}}
