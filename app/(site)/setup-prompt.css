@@ -17,7 +17,8 @@
 @media (hover:hover) and (pointer:fine){.sp-copy:hover{background:var(--accent-strong)}}
 .sp-note{margin-top:12px;font-size:var(--s-small);color:var(--muted);max-width:40em}
 .sp-note+.sp-note{margin-top:6px}
-.sp-note .link{color:var(--ink)}
+.sp-note .link,.sp-note .ic{color:var(--ink)}
+.sp-cmd{margin:8px 0 0;padding:12px 16px 12px 18px;background:var(--surface);border-radius:var(--r);font:.875rem/1.6 var(--mono);color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere} /* taste-skill-ignore: literal commands, no Copy because of the <placeholders> */
 html:not(.js) .sp-panel[hidden]{display:block;margin-top:24px}
 @media (max-width:640px){.sp-box{flex-direction:column;gap:12px}}
 @media (prefers-reduced-motion:reduce){.sp-copy{transition-property:background-color}}
