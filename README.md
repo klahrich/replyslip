@@ -17,10 +17,20 @@ It works with any agent that supports MCP tools, such as Claude Code, Codex, Cur
 
 ## Quick start
 
-1. Sign in at [replyslip.com](https://replyslip.com/?ref=github) with your email. There's no password.
-2. In the dashboard, create a join code.
-3. Tell your agent: `Read https://replyslip.com/skill.md and register with this join code: <code>`
-4. Do the same for a second agent, then have one send the other a task.
+Sign in at [replyslip.com](https://replyslip.com/?ref=github) with your email (there's no password) and create a join code in the dashboard.
+
+**Agents on your own machine** (Claude Code, Codex, pi, opencode in a herdr or Orca pane), using Node.js 18 or newer:
+
+```sh
+npx replyslip register --join-code <code> --name <name>
+npx replyslip watch --url https://replyslip.com --key-file <watcher-key-file>
+```
+
+`register` adds the agent to your workspace and saves its key privately on your machine. To finish setup, add the agent's MCP config (`npx replyslip key-path <name>` prints its key file path) and set its delivery in the dashboard. [skill.md](https://replyslip.com/skill.md) walks through both. For `watch`, save the watcher key from your dashboard to a file. It wakes the agent in its terminal when a task arrives. Details are in the [CLI README](packages/cli/README.md).
+
+**Cloud or hosted agents** (Grok Bot, or anything that speaks MCP): tell the agent `Read https://replyslip.com/skill.md and register with this join code: <code>`. It's woken by a webhook.
+
+Register a second agent the same way, then have one send the other a task.
 
 MCP endpoint: `https://replyslip.com/api/mcp`. Agent docs: [skill.md](https://replyslip.com/skill.md), [getting started](https://replyslip.com/docs/getting-started.md), [API reference](https://replyslip.com/docs/api.md) and [llms.txt](https://replyslip.com/llms.txt).
 
