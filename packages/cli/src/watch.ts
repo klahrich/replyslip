@@ -129,6 +129,19 @@ export class WatcherAuthError extends Error {
   }
 }
 
+/** The first poll found no ReplySlip API at this origin (404, or a 2xx body that is not JSON). */
+export class WatcherNotFoundError extends Error {
+  constructor(origin: string) {
+    super(`No ReplySlip server at ${origin}. Check --url.`);
+    this.name = 'WatcherNotFoundError';
+  }
+}
+
+/** True when a failed poll means the origin is not a ReplySlip server at all. */
+function notReplyslip(err: WatcherPollError): boolean {
+  return err.step === 'poll' && (err.reason === '404' || err.reason === 'invalid JSON');
+}
+
 /** A network error, timeout, or non-auth HTTP failure. The watcher backs off and polls again. */
 export class WatcherPollError extends Error {
   constructor(
@@ -206,6 +219,8 @@ export async function watch(options: {
   let hold: WatcherLockHold | null = null;
   let unbind: (() => void) | null = null;
   let failures = 0;
+  /** Until one poll succeeds, a 404 or a non-JSON body means a wrong --url, so the watcher exits. */
+  let polledOk = false;
 
   try {
     while (!options.signal?.aborted) {
@@ -215,12 +230,15 @@ export async function watch(options: {
           method: 'POST',
           headers,
         });
-        let payload: { wakes?: DueWake[]; workspace_id?: unknown };
+        let parsed: unknown;
         try {
-          payload = (await response.json()) as typeof payload;
+          parsed = await response.json();
         } catch {
           throw new WatcherPollError('poll', 'invalid JSON');
         }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new WatcherPollError('poll', 'invalid JSON');
+        const payload = parsed as { wakes?: unknown; workspace_id?: unknown };
+        polledOk = true;
         const workspaceId = typeof payload.workspace_id === 'string' && payload.workspace_id ? payload.workspace_id : null;
         if (options.lock && !hold) {
           const acquired = acquireWatcherLock({
@@ -235,7 +253,7 @@ export async function watch(options: {
           unbind = bindWatcherLockLifecycle(hold.release);
           log(`[replyslip] watching ${base}${workspaceId ? ` (workspace ${workspaceId})` : ''}`);
         }
-        const acked = await nudgeWakes({ wakes: payload.wakes ?? [], registry, checks, warned, log });
+        const acked = await nudgeWakes({ wakes: Array.isArray(payload.wakes) ? (payload.wakes as DueWake[]) : [], registry, checks, warned, log });
         if (acked.length > 0) {
           await relayRequest(fetchImpl, 'ack', `${base}/api/v1/watcher/ack`, base, {
             method: 'POST',
@@ -246,6 +264,7 @@ export async function watch(options: {
         if (failures > 0) log(`[replyslip] ${base} reachable again`);
         failures = 0;
       } catch (err) {
+        if (err instanceof WatcherPollError && !polledOk && notReplyslip(err)) throw new WatcherNotFoundError(base);
         if (!(err instanceof WatcherPollError) || options.once) throw err;
         failures += 1;
         delay = backoffDelay(options.intervalMs, failures);

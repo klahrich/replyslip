@@ -215,4 +215,59 @@ describe('replyslip watch resilience', () => {
     expect(await runReplyslip(['watch', '--status'], { home, stdout: (line) => out.push(line), stderr: () => undefined })).toBe(0);
     expect(out).toEqual([`A ReplySlip watcher is running for workspace ws-a (pid ${process.pid}, origin https://a.example).`]);
   });
+
+  it('exits 1 when the first poll gets a 404 or an HTML page', async () => {
+    const responses = [
+      () => new Response('<html>Not Found</html>', { status: 404, headers: { 'content-type': 'text/html' } }),
+      () => new Response('<!doctype html><title>Some site</title>', { status: 200, headers: { 'content-type': 'text/html' } }),
+    ];
+    for (const respond of responses) {
+      const err: string[] = [];
+      let polls = 0;
+      const home = await mkdtemp(path.join(tmpdir(), 'replyslip-404-'));
+      const code = await runReplyslip(['watch', '--url', `${ORIGIN}/`, '--key', KEY], {
+        home,
+        stdout: () => undefined,
+        stderr: (line) => err.push(line),
+        fetchImpl: async () => {
+          polls += 1;
+          return respond();
+        },
+      });
+      expect(code).toBe(1);
+      expect(polls).toBe(1);
+      expect(err).toEqual([`No ReplySlip server at ${ORIGIN}. Check --url.`]);
+    }
+  });
+
+  it('keeps retrying a 404 after a good poll', async () => {
+    const controller = new AbortController();
+    const logs: string[] = [];
+    const delays: number[] = [];
+    let polls = 0;
+    const result = await watch({
+      url: ORIGIN,
+      key: KEY,
+      intervalMs: 1000,
+      log: (line) => logs.push(line),
+      registry: createRegistry([]),
+      sleep: async (ms) => {
+        delays.push(ms);
+      },
+      signal: controller.signal,
+      fetchImpl: async () => {
+        polls += 1;
+        if (polls === 1) return json({ wakes: [], workspace_id: 'ws-1' });
+        if (polls === 2) return new Response('not found', { status: 404 });
+        if (polls === 3) return new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+        controller.abort();
+        return json({ wakes: [] });
+      },
+    });
+    expect(result).toEqual({});
+    expect(polls).toBe(4);
+    expect(delays).toEqual([1000, 1000, 2000, 1000]);
+    expect(logs).toContain('[replyslip] poll failed (404), retrying in 1s');
+    expect(logs).toContain('[replyslip] poll failed (invalid JSON), retrying in 2s');
+  });
 });
