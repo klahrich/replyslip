@@ -126,7 +126,7 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
   if (argv.includes('--status')) {
     const live = listLiveWatcherLocks(io.home);
     if (live.length === 0) stdout(WATCHER_NOT_RUNNING_MESSAGE);
-    else for (const lock of live) stdout(runningStatusMessage(lock.pid, lock.origin));
+    else for (const lock of live) stdout(runningStatusMessage(lock.pid, lock.origin, lock.workspaceId));
     return 0;
   }
 
@@ -150,14 +150,21 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     stderr('--interval must be at least 500 milliseconds.');
     return 1;
   }
-  const result = await watch({
-    url,
-    key,
-    intervalMs,
-    once: argv.includes('--once'),
-    fetchImpl: io.fetchImpl,
-    lock: { home: io.home, force: argv.includes('--force') },
-  });
+  let result: { blockedPid?: number };
+  try {
+    result = await watch({
+      url,
+      key,
+      intervalMs,
+      once: argv.includes('--once'),
+      fetchImpl: io.fetchImpl,
+      log: io.stderr,
+      lock: { home: io.home, force: argv.includes('--force') },
+    });
+  } catch (err) {
+    stderr(err instanceof Error ? err.message : 'Watcher stopped.');
+    return 1;
+  }
   if (result.blockedPid !== undefined) stdout(alreadyRunningMessage(result.blockedPid));
   return 0;
 }

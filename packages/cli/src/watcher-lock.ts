@@ -12,6 +12,8 @@ export type WatcherLockInfo = {
   hostname: string;
   bootId: string;
   origin: string;
+  /** Workspace id from the first poll. Not a secret. Older locks omit it. */
+  workspaceId?: string;
 };
 
 export type WatcherLockHold = {
@@ -67,8 +69,9 @@ export function alreadyRunningMessage(pid: number): string {
   return `A ReplySlip watcher is already running for this workspace (pid ${pid}); it delivers every local agent in this workspace.`;
 }
 
-export function runningStatusMessage(pid: number, origin: string): string {
-  return `A ReplySlip watcher is running for this workspace (pid ${pid}, origin ${origin}).`;
+export function runningStatusMessage(pid: number, origin: string, workspaceId?: string): string {
+  const scope = workspaceId ? `workspace ${workspaceId}` : 'this workspace';
+  return `A ReplySlip watcher is running for ${scope} (pid ${pid}, origin ${origin}).`;
 }
 
 export const WATCHER_NOT_RUNNING_MESSAGE = 'No ReplySlip watcher is running for this workspace.';
@@ -104,6 +107,7 @@ export function readWatcherLock(file: string): WatcherLockInfo | null {
       hostname?: unknown;
       bootId?: unknown;
       origin?: unknown;
+      workspaceId?: unknown;
     };
     if (typeof parsed.pid !== 'number' || !Number.isInteger(parsed.pid) || parsed.pid <= 0) return null;
     if (typeof parsed.startedAt !== 'string' || parsed.startedAt.trim() === '') return null;
@@ -113,6 +117,7 @@ export function readWatcherLock(file: string): WatcherLockInfo | null {
       hostname: typeof parsed.hostname === 'string' ? parsed.hostname : '',
       bootId: typeof parsed.bootId === 'string' ? parsed.bootId : '',
       origin: typeof parsed.origin === 'string' ? parsed.origin : '',
+      ...(typeof parsed.workspaceId === 'string' && parsed.workspaceId ? { workspaceId: parsed.workspaceId } : {}),
     };
   } catch {
     return null;
@@ -176,7 +181,14 @@ export function acquireWatcherLock(options: AcquireWatcherLockOptions): AcquireW
     bootId: options.bootId ?? machineBootId(),
   };
   const isAlive = options.isAlive ?? pidIsAlive;
-  const identity: WatcherLockInfo = { pid, startedAt, hostname: self.hostname, bootId: self.bootId, origin };
+  const identity: WatcherLockInfo = {
+    pid,
+    startedAt,
+    hostname: self.hostname,
+    bootId: self.bootId,
+    origin,
+    ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+  };
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 
   const first = attempt(file, identity, self, isAlive, Boolean(options.force), true, options);

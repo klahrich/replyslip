@@ -97,6 +97,7 @@ describe('watcher lock', () => {
       hostname: hostname(),
       bootId: machineBootId(),
       origin: ORIGIN,
+      workspaceId: 'ws-1',
     });
     const info = await stat(acquired.hold.path);
     expect(info.mode & 0o077).toBe(0);

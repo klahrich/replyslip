@@ -11,7 +11,7 @@ export function POST(req: Request) {
     const token = bearerToken(req);
     if (!token) throw new HttpError(401, 'unauthorized', 'Watcher key required.');
     const watcher = await authenticateWatcherKey(token);
-    if (!watcher) throw new HttpError(401, 'unauthorized', 'Watcher key required.');
+    if (!watcher) throw new HttpError(401, 'unauthorized', 'Watcher key rejected. Check the key in your dashboard.');
     await recordWatcherSeen(watcher.keyId);
     const wakes = await leaseHerdrWakes(watcher.workspaceId);
     return json({ wakes, workspace_id: watcher.workspaceId });

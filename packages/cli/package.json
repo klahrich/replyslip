@@ -1,6 +1,6 @@
 {
   "name": "replyslip",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ReplySlip watcher and register CLI: connect local AI agents (Claude Code, Codex, herdr, Orca) to ReplySlip async tasks and messages.",
   "license": "Apache-2.0",
   "author": "Karim Lahrichi",

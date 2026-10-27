@@ -71,7 +71,6 @@ describe('replyslip watch', () => {
 
     expect(calls).toEqual([
       ['--version'],
-      ['status', '--json'],
       ['agent', 'prompt', 'evaluator', WAKE_NOTICE],
     ]);
     expect(JSON.stringify(calls)).not.toContain('CANARY');

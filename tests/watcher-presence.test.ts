@@ -51,6 +51,7 @@ describe('watcher last_seen', () => {
 
     const denied = await call(poll, 'http://localhost/api/v1/watcher/poll', { bearer: agentKey });
     expect(denied.status).toBe(401);
+    expect(denied.data.error.message).toBe('Watcher key rejected. Check the key in your dashboard.');
     const deniedAck = await call(ack, 'http://localhost/api/v1/watcher/ack', {
       bearer: agentKey,
       body: { wake_ids: [] },

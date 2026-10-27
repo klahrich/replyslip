@@ -633,8 +633,9 @@ function watcherLockPath(home, scopeId) {
 function alreadyRunningMessage(pid) {
   return `A ReplySlip watcher is already running for this workspace (pid ${pid}); it delivers every local agent in this workspace.`;
 }
-function runningStatusMessage(pid, origin) {
-  return `A ReplySlip watcher is running for this workspace (pid ${pid}, origin ${origin}).`;
+function runningStatusMessage(pid, origin, workspaceId) {
+  const scope = workspaceId ? `workspace ${workspaceId}` : "this workspace";
+  return `A ReplySlip watcher is running for ${scope} (pid ${pid}, origin ${origin}).`;
 }
 var WATCHER_NOT_RUNNING_MESSAGE = "No ReplySlip watcher is running for this workspace.";
 function roundedBootId(nowMs, uptimeSeconds) {
@@ -665,7 +666,8 @@ function readWatcherLock(file) {
       startedAt: parsed.startedAt,
       hostname: typeof parsed.hostname === "string" ? parsed.hostname : "",
       bootId: typeof parsed.bootId === "string" ? parsed.bootId : "",
-      origin: typeof parsed.origin === "string" ? parsed.origin : ""
+      origin: typeof parsed.origin === "string" ? parsed.origin : "",
+      ...typeof parsed.workspaceId === "string" && parsed.workspaceId ? { workspaceId: parsed.workspaceId } : {}
     };
   } catch {
     return null;
@@ -717,7 +719,14 @@ function acquireWatcherLock(options) {
     bootId: options.bootId ?? machineBootId()
   };
   const isAlive = options.isAlive ?? pidIsAlive;
-  const identity = { pid, startedAt, hostname: self.hostname, bootId: self.bootId, origin };
+  const identity = {
+    pid,
+    startedAt,
+    hostname: self.hostname,
+    bootId: self.bootId,
+    origin,
+    ...options.workspaceId ? { workspaceId: options.workspaceId } : {}
+  };
   mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
   const first = attempt(file, identity, self, isAlive, Boolean(options.force), true, options);
   if (first !== "lost") return first;
@@ -834,16 +843,17 @@ function resolveWake(wake) {
   if (!driver || !target) return null;
   return { driver, target };
 }
-async function checkDrivers(registry, log = console.error) {
-  const checks = /* @__PURE__ */ new Map();
-  for (const driver of registry.list()) {
-    const result = await driver.check();
-    checks.set(driver.id, result);
-    log(
-      result.ok ? `[replyslip] driver ${driver.id}: ok${result.version ? ` (${result.version})` : ""}` : `[replyslip] driver ${driver.id}: ${result.message ?? "check failed"}`
-    );
-  }
-  return checks;
+async function ensureDriverCheck(driver, checks, log = console.error) {
+  const cached = checks.get(driver.id);
+  if (cached?.ok) return cached;
+  const result = await driver.check();
+  checks.set(driver.id, result);
+  if (result.ok) log(`[replyslip] driver ${driver.id}: ok${result.version ? ` (${result.version})` : ""}`);
+  return result;
+}
+function wakeLabel(wake) {
+  if (wake.task_id) return `task ${wake.task_id.slice(0, 8)}`;
+  return wake.reason ? wake.reason : `wake ${wake.id.slice(0, 8)}`;
 }
 async function nudgeWakes(options) {
   const log = options.log ?? console.error;
@@ -866,20 +876,21 @@ async function nudgeWakes(options) {
       );
       continue;
     }
-    const check = options.checks.get(driver.id);
-    if (!check?.ok) {
+    const check = await ensureDriverCheck(driver, options.checks, log);
+    if (!check.ok) {
       warnOnce(
         options.warned,
         key,
         "check",
         log,
-        `[replyslip] wake ${wake.id} driver ${driver.id}: ${check?.message ?? "driver check failed"}; not acked`
+        `[replyslip] wake ${wake.id} driver ${driver.id}: ${check.message ?? "driver check failed"}; not acked`
       );
       continue;
     }
     const result = await driver.nudge(resolved.target, nudgeText(wake));
     if (result.ok) {
       acked.push(wake.id);
+      log(`[replyslip] woke ${wake.agent_name || resolved.target} via ${driver.id} (${wakeLabel(wake)})`);
       continue;
     }
     warnOnce(
@@ -898,63 +909,121 @@ function warnOnce(warned, key, kind, log, message) {
   warned.add(slot);
   log(message);
 }
+var MAX_BACKOFF_MS = 6e4;
+var REQUEST_TIMEOUT_MS = 3e4;
+var WatcherAuthError = class extends Error {
+  constructor(origin) {
+    super(`Watcher key rejected by ${origin}. Check the key in your dashboard.`);
+    this.name = "WatcherAuthError";
+  }
+};
+var WatcherNotFoundError = class extends Error {
+  constructor(origin) {
+    super(`No ReplySlip server at ${origin}. Check --url.`);
+    this.name = "WatcherNotFoundError";
+  }
+};
+function notReplyslip(err) {
+  return err.step === "poll" && (err.reason === "404" || err.reason === "invalid JSON");
+}
+var WatcherPollError = class extends Error {
+  constructor(step, reason, detail) {
+    super(`Watcher ${step} failed (${reason})${detail ? `: ${detail}` : ""}`);
+    this.step = step;
+    this.reason = reason;
+    this.name = "WatcherPollError";
+  }
+};
+function backoffDelay(intervalMs, failures) {
+  const exponent = Math.max(0, failures - 1);
+  return Math.min(MAX_BACKOFF_MS, intervalMs * 2 ** Math.min(exponent, 20));
+}
+function formatDelay(ms) {
+  return `${Number((ms / 1e3).toFixed(1))}s`;
+}
+function networkReason(err) {
+  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return "timeout";
+  const message = err instanceof Error ? err.message : String(err);
+  return message.split("\n")[0]?.slice(0, 80) || "network error";
+}
+async function relayRequest(fetchImpl, step, url, origin, init) {
+  let response;
+  try {
+    const signal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : void 0;
+    response = await fetchImpl(url, { ...init, signal });
+  } catch (err) {
+    throw new WatcherPollError(step, networkReason(err));
+  }
+  if (response.ok) return response;
+  if (response.status === 401 || response.status === 403) throw new WatcherAuthError(origin);
+  const text = await response.text().catch(() => "");
+  throw new WatcherPollError(step, String(response.status), text.slice(0, 200) || void 0);
+}
+var defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function watch(options) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const log = options.log ?? console.error;
+  const sleep = options.sleep ?? defaultSleep;
   const registry = options.registry ?? defaultRegistry(options.runCommand);
   const base = options.url.replace(/\/$/, "");
-  const checks = await checkDrivers(registry, log);
+  const checks = /* @__PURE__ */ new Map();
   const warned = /* @__PURE__ */ new Set();
+  const headers = { authorization: `Bearer ${options.key}` };
   let hold = null;
   let unbind = null;
+  let failures = 0;
+  let polledOk = false;
   try {
-    do {
-      const response = await fetchImpl(`${base}/api/v1/watcher/poll`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${options.key}` }
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Watcher poll failed (${response.status}): ${text.slice(0, 200)}`);
-      }
-      const payload = await response.json();
-      if (options.lock && !hold) {
-        const workspaceId = typeof payload.workspace_id === "string" && payload.workspace_id ? payload.workspace_id : null;
-        const acquired = acquireWatcherLock({
-          home: options.lock.home,
-          force: options.lock.force,
-          origin: base,
-          workspaceId,
-          watcherKey: options.key
-        });
-        if (!acquired.ok) return { blockedPid: acquired.pid };
-        hold = acquired.hold;
-        unbind = bindWatcherLockLifecycle(hold.release);
-      }
-      const acked = await nudgeWakes({
-        wakes: payload.wakes ?? [],
-        registry,
-        checks,
-        warned,
-        log
-      });
-      if (acked.length > 0) {
-        const ack = await fetchImpl(`${base}/api/v1/watcher/ack`, {
+    while (!options.signal?.aborted) {
+      let delay = options.intervalMs;
+      try {
+        const response = await relayRequest(fetchImpl, "poll", `${base}/api/v1/watcher/poll`, base, {
           method: "POST",
-          headers: {
-            authorization: `Bearer ${options.key}`,
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({ wake_ids: acked })
+          headers
         });
-        if (!ack.ok) {
-          const text = await ack.text();
-          throw new Error(`Watcher ack failed (${ack.status}): ${text.slice(0, 200)}`);
+        let parsed;
+        try {
+          parsed = await response.json();
+        } catch {
+          throw new WatcherPollError("poll", "invalid JSON");
         }
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new WatcherPollError("poll", "invalid JSON");
+        const payload = parsed;
+        polledOk = true;
+        const workspaceId = typeof payload.workspace_id === "string" && payload.workspace_id ? payload.workspace_id : null;
+        if (options.lock && !hold) {
+          const acquired = acquireWatcherLock({
+            home: options.lock.home,
+            force: options.lock.force,
+            origin: base,
+            workspaceId,
+            watcherKey: options.key
+          });
+          if (!acquired.ok) return { blockedPid: acquired.pid };
+          hold = acquired.hold;
+          unbind = bindWatcherLockLifecycle(hold.release);
+          log(`[replyslip] watching ${base}${workspaceId ? ` (workspace ${workspaceId})` : ""}`);
+        }
+        const acked = await nudgeWakes({ wakes: Array.isArray(payload.wakes) ? payload.wakes : [], registry, checks, warned, log });
+        if (acked.length > 0) {
+          await relayRequest(fetchImpl, "ack", `${base}/api/v1/watcher/ack`, base, {
+            method: "POST",
+            headers: { ...headers, "content-type": "application/json" },
+            body: JSON.stringify({ wake_ids: acked })
+          });
+        }
+        if (failures > 0) log(`[replyslip] ${base} reachable again`);
+        failures = 0;
+      } catch (err) {
+        if (err instanceof WatcherPollError && !polledOk && notReplyslip(err)) throw new WatcherNotFoundError(base);
+        if (!(err instanceof WatcherPollError) || options.once) throw err;
+        failures += 1;
+        delay = backoffDelay(options.intervalMs, failures);
+        log(`[replyslip] ${err.step} failed (${err.reason}), retrying in ${formatDelay(delay)}`);
       }
       if (options.once) return {};
-      await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
-    } while (!options.once);
+      await sleep(delay);
+    }
     return {};
   } finally {
     unbind?.();
@@ -963,7 +1032,7 @@ async function watch(options) {
 }
 
 // packages/cli/src/cli.ts
-var REPLYSLIP_VERSION = true ? "0.1.0" : "dev";
+var REPLYSLIP_VERSION = true ? "0.1.1" : "dev";
 var HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for ReplySlip (https://replyslip.com)
 
 Usage:
@@ -1060,7 +1129,7 @@ async function runReplyslip(argv, io = {}) {
   if (argv.includes("--status")) {
     const live = listLiveWatcherLocks(io.home);
     if (live.length === 0) stdout(WATCHER_NOT_RUNNING_MESSAGE);
-    else for (const lock of live) stdout(runningStatusMessage(lock.pid, lock.origin));
+    else for (const lock of live) stdout(runningStatusMessage(lock.pid, lock.origin, lock.workspaceId));
     return 0;
   }
   const url = flag(argv, "--url") ?? env.REPLYSLIP_URL;
@@ -1083,14 +1152,21 @@ async function runReplyslip(argv, io = {}) {
     stderr("--interval must be at least 500 milliseconds.");
     return 1;
   }
-  const result = await watch({
-    url,
-    key,
-    intervalMs,
-    once: argv.includes("--once"),
-    fetchImpl: io.fetchImpl,
-    lock: { home: io.home, force: argv.includes("--force") }
-  });
+  let result;
+  try {
+    result = await watch({
+      url,
+      key,
+      intervalMs,
+      once: argv.includes("--once"),
+      fetchImpl: io.fetchImpl,
+      log: io.stderr,
+      lock: { home: io.home, force: argv.includes("--force") }
+    });
+  } catch (err) {
+    stderr(err instanceof Error ? err.message : "Watcher stopped.");
+    return 1;
+  }
   if (result.blockedPid !== void 0) stdout(alreadyRunningMessage(result.blockedPid));
   return 0;
 }
