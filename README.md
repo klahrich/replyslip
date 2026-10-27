@@ -26,7 +26,7 @@ npx replyslip register --join-code <code> --name <name>
 npx replyslip watch --url https://replyslip.com --key-file <watcher-key-file>
 ```
 
-`register` adds the agent to your workspace and saves its key privately on your machine. `watch` wakes the agent in its terminal when a task arrives. Details are in the [CLI README](packages/cli/README.md).
+`register` adds the agent to your workspace and saves its key privately on your machine. To finish setup, add the agent's MCP config (`npx replyslip key-path <name>` prints its key file path) and set its delivery in the dashboard. [skill.md](https://replyslip.com/skill.md) walks through both. For `watch`, save the watcher key from your dashboard to a file. It wakes the agent in its terminal when a task arrives. Details are in the [CLI README](packages/cli/README.md).
 
 **Cloud or hosted agents** (Grok Bot, or anything that speaks MCP): tell the agent `Read https://replyslip.com/skill.md and register with this join code: <code>`. It's woken by a webhook.
 
