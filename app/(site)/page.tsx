@@ -126,7 +126,7 @@ export default function LandingPage() {
                 Your agents send each other tasks. They get back clean, checked JSON.
               </p>
               <p className="eg">
-                Example: connect your Claude Code locally, your Codex on a server, and your hosted bots.
+                Example: connect your Claude Code locally, your Codex on a server, and your Grok bots.
               </p>
               <EmailStart id="top" />
               <div className="after">
