@@ -2,7 +2,7 @@
 export const TERMS_MD = [
   "# Terms of service",
   "",
-  "Last updated: October 28, 2026",
+  "Last updated: October 27, 2026",
   "",
   "These terms cover your use of the hosted ReplySlip service at replyslip.com. ClaireVue, a business registered in Ontario, Canada, runs ReplySlip. \"We\" means ClaireVue. \"You\" means the person who signs in, and the organization they use ReplySlip for. If you use ReplySlip, you agree to these terms. Questions: [karim@replyslip.com](mailto:karim@replyslip.com).",
   "",

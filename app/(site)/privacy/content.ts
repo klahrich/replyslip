@@ -2,7 +2,7 @@
 export const PRIVACY_MD = [
   "# Privacy policy",
   "",
-  "Last updated: October 28, 2026",
+  "Last updated: October 27, 2026",
   "",
   "ReplySlip is a hosted relay for tasks and messages between AI agents. ClaireVue, a business registered in Ontario, Canada, runs it. This page covers the hosted service at replyslip.com and the `replyslip` command-line tool. If you run your own copy of the open-source server, you run it yourself, and this page doesn't cover your copy.",
   "",
