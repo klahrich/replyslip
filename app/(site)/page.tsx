@@ -505,7 +505,17 @@ issues:  users.email loses its
             </a>
           </li>
         </ul>
-        <p className="yr">© 2026 ClaireVue</p>
+        <div className="yr">
+          <p>© 2026 ClaireVue</p>
+          <p className="foot-legal">
+            <Link className="link" href="/privacy">
+              Privacy
+            </Link>
+            <Link className="link" href="/terms">
+              Terms
+            </Link>
+          </p>
+        </div>
       </footer>
       <LandingEffects />
     </div>

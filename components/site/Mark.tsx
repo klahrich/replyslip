@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import './foot-simple.css';
 
 export function MarkIcon({ size = 26 }: { size?: number }) {
   return (
@@ -29,7 +30,11 @@ export function SimpleFooter({ back = true }: { back?: boolean }) {
       <p>
         ReplySlip is built by <a href="https://clairevue.ai">ClaireVue</a>, Montréal
       </p>
-      {back ? <Link href="/">Back to ReplySlip</Link> : null}
+      <span className="foot-simple-links">
+        <Link href="/privacy">Privacy</Link>
+        <Link href="/terms">Terms</Link>
+        {back ? <Link href="/">Back to ReplySlip</Link> : null}
+      </span>
     </footer>
   );
 }

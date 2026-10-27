@@ -1,0 +1,2 @@
+/* SimpleFooter: the page links sit together on the right. */
+.foot-simple-links{display:flex;flex-wrap:wrap;gap:8px 24px}

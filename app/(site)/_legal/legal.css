@@ -1,0 +1,6 @@
+/* /privacy and /terms: the /compare article column with tighter section spacing for long reference pages. */
+.legal .cmp-body h1+p.legal-updated{margin-top:16px;font-size:var(--s-small);line-height:1.4;letter-spacing:0;color:var(--muted)}
+.legal .cmp-body h2{margin-top:clamp(44px,5vw,64px);font-size:var(--s-lead);line-height:1.2;letter-spacing:-.015em}
+.legal .cmp-body h2+p,.legal .cmp-body h2+ul{margin-top:14px}
+.legal .cmp-body ul{gap:8px}
+.legal .cmp-body p+p,.legal .cmp-body p+ul,.legal .cmp-body ul+p{margin-top:14px}
