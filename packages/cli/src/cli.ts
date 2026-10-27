@@ -11,6 +11,23 @@ import {
   runningStatusMessage,
 } from './watcher-lock.ts';
 
+/** Set by scripts/bundle-replyslip.mjs from packages/cli/package.json. Undefined under tsx. */
+declare const __REPLYSLIP_VERSION__: string | undefined;
+
+export const REPLYSLIP_VERSION = typeof __REPLYSLIP_VERSION__ === 'string' ? __REPLYSLIP_VERSION__ : 'dev';
+
+const HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for ReplySlip (https://replyslip.com)
+
+Usage:
+  replyslip register --join-code <code> --name <name> [--url <origin>] [--description <text>] [--force]
+  replyslip watch --url <origin> (--key-file <file> | --key <watcher-key>) [--interval <ms>] [--once] [--force]
+  replyslip watch --status
+  replyslip key-path <name>
+  replyslip --help | --version
+
+Environment: REPLYSLIP_URL, REPLYSLIP_WATCHER_KEY, REPLYSLIP_POLL_INTERVAL_MS, REPLYSLIP_ORCA_BIN.
+Agent setup guide: https://replyslip.com/skill.md`;
+
 export type CliIo = {
   env?: NodeJS.ProcessEnv;
   home?: string;
@@ -47,6 +64,15 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
   const stderr = io.stderr ?? ((line) => process.stderr.write(`${line}\n`));
   const env = io.env ?? process.env;
   const [command, ...rest] = positionals(argv);
+
+  if (argv.includes('--version') || argv.includes('-v') || command === 'version') {
+    stdout(REPLYSLIP_VERSION);
+    return 0;
+  }
+  if (argv.includes('--help') || argv.includes('-h') || command === 'help') {
+    stdout(HELP);
+    return 0;
+  }
 
   if (command === 'key-path') {
     const name = rest[0] ?? flag(argv, '--name');

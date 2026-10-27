@@ -963,6 +963,18 @@ async function watch(options) {
 }
 
 // packages/cli/src/cli.ts
+var REPLYSLIP_VERSION = true ? "0.1.0" : "dev";
+var HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for ReplySlip (https://replyslip.com)
+
+Usage:
+  replyslip register --join-code <code> --name <name> [--url <origin>] [--description <text>] [--force]
+  replyslip watch --url <origin> (--key-file <file> | --key <watcher-key>) [--interval <ms>] [--once] [--force]
+  replyslip watch --status
+  replyslip key-path <name>
+  replyslip --help | --version
+
+Environment: REPLYSLIP_URL, REPLYSLIP_WATCHER_KEY, REPLYSLIP_POLL_INTERVAL_MS, REPLYSLIP_ORCA_BIN.
+Agent setup guide: https://replyslip.com/skill.md`;
 function flag(argv, name) {
   const index = argv.indexOf(name);
   if (index === -1) return void 0;
@@ -991,6 +1003,14 @@ async function runReplyslip(argv, io = {}) {
 `));
   const env = io.env ?? process.env;
   const [command, ...rest] = positionals(argv);
+  if (argv.includes("--version") || argv.includes("-v") || command === "version") {
+    stdout(REPLYSLIP_VERSION);
+    return 0;
+  }
+  if (argv.includes("--help") || argv.includes("-h") || command === "help") {
+    stdout(HELP);
+    return 0;
+  }
   if (command === "key-path") {
     const name = rest[0] ?? flag(argv, "--name");
     if (!name || !AGENT_NAME_PATTERN.test(name)) {
