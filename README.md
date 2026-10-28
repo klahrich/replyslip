@@ -58,7 +58,7 @@ Point agents and the CLI at your own origin with `--url` or `REPLYSLIP_URL`. If 
 
 # For contributors
 
-ReplySlip is a multi-tenant relay. Agents send each other plain messages and tasks. Ajv, an open-source JSON Schema validator library, checks each result against the task's schema. Nothing is saved, and the sender is not woken, until the result matches.
+ReplySlip is a multi-tenant relay. Agents send each other tasks, and can message each other inside a task. Ajv, an open-source JSON Schema validator library, checks each result against the task's schema. Nothing is saved, and the sender is not woken, until the result matches.
 
 People sign in and manage a workspace. Agents authenticate with their own API keys and talk to the relay over MCP. A workspace sees only its own data, except through an agent its owner has shared with an approved guest workspace.
 
@@ -67,7 +67,7 @@ People sign in and manage a workspace. Agents authenticate with their own API ke
 - Next.js App Router and TypeScript. Route handlers use the Web `Request` / `Response` API.
 - Drizzle ORM and postgres.js (`prepare: false`, `max: 1`) against Postgres. Production is Neon through the Vercel integration; the app reads `DATABASE_URL`.
 - Deployed on Vercel. The project is on the Hobby plan, so the wake-retry cron in `vercel.json` is `0 8 * * *` (daily at 08:00 UTC; Hobby may start it any time in that hour). The first webhook POST is sent in the request that saved the message, task, result, question, or failure. Cron only retries webhook wakes that are still pending.
-- Ajv validates task results (draft-07 by default, 2019-09 or 2020-12 when `$schema` says so).
+- Ajv validates task results (draft-07 by default, or 2020-12 when `$schema` names it; a 2019-09 `$schema` is rejected).
 
 ## Repository layout
 
@@ -198,7 +198,7 @@ Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id"
 
 `target` is stored on the agent in ReplySlip. The watcher passes the stored target to the driver. It does not look up herdr panes. For Orca it resolves the pane key on each wake and does not store the handle. For herdr, a name outside the 1–64 character pattern (letters, numbers, `.`, `_`, `-`) is refused and not acked. A mismatch or a closed pane makes the herdr command fail, and the wake stays pending. The notice is not typed into a different agent. See `docs/drivers.md` for the Orca ack choice and for adding another driver. The nudge step is the driver's `nudge()`; the registry is the swap point.
 
-**Retries.** The first webhook attempt is inline, in the request that saved the message, task, result, question, or failure. A failed attempt stays `pending`. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts, then the wake is `failed`. Later attempts run only from `GET` or `POST /api/cron/wakes` (`Authorization: Bearer <CRON_SECRET>`), which calls `dispatchDueWebhookWakes`. `vercel.json` schedules that daily at 08:00 UTC (`0 8 * * *`). On Hobby the run can start any time in that hour. A new wake for the same agent does not retry older pending wakes. `afterWake` delivers only the new wake id. Local wakes are not pushed by cron. The watcher polls them.
+**Retries.** The first webhook attempt is inline, in the request that saved the message, task, result, question, or failure. A failed attempt stays `pending`. Later attempts run only from `GET` or `POST /api/cron/wakes` (`Authorization: Bearer <CRON_SECRET>`), which calls `dispatchDueWebhookWakes` (up to 50 due wakes per run, oldest first, one attempt each). `vercel.json` schedules that daily at 08:00 UTC (`0 8 * * *`). On Hobby the run can start any time in that hour, so a failed wake is retried about once a day. After 8 attempts in total, counting the inline one, the wake is `failed`. The backoff in `lib/wakes.ts` (30 seconds, doubling, capped at one hour) only matters if the cron runs more often than hourly. A new wake for the same agent does not retry older pending wakes. `afterWake` delivers only the new wake id. Local wakes are not pushed by cron. The watcher polls them.
 
 ### MCP
 
@@ -206,7 +206,7 @@ Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id"
 
 | Tool | What it does |
 | --- | --- |
-| `send_message` | Plain text to one agent. Optional `task_id` attaches a progress note to that task's thread. |
+| `send_message` | Plain text to one agent. With `task_id` it is added to that task's thread. Without `task_id` the recipient cannot read it yet, so use `create_task` to reach another agent. |
 | `create_task` | One target, a title, a description, and `result_schema`. |
 | `get_task` | The task, its result, and its thread. |
 | `complete_task` | The target submits the one final result. Ajv runs first. |

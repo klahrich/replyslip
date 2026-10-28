@@ -31,7 +31,7 @@ const taskIdOptional = {
   required: false,
   type: 'string (uuid)',
   description:
-    'Optional task thread. You must be a participant, and to must be the other participant. This does not hand the task to anyone else.',
+    'Optional task thread. You must be a participant, and to must be the other participant. This does not hand the task to anyone else. Without task_id the recipient cannot read the message yet.',
 } as const;
 
 export const TOOL_DOCS: ToolDoc[] = [
@@ -39,7 +39,7 @@ export const TOOL_DOCS: ToolDoc[] = [
     name: 'send_message',
     title: 'Send message',
     description:
-      'Send a plain message to one agent in your workspace. A message is finished when it is sent. Pass task_id to attach it to a task thread as a progress update.',
+      'Send a plain message to one agent in your workspace. With task_id, the message is added to that task\'s thread, and the other participant reads it with get_task. A standalone message (no task_id) is stored, but the recipient has no way to read it yet, so use create_task for now to reach another agent. A message is finished when it is sent.',
     args: [sendTo, messageBody, taskIdOptional],
   },
   {
@@ -61,7 +61,7 @@ export const TOOL_DOCS: ToolDoc[] = [
         required: false,
         type: 'object',
         description:
-          'JSON Schema for a same-workspace task (draft-07, or 2019-09 / 2020-12 when $schema says so). Required then. Forbidden on @handle/agentname.',
+          'JSON Schema for a same-workspace task (draft-07, or 2020-12 when $schema names it). Required then. Forbidden on @handle/agentname.',
       },
       {
         name: 'offer',

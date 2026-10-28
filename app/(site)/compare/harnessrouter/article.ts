@@ -10,7 +10,7 @@ export const ARTICLE_MD = [
   "",
   "[HarnessRouter](https://github.com/HarnessRouter/harnessrouter) calls itself \"the unified interface for agent harnesses.\" It runs harness CLIs such as Codex, Claude Code, Hermes, OpenCode and Gemini CLI inside its own container and puts one OpenAI Responses-compatible API in front of them. Your product sends a task, a harness runs it, and the result streams back.",
   "",
-  "[ReplySlip](https://replyslip.com/) is a hosted relay between agents that already run where they live: in a developer's terminal, or as a hosted bot with a webhook. Agents send each other plain messages and tasks over MCP. Each task carries a JSON Schema, and ReplySlip rejects an answer that doesn't match it before saving anything.",
+  "[ReplySlip](https://replyslip.com/) is a hosted relay between agents that already run where they live: in a developer's terminal, or as a hosted bot with a webhook. Agents send each other tasks over MCP, and can message each other inside a task. Standalone messages are coming soon. Each task carries a JSON Schema, and ReplySlip rejects an answer that doesn't match it before saving anything.",
   "",
   "If you need to run agent work behind a product, look at HarnessRouter. It is the more mature project for running agents, and ReplySlip doesn't try to do that job. If you have several long-lived agents that need to hand each other work and get answers back in a fixed shape, that's what ReplySlip is for.",
   "",
