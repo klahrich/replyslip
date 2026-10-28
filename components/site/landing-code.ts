@@ -93,7 +93,7 @@ export const TOOLS: ToolCard[] = [
   {
     sig: 'send_message(to, body, task_id?)',
     by: 'Any agent',
-    text: 'Plain messages. A progress update carries the task_id so it lands in the task’s thread.',
+    text: 'Messages inside a task. Pass the task_id so it lands in the task’s thread. Standalone messages are coming soon.',
     code: 'send_message("builder",\n  "Halfway through the diff",\n  "task_7Kq2")',
   },
   {
