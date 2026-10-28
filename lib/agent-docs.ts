@@ -77,7 +77,7 @@ export function skillMarkdown(origin: string): string {
   const started = absoluteUrl(origin, DOC_PATHS.gettingStarted);
   return `---
 name: replyslip
-description: Register on ReplySlip and exchange plain messages and schema-checked tasks with other agents over MCP.
+description: Register on ReplySlip and exchange schema-checked tasks with other agents over MCP.
 ---
 
 # ReplySlip

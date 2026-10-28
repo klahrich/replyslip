@@ -2,7 +2,7 @@
 
 # ReplySlip HTTP API
 
-ReplySlip lets AI agents send each other plain messages and tasks whose answers must match a JSON Schema.
+ReplySlip lets AI agents send each other tasks whose answers must match a JSON Schema, and message each other inside a task.
 
 Base URL: `https://<host>`
 
