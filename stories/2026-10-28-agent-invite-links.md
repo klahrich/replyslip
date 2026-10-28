@@ -39,7 +39,7 @@ Company ABC wants to share its `grokbot` with its customers' agents. It does not
 | --- | --- |
 | Invite | A row in `agent_invites`. It holds one shared agent, a set of offers, a daily cap, a max-use count, an expiry, and whether redemption approves. |
 | Invite token | `rsi_…`. Shown once at creation and stored as sha256, like join codes. |
-| Invite URL | `https://<host>/i/<rsi_…>`. A human-readable preview page. Agents use the API. |
+| Invite URL | `https://<host>/i#<rsi_…>`. A human-readable preview page. The token is in the fragment, so it never reaches the server, the request logs, or `SiteAnalytics` (section 13). Agents use the API. |
 | Redeem | Turn an invite into a share. Either it creates a new guest workspace with one agent and one key, or it attaches the share to the caller's existing workspace. |
 | Invite workspace | A workspace created by redeem. It has no user (`origin = 'invite'`) until it is claimed. |
 | Claim token | `rsc_…`. Returned once at redeem. Lets a human attach an email to the invite workspace later. |
@@ -57,16 +57,16 @@ Dashboard → agent → Guests → **Create invite link**:
 - label: optional, e.g. `Initech`. Shown on every share redeemed from this link.
 - approve on redeem: on by default. This is the human's approval, given up front.
 
-Response panel (shown once):
+Response panel (shown once), in the dashboard Sharing tab (section 18):
 
 ```
-Link:   https://replyslip.com/i/rsi_8hQ…
+Link:   https://replyslip.com/i#rsi_8hQ…
 Prompt for their agent:
   Read https://replyslip.com/skill.md, then redeem this ReplySlip invite: rsi_8hQ…
   Choose a name for yourself. If you are already on ReplySlip, redeem it with redeem_invite instead.
 ```
 
-The owner sends the link or the prompt to the customer by email, Slack, or whatever channel they already use.
+The panel also shows a ready-to-send message for the customer (section 18.3). The owner sends it by email, Slack, or whatever channel they already use.
 
 An owner agent can also create an invite with the `create_invite` MCP tool. Because an agent key cannot approve (`requireHumanOwner`), an invite created by an agent always has `approve_on_redeem = false`. Shares redeemed from it land `pending`, and a human approves them as today.
 
@@ -106,7 +106,7 @@ The share is created for the caller's workspace. No workspace, agent or key is c
 
 ### 5.4 Human opens the link
 
-`GET /i/rsi_…` renders a preview:
+`/i#rsi_…` is a static page. Client code reads `location.hash`, calls `GET /api/v1/invites/preview` with the token as a bearer, and renders:
 
 - "ABC (@abc) is sharing **grokbot** with your agent."
 - Agent description, then each offer: name, description, and a collapsed result schema.
@@ -118,7 +118,7 @@ The page never redeems. An unknown, expired, revoked or exhausted token shows on
 
 ### 5.5 Claim (optional, phase 2)
 
-The redeem response includes `claim_url: https://<host>/claim/rsc_…`. A human opens it, enters an email, receives a code, and verifies. `POST /api/v1/auth/verify-code` gets an extra `claim_token`:
+The redeem response includes `claim_url: https://<host>/claim#rsc_…`. A human opens it, enters an email, receives a code, and verifies. `POST /api/v1/auth/verify-code` gets an extra `claim_token`:
 
 - **New user (no workspace):** the user is attached to the invite workspace instead of a new one being created. `workspaces.claimed_at` is set and `claim_token_hash` is cleared.
 - **User already in a workspace:** `409 already_in_workspace`, "This email already has a workspace. Use your agent's redeem_invite to add the share to it." The code is not consumed.
@@ -129,7 +129,7 @@ After claiming, the human has the normal dashboard. They can see the agent, rota
 
 - **Guests list.** It shows label, guest handle, status, cap, offers and "via invite <prefix>".
 - **Invite list.** It shows label, prefix, offers, uses/max, expiry and status (`active`, `exhausted`, `expired`, `revoked`).
-- **Revoke an invite.** This stops future redemptions only. Existing shares stay as they are. Each one is revoked on its own with `revoke`, which fails open guest tasks as today.
+- **Revoke an invite.** This always stops future redemptions. The confirm dialog has a checkbox, "Also revoke the N guests who joined with this link", which is off by default. When it's ticked, every pending or approved share with that `invite_id` is revoked in the same transaction. Their open guest tasks fail with `access revoked` and the senders are woken, exactly like a single revoke.
 - **Pending shares.** Shares from `approve_on_redeem = false` invites show up in Guests as pending, with the existing Approve button.
 
 ### 5.7 Owner provisions from its backend (phase 3, docs only)
@@ -305,6 +305,8 @@ export const INVITE_MAX_ACTIVE_PER_AGENT = 50;
 export const INVITE_LABEL_MAX = 80;
 /** Auto handle for an invite workspace: g- plus 10 lowercase base32 characters. Matches HANDLE_PATTERN. */
 export const INVITE_HANDLE_PREFIX = 'g-';
+/** Unclaimed invite workspaces whose agent never called the API are deleted after this (section 19). */
+export const INVITE_WORKSPACE_IDLE_DAYS = 30;
 
 // RATE_LIMITS: add
   redeem: { ip: 30, windowMs: 15 * 60 * 1000 },
@@ -334,7 +336,7 @@ Only `offers` is required. Defaults: `daily_cap` 50, `max_uses` 1, `expires_in_d
               "daily_cap": 20, "max_uses": 1, "uses": 0, "approve_on_redeem": true,
               "expires_at": "…", "revoked_at": null, "created_at": "…", "status": "active" },
   "token": "rsi_8hQx…",
-  "url": "https://replyslip.com/i/rsi_8hQx…",
+  "url": "https://replyslip.com/i#rsi_8hQx…",
   "agent_prompt": "Read https://replyslip.com/skill.md, then redeem this ReplySlip invite: rsi_8hQx… …"
 }
 ```
@@ -356,7 +358,14 @@ The guest-workspace limit is **not** checked here, because uses may never happen
 
 ### 7.3 `POST /api/v1/agents/:id/invites/:inviteId/revoke` (session)
 
-`200 { "invite" }`. It is idempotent. Shares already redeemed from the invite are not touched.
+Body (optional): `{ "revoke_shares": true }`. It defaults to `false`.
+
+`200 { "invite", "revoked_shares", "failed_tasks" }`. Revoking the invite is idempotent.
+
+- **With `revoke_shares`:** every pending or approved share with this `invite_id` is revoked through the same path as `revokeShare`. That uses `failGuestTasks` per share, and the wake ids are delivered after commit. The two counts come back in the response.
+- **Without it:** both counts are `0`.
+
+Calling it again with `revoke_shares: true` on an already-revoked invite still revokes any live shares. The MCP `revoke_invite` tool takes the same optional `revoke_shares`.
 
 ### 7.4 `GET /api/v1/invites/preview` (public)
 
@@ -370,7 +379,7 @@ The guest-workspace limit is **not** checked here, because uses may never happen
   "expires_at": "…", "uses_left": 1 }
 ```
 
-Any invalid state returns `404 invite_not_found` with one message. This avoids leaking whether a token ever existed, and differs from join codes on purpose because the page is public. The `/i/[token]` page renders from the same function server-side.
+Any invalid state returns `404 invite_not_found` with one message. This avoids leaking whether a token ever existed, and differs from join codes on purpose because the page is public. The `/i` page calls this endpoint from the browser with the token from the fragment.
 
 ### 7.5 `POST /api/v1/invites/redeem` (public, or agent key)
 
@@ -396,7 +405,7 @@ Body:
 {
   "agent": { …serializeAgent… },
   "api_key": "rsk_…",
-  "workspace": { "id": "…", "handle": "g-k3v9x2m7qa", "claim_url": "https://replyslip.com/claim/rsc_…" },
+  "workspace": { "id": "…", "handle": "g-k3v9x2m7qa", "claim_url": "https://replyslip.com/claim#rsc_…" },
   "share": { "address": "@abc/grokbot", "status": "approved", "daily_cap": 20,
              "offers": [{ "name": "summarize_pr", "description": "…", "result_schema": { … } }] },
   "mcp": { "url": "https://replyslip.com/api/mcp", "transport": "http", "header": "Bearer <api_key>" },
@@ -783,8 +792,9 @@ Call it from `setAgentShared(…, true)` and `createInvite`.
 | `app/api/v1/invites/preview/route.ts` | GET preview (public, rsi bearer). |
 | `app/api/v1/invites/redeem/route.ts` | POST redeem. |
 | `app/api/v1/claims/preview/route.ts` | Phase 2. |
-| `app/(site)/i/[token]/page.tsx` | Preview page, server-rendered. Calls `previewInvite` directly, never redeems. Sends `noindex` and `Referrer-Policy: no-referrer`. |
-| `app/(site)/claim/[token]/page.tsx` | Phase 2. Email → code → verify with `claim_token`, then redirect to `/dashboard`. |
+| `app/(site)/i/page.tsx` | Static preview page. A client component reads `location.hash` and calls the preview API. It never redeems. Sends `noindex` and `Referrer-Policy: no-referrer`. |
+| `app/api/cron/wakes/route.ts` | Also runs `cleanupUnclaimedInviteWorkspaces()` (section 19). There is no new cron, because Hobby allows one daily job. |
+| `app/(site)/claim/page.tsx` | Phase 2. Reads `rsc_` from the fragment. Email → code → verify with `claim_token`, then redirect to `/dashboard`. |
 
 The redeem route shape:
 
@@ -849,7 +859,11 @@ export function POST(req: Request) {
 
 ## 13. Security and abuse
 
-- **Tokens.** `rsi_` and `rsc_` are hashed at rest and shown once. An `rsi_` token is a bearer secret in a URL, so the preview page sends `Referrer-Policy: no-referrer` and `noindex`. Logs must not record the path; check Vercel log settings.
+- **Tokens.** `rsi_` and `rsc_` are hashed at rest and shown once.
+  - The invite URL keeps `rsi_` in the fragment (`/i#rsi_…`). Browsers never send fragments, so the token stays out of Vercel request logs, `SiteAnalytics` (which records `pathname`), and `Referer` headers.
+  - Chat apps that unfurl links (Slack, Teams) fetch only `/i`, so their servers never see the token either.
+  - The trade-off is that the preview renders client-side, which is fine for a `noindex` page.
+  - The claim URL uses the same pattern: `/claim#rsc_…`.
 - **Approval.** Only a session can create an approving invite, and a DB check enforces it. Agent-created invites land pending.
 - **Scope.** A redeemed share is exactly the invite's offers. `resolveSharedTask` already hides ungranted offers.
 - **Volume.** Each redeem is rate-limited per IP. Uses are capped per invite (≤1000), active invites per agent (≤50), and guests by the owner's plan. Each share keeps its own daily cap. Guest task quota is charged to the guest workspace (`countTasksThisMonth` uses `from_workspace_id`), so each invite workspace has its own free 1000/month.
@@ -897,16 +911,180 @@ export function POST(req: Request) {
 
 | Phase | Scope | Ships |
 | --- | --- | --- |
-| 1 | Migration, `lib/invites.ts`, REST create/list/revoke/preview/redeem, MCP `create_invite`, `list_invites`, `revoke_invite`, `redeem_invite`, unclaimed guard, `/i/[token]` page, dashboard Invite links, skill.md and API docs, tests | ABC can onboard customer agents with one paste |
-| 2 | Claim: `claim_token` on verify, `/claim/[token]`, claims preview, tests | Customers can get a dashboard later |
+| 0 | The **Sharing** tab on `/how-it-works` (section 20.1). It documents agent sharing as it works today and doesn't depend on invite links. | Sharing is explained on the site. It can merge before phase 1. |
+| 1 | Migration, `lib/invites.ts`, REST create/list/revoke (with `revoke_shares`)/preview/redeem, MCP `create_invite`, `list_invites`, `revoke_invite`, `redeem_invite`, unclaimed guard, `/i` page, dashboard Sharing tab (section 18), cleanup cron (section 19), skill.md, API docs and website (section 20.2), tests | ABC can onboard customer agents with one paste |
+| 2 | Claim: `claim_token` on verify, `/claim` page, claims preview, tests | Customers can get a dashboard later |
 | 3 | Provisioning docs (5.7), with an example backend snippet | ABC can automate with no customer action |
 
-For ABC specifically: the free plan allows 3 guests per shared agent, so ABC's workspace must be on `unlimited` (one `UPDATE workspaces SET plan = 'unlimited'`, as today) before phase 1 is useful to them.
+Invite links are available on every plan. The guest-workspace limit (3 per shared agent on free, none on unlimited) applies at redeem, as specified. ABC must be on `unlimited` to onboard more than 3 customers.
 
-## 16. Open questions
+## 16. Decisions and open questions
 
-1. **Cleanup of unclaimed invite workspaces** with no tasks after N days. They cost nothing, but they inflate stats. Exclude `origin = 'invite'` from `admin-stats` signups?
-2. **Should revoking an invite optionally revoke its shares?** A checkbox "also revoke the N guests who used this link" would be easy to add later, because `agent_shares.invite_id` exists.
-3. **Key recovery for unclaimed workspaces.** Today a lost key means a new invite. Should redeem with the claim token also issue a fresh key, without a full claim?
-4. **Pricing.** Should invite links be an unlimited-plan feature, since they mainly make sense with more than 3 guests?
-5. **Token in the URL path vs fragment.** `/i/#rsi_…` keeps the token out of server logs, but needs client-side rendering of the preview. Decide before launch.
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | Clean up unclaimed invite workspaces? | Yes, see section 19. |
+| 2 | Revoking an invite can also revoke its shares? | Yes, `revoke_shares`. It is off by default (5.6, 7.3). |
+| 3 | Key recovery for unclaimed workspaces | Later. Today a lost key means a new invite, or claiming the workspace (phase 2) and issuing a new key. |
+| 4 | Plan gating | Invite links are available on every plan. The free limit of 3 guests per shared agent applies. |
+| 5 | Token in path or fragment | Fragment: `/i#rsi_…` and `/claim#rsc_…` (section 13). |
+
+Still open: none blocking phase 1.
+
+## 17. Naming
+
+The feature is called **invite links**.
+
+- It matches what is already there: the owner already *invites* a guest (`invite_guest`, "Invite a team by its handle"). An invite link is the same grant, sent as a link instead of to a handle.
+- It says what the owner holds (a link) and what it does (an invite), with no new noun to learn.
+- Code, API and tools already use it: `agent_invites`, `rsi_`, `/invites/redeem`, `create_invite`, `redeem_invite`.
+
+Copy rules:
+
+- Marketing headline: "Share your agent with a link." Subline: "Their agent joins in one step. No ReplySlip account needed."
+- Dashboard button: "Create invite link". Guest row: "Joined with invite link `rsi_8hQx`".
+- Docs heading: "Invite links".
+- Don't call it a "share link". The site uses "share" for turning sharing on (`set_agent_sharing`), and two meanings would confuse.
+- Don't use "guest link" or "magic link". Magic link means email sign-in elsewhere.
+
+## 18. Dashboard: Sharing tab
+
+Today the dashboard (`components/dashboard/Dashboard.tsx`) is one long page, and sharing is spread over three places: `WorkspaceHandle` in the hero, and `SharingToggle` plus `Guests` inside each agent card. Invite links would add a fourth. Instead, sharing gets its own tab.
+
+### 18.1 Tabs
+
+The top of the dashboard gets two tabs: **Workspace** (everything that's there today) and **Sharing**.
+
+- The selected tab is kept in the URL hash (`/dashboard#sharing`), so it can be linked to and survives a reload.
+- The `SetupChecklist` sharing step and each agent card get a "Manage sharing →" link to the tab.
+- `SharingToggle` and `Guests` move out of the agent card into the Sharing tab. The card keeps only a "Shared as @abc/grokbot" chip.
+
+### 18.2 Sharing tab layout
+
+1. **How sharing works** is a short strip with three numbered steps and a link to `/how-it-works#sharing`:
+   - "Pick what your agent offers": offers, each with a result schema.
+   - "Give access": invite a ReplySlip workspace by handle, or create an invite link for anyone.
+   - "They send tasks": their agent calls `@abc/grokbot` over MCP. You can revoke at any time.
+2. **Your handle** is the `WorkspaceHandle` editor, moved here. The hero keeps a read-only display.
+3. **Shared agents.** There is one panel per agent, with an agent picker at the top when there are several. Each panel has these sub-sections:
+   - **Sharing**: the `SharingToggle` and the address.
+   - **Offers**: a list showing name, description, and the schema collapsed. There is no offer editor in the dashboard yet. Offers are created by the agent with `upsert_offer`, so the empty state shows a copyable prompt: "Ask your agent: add an offer called `<name>` that …".
+   - **Invite links**: the create form (5.1), the list (status, uses, expiry, label), and Revoke with the "also revoke guests" checkbox.
+   - **Guests**: the existing `Guests` component, plus the label and "Joined with invite link" line.
+4. When the workspace has no handle or no shared agent, the tab shows the strip and the first missing step only.
+
+### 18.3 "Send this to your customer" panel
+
+After **Create invite link**, a panel opens. Every part has a `CopyButton`, and it is shown once.
+
+- **Message to send** is the main block. It is editable before copying, and `<label>` and dates are filled in:
+
+  ```
+  Hi <label>,
+
+  You can now connect your AI agent to our grokbot. No ReplySlip account needed.
+  Paste this into your agent:
+
+    Read https://replyslip.com/skill.md, then redeem this ReplySlip invite: rsi_8hQx…
+    Choose a name for yourself. If you are already on ReplySlip, use the redeem_invite tool instead.
+
+  What it can do and what it returns: https://replyslip.com/i#rsi_8hQx…
+  This link works once and expires on 27 November 2026.
+  ```
+
+  For a multi-use link, "works once" becomes "works for up to N agents".
+- **Just the agent prompt**, for owners who already have their own message.
+- **Just the link.**
+- **Before you send it:** "Anyone with this link can join until it's used up or expires. Send it only to the customer it's for. You can revoke it from this tab."
+- **What happens next** is three lines:
+  - their agent redeems the link and gets its own key,
+  - it shows up under Guests, already approved (or pending if an agent created the link),
+  - its tasks count against its own quota, not yours.
+
+The token is never shown again after the panel closes. Losing it means creating a new link, the same as join codes.
+
+### 18.4 Files
+
+- `components/dashboard/Tabs.tsx` (new) is a small hash-synced tab bar with `role="tablist"`.
+- `components/dashboard/Sharing.tsx` (new) is the tab body.
+- `components/dashboard/InviteLinks.tsx` (new) holds the form, the list and the send panel.
+- `components/dashboard/Dashboard.tsx` gets the tab split.
+- `components/dashboard/Agents.tsx` loses `SharingToggle` and `Guests` and gains the chip and link.
+- `components/dashboard/api.ts` and `types.ts` get the invite calls and the `Invite` type.
+
+## 19. Cleanup of unclaimed invite workspaces
+
+An unclaimed invite workspace whose agent never did anything is removed after `INVITE_WORKSPACE_IDLE_DAYS = 30`. A redemption that was never used then stops holding one of the owner's 3 free guest slots.
+
+A workspace is removable when all of these hold:
+
+- `origin = 'invite'` and `claimed_at is null`,
+- `created_at < now() - 30 days`,
+- none of its agent keys has `last_used_at` set (the agent never called the API),
+- no `tasks` row has `from_workspace_id` or `workspace_id` equal to it, and no `wakes` or `messages` rows reference it.
+
+A workspace whose agent was ever used is kept. It holds task history the owner can see, so it is never deleted automatically.
+
+`lib/invites.ts` → `cleanupUnclaimedInviteWorkspaces(limit = 200)`. One transaction per workspace, in this order:
+
+1. `select … for update` on the workspace, and re-check every condition.
+2. Delete its `agent_shares` rows (as guest). `agent_share_offers` cascade.
+3. Delete its `agents`. `agent_keys` cascade.
+4. Delete the `workspaces` row.
+
+It returns `{ deleted }`. The daily `app/api/cron/wakes` handler calls it after wake retries and adds `invite_workspaces_deleted` to its JSON response.
+
+`admin-stats` reports invite workspaces as their own number (`invite_workspaces`, `invite_workspaces_claimed`) and leaves them out of signups.
+
+Tests:
+
+- An idle workspace older than 30 days is deleted, its share disappears, and the owner's guest count drops.
+- A used key, any task, or a claimed workspace keeps it.
+- A workspace younger than 30 days is kept.
+
+## 20. Website and docs
+
+### 20.1 `/how-it-works` gets tabs (phase 0, ships now)
+
+Today `/how-it-works` only covers agents inside one workspace. Sharing is only on the `/sharing` landing page and in the agent docs. The page becomes tabbed:
+
+| Tab | Hash | Content |
+| --- | --- | --- |
+| Inside your workspace | `#workspace` | The current page content, unchanged |
+| Sharing an agent | `#sharing` | How sharing works today |
+| Invite links | `#invite-links` | Added in phase 1 |
+
+The **Sharing an agent** tab has these parts:
+
+1. **Diagram** (same style as `diagrams.tsx`): owner workspace (@abc) with grokbot and its offers, a guest workspace (@initech) with its agent, and the relay between them. Arrows for `get_agent_card`, then `create_task` with `offer`, then the schema-checked result coming back.
+2. **The address.** `@handle/agentname`, why it exists, and that `list_agents` never shows it.
+3. **Offers.** These are the menu: a name, a description, and a result schema the owner writes. A guest can't send its own schema.
+4. **Granting access.** Invite by handle, approve as a human, agents can't approve, the daily cap.
+5. **What a guest can see.** Only its own tasks to that one agent. Guest tasks arrive marked untrusted.
+6. **Who pays.** The guest's quota. Free allows 3 guests per shared agent.
+7. **Revoking.** It takes effect immediately, and open tasks fail with `access revoked`.
+8. **Example prompts** (copyable), from what we covered in chat: "Make yourself available to other workspaces…" and "Invite @bobs-team to …". They show that plain language works.
+
+All panels render in the HTML and are switched with CSS and a small client toggle, so crawlers still index every tab. The `/sharing` page links to `/how-it-works#sharing`. The `/how-it-works` metadata description adds "and share agents with other teams".
+
+### 20.2 Invite links on the site (phase 1, ships with the feature)
+
+- **`/how-it-works#invite-links` tab.**
+  - A diagram: owner → link → customer's agent → redeem → its own guest workspace → `@abc/grokbot`.
+  - The two redeem paths (new and existing workspace).
+  - What the customer sees, revoking, claiming (once phase 2 ships), and the copyable "send this to your customer" message.
+  - A "Provisioning from your backend" box (5.7), once phase 3 is documented.
+- **`/sharing` page** (`app/(site)/sharing/content.ts`).
+  - A new section, "Share your agent with a link", using the copy from section 17.
+  - `STEPS` step 4 becomes "Invite a team by its ReplySlip handle, or send an invite link to anyone."
+  - The FAQ answer "There's no invite by email or link." **must** change. It becomes: "Teams you invite by handle and approve, or agents that redeem an invite link you created. Each guest gets a daily cap, 50 tasks by default."
+  - New FAQ items:
+    - "Does my customer need a ReplySlip account?" No. Their agent redeems the link and gets its own key.
+    - "Can I see who joined with a link?" Yes, in Guests with the label you gave it.
+    - "Can I stop a link?" Yes. Revoke it, and optionally everyone who joined with it.
+- **Agent docs** (`lib/agent-docs.ts`).
+  - `skill.md` gets "Redeem an invite" (section 12).
+  - `getting-started.md` "Share one of your agents" gets "Or create an invite link with `create_invite`".
+  - The `llms.txt` sharing line adds invite links.
+  - `docs/API.md` gets the "Invite links" section.
+- **Landing page.** The `/sharing` banner link (`app/(site)/page.tsx:88`) can say "New: share your agent with a link" for launch.
+- **Tests.** `tests/docs.test.ts` checks the new tool names and the skill.md section. A test asserts the "no invite by email or link" sentence is gone.
