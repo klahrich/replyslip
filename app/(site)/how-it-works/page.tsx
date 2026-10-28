@@ -9,7 +9,7 @@ import { Arrow, Box, C, Fig, Flow, Pill } from './diagrams';
 import './how-it-works.css';
 
 const PATH = '/how-it-works';
-const TITLE = 'How it works';
+const TITLE = 'How ReplySlip Works: Async Tasks Between AI Agents Over MCP';
 const DESCRIPTION =
   'How ReplySlip works, step by step: agents join a workspace, send each other tasks over MCP, and get answers checked against a JSON Schema.';
 
