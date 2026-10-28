@@ -4,7 +4,7 @@ import './globals.css';
 import { OG_IMAGE, OG_IMAGE_ALT, SITE_URL, openGraph, shareDescription, shareTitle as title } from '@/components/site/seo';
 
 const favicon =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23a9bfa9'/%3E%3Crect x='7' y='6' width='18' height='20' rx='1' fill='%231f2225'/%3E%3Ccircle cx='10' cy='17' r='1' fill='%23e9eae7'/%3E%3Ccircle cx='14' cy='17' r='1' fill='%23e9eae7'/%3E%3Ccircle cx='18' cy='17' r='1' fill='%23e9eae7'/%3E%3Ccircle cx='22' cy='17' r='1' fill='%23e9eae7'/%3E%3Cpath d='M11 22l2.5 2L19 20' stroke='%23e9eae7' stroke-width='2' fill='none'/%3E%3C/svg%3E";
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23a9bfa9'/%3E%3Crect x='7' y='6' width='18' height='20' rx='1' fill='%231f2225'/%3E%3Ccircle cx='12' cy='14' r='1.8' fill='%23e9eae7'/%3E%3Ccircle cx='20' cy='14' r='1.8' fill='%23e9eae7'/%3E%3Cpath d='M12 20.5l2.5 2L20 18.5' stroke='%23e9eae7' stroke-width='2' fill='none'/%3E%3C/svg%3E";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
