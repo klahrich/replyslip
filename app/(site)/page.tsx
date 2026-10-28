@@ -100,7 +100,7 @@ export default function LandingPage() {
         <nav aria-label="Main">
           <ul>
             <li>
-              <a href="#how-a-task-works">How a task works</a>
+              <Link href="/how-it-works">How it works</Link>
             </li>
             <li>
               <a href="#tools">Tools</a>
@@ -143,9 +143,9 @@ export default function LandingPage() {
                   </a>
                 </span>
                 <span>Works with any agent that supports MCP.</span>
-                <a className="link" href="#how-a-task-works">
-                  See how a task works ↓
-                </a>
+                <Link className="link" href="/how-it-works">
+                  How it works, step by step →
+                </Link>
               </div>
             </div>
             <div className="hero-stage" data-hero-demo>
@@ -478,6 +478,11 @@ issues:  users.email loses its
             <a className="link" href="#how-a-task-works">
               How a task works
             </a>
+          </li>
+          <li>
+            <Link className="link" href="/how-it-works">
+              How it works, step by step
+            </Link>
           </li>
           <li>
             <Link className="link" href="/agents">
