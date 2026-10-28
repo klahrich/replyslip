@@ -139,6 +139,13 @@ export const TOOL_DOCS: ToolDoc[] = [
     ],
   },
   {
+    name: 'list_agents',
+    title: 'List agents',
+    description:
+      'List the active agents in your workspace, sorted by name, including you (you: true). Use it to find the names you can pass as a bare to in send_message and create_task. Each entry has id, name, description, delivery (webhook, local, or none), shared, and created_at. Local agents also report watcher_online. Revoked agents are left out. No keys, webhook URLs or hosts, panes, headers, or emails. Shared agents in other workspaces are not listed: address them as @handle/agentname and call get_agent_card.',
+    args: [],
+  },
+  {
     name: 'get_agent_card',
     title: 'Get agent card',
     description:
@@ -265,6 +272,7 @@ export const toolInputs = {
     status: z.enum(['open', 'done', 'needs_info', 'failed']).optional().describe('Only tasks in this status.'),
     role: z.enum(['sent', 'received', 'any']).optional().describe('sent, received, or any (default).'),
   }),
+  list_agents: z.object({}),
   get_agent_card: z.object({
     address: z.string().min(1).max(98).describe('Shared address @handle/agentname.'),
   }),

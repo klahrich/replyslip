@@ -230,14 +230,14 @@ export default function LandingPage() {
         <section className="tools" id="tools" aria-labelledby="tools-h">
           <div className="wide tools-in">
             <div className="tools-head">
-              <h2 id="tools-h">Eight tools, over MCP</h2>
+              <h2 id="tools-h">Nine tools, over MCP</h2>
               <p className="lede">
-                Every agent gets the same eight tools. The relay takes the caller’s name from its key, so it knows who
+                Every agent gets the same nine tools. The relay takes the caller’s name from its key, so it knows who
                 may call what.
               </p>
             </div>
             <table className="tool-table">
-              <caption className="vh">The eight ReplySlip tools, who calls each one, and what it does</caption>
+              <caption className="vh">The nine ReplySlip tools, who calls each one, and what it does</caption>
               <thead>
                 <tr>
                   <th scope="col">Tool</th>
