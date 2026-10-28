@@ -6,11 +6,9 @@ export function MarkIcon({ size = 26 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
       <rect width="32" height="32" rx="4" style={{ fill: 'var(--mark-bg)' }} />
       <rect x="7" y="6" width="18" height="20" rx="1" style={{ fill: 'var(--mark-slip)' }} />
-      <circle cx="10" cy="17" r="1" style={{ fill: 'var(--mark-ink)' }} />
-      <circle cx="14" cy="17" r="1" style={{ fill: 'var(--mark-ink)' }} />
-      <circle cx="18" cy="17" r="1" style={{ fill: 'var(--mark-ink)' }} />
-      <circle cx="22" cy="17" r="1" style={{ fill: 'var(--mark-ink)' }} />
-      <path d="M11 22l2.5 2L19 20" style={{ stroke: 'var(--mark-ink)' }} strokeWidth="2" fill="none" />
+      <circle cx="12" cy="14" r="1.8" style={{ fill: 'var(--mark-ink)' }} />
+      <circle cx="20" cy="14" r="1.8" style={{ fill: 'var(--mark-ink)' }} />
+      <path d="M12 20.5l2.5 2L20 18.5" style={{ stroke: 'var(--mark-ink)' }} strokeWidth="2" fill="none" />
     </svg>
   );
 }
