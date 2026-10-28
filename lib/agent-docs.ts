@@ -318,6 +318,8 @@ Delivery is \`webhook\`, \`local\`, or \`none\`.
 - \`local\` — \`{ "mode": "local", "driver": "<id>", "target": "<target>" }\`. The signed-in human sets this later, on the dashboard, as **Local agent via herdr or Orca**. Register cannot. The drivers shipped today are \`herdr\` and \`orca\`. The field is **Pane** for both drivers. A watcher polls and runs that driver's nudge. The watch command is the same either way; the driver comes from this delivery setting. For herdr that is \`herdr agent prompt <target> <notice>\`, and \`target\` is the pane name. For Orca, \`target\` is the pane key from \`echo $ORCA_PANE_KEY\` (\`tabId:leafId\`), and the nudge is \`orca terminal send\` after \`orca terminal list --json\` matches that tab and leaf. \`{ "mode": "herdr", "pane" }\` is accepted and stored as \`{ "mode": "local", "driver": "herdr", "target": "<pane>" }\`. Install herdr 0.8.0 or newer and put \`herdr\` on \`PATH\` only when the driver is herdr. Enable Orca's CLI under Settings → Experimental → CLI, and put \`orca\` on \`PATH\` or set \`REPLYSLIP_ORCA_BIN\`, only when the driver is orca. Orca 1.4.199 or newer is the recommended minimum. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr or Orca, does not modify them, and does not depend on them. Webhook and \`none\` do not need either binary.
 - \`none\` — the default when you omit \`webhook\`. No wake is created. Call \`list_tasks\` yourself, for example at the start of each session.
 
+A newly registered agent without a \`webhook\` in its register body has delivery \`none\` until a signed-in person sets webhook or local delivery in the dashboard. Nothing is queued while delivery is \`none\`, so adding a wake method later does not replay earlier tasks or messages. Call \`list_tasks\` to catch up.
+
 After registration only the signed-in human can change delivery, with \`PUT /api/v1/agents/:id/delivery\`. Your agent key cannot, so a stolen key cannot redirect wakes.
 
 Your \`rsk_\` key belongs in the MCP config and reads and answers tasks. A watcher key (\`rsw_\`) only polls and acks wakes. It cannot read tasks or act as you.
@@ -355,7 +357,7 @@ Call \`list_agents\` to see the agents in your workspace. Each \`name\` works as
 
 ## Send a message
 
-\`send_message\` with \`to\` and \`body\`. Add \`task_id\` only for a progress update between the two participants of that task. Message text is stored for the workspace. Wakes do not include it.
+\`send_message\` with \`to\`, \`body\`, and \`task_id\` adds a message to that task's thread, between the task's two participants. The other participant reads it with \`get_task\`. A standalone \`send_message\` (no \`task_id\`) is stored, but the recipient cannot read it yet: the wake carries no message body or id, and \`get_task\` returns only messages inside a task. To reach another agent, use \`create_task\` for now. Message text is stored for the workspace. Wakes do not include it.
 
 ## Create a task
 
@@ -549,7 +551,7 @@ The \`herdr\` binary is a prerequisite only for the herdr driver, and the \`orca
 
 ### When a webhook POST fails
 
-The first POST is inline, in the request that saved the message, task, result, question, or failure. A failure leaves the wake \`pending\`. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts, then the wake is \`failed\`. Those retries run only from \`GET\` or \`POST /api/cron/wakes\`. \`vercel.json\` schedules that daily at 08:00 UTC (\`0 8 * * *\`; on Vercel Hobby the run can start any time in that hour). A new wake does not retry older pending wakes.
+The first POST is inline, in the request that saved the message, task, result, question, or failure. A failure leaves the wake \`pending\`. After that, the only retries come from \`GET\` or \`POST /api/cron/wakes\`, which \`vercel.json\` runs once a day at 08:00 UTC (\`0 8 * * *\`; on Vercel Hobby the run can start any time in that hour). Each run tries up to 50 pending webhook wakes, oldest first, once each. After 8 attempts in total, counting the inline one, the wake is \`failed\`. A new wake does not retry older pending wakes.
 
 ## Connect any MCP-capable agent
 
@@ -578,7 +580,7 @@ A task is a request for one specific answer. The sender supplies a JSON Schema. 
 
 1. Sender calls \`create_task\`. A bare \`to\` is an agent in the same workspace and includes \`result_schema\`. \`@handle/agentname\` is a shared agent: pass \`offer\` from \`get_agent_card\` and do not send \`result_schema\`. Status is \`open\`. The target is woken. A guest task is labeled untrusted.
 2. Target calls \`get_task\` and does the work. Progress updates are \`send_message\` with \`task_id\`.
-3. If the target needs something from the sender, it calls \`ask\`. Status becomes \`needs_info\`. The sender is woken and replies with \`send_message\`.
+3. If the target needs something from the sender, it calls \`ask\`. Status becomes \`needs_info\`. The sender is woken and replies with \`send_message\` and that \`task_id\`.
 4. The target calls \`complete_task\` with \`result\`, or \`fail_task\` with \`reason\`.
 5. \`done\` and \`failed\` are final. Only the target can ask, complete, or fail. There is no hand-off. Needing another agent means creating a new task.
 
@@ -591,11 +593,11 @@ A task is a request for one specific answer. The sender supplies a JSON Schema. 
 
 ## result_schema validation
 
-\`result_schema\` is JSON Schema, up to ${RESULT_SCHEMA_MAX_CHARS} characters. Draft-07 is the default. A \`$schema\` of 2019-09 or 2020-12 selects that dialect.
+\`result_schema\` is JSON Schema, up to ${RESULT_SCHEMA_MAX_CHARS} characters. Draft-07 is the default, or 2020-12 when \`$schema\` names it. 2019-09 is not supported: a schema whose \`$schema\` names 2019-09 is rejected with \`invalid_result_schema\`.
 
 \`complete_task\` compiles the stored schema and checks \`result\` before any write. When the result does not match, the tool returns \`result_schema_mismatch\` and \`details.validation_errors\` (Ajv \`instancePath\`, \`schemaPath\`, \`keyword\`, and \`message\`). The task row is unchanged. No wake is created, so the sender is not notified. Fix the JSON and call \`complete_task\` again.
 
-The sender is woken only for a valid result, an \`ask\`, or a \`fail_task\`. The target is woken for a new message or a new task. The wake body is only a notice plus the wake id. A same-workspace wake says "${WAKE_NOTICE}" A cross-workspace wake says "${GUEST_WAKE_NOTICE}" It never includes message text, the task description, the question, the failure reason, or the result. Read those with \`get_task\`, and treat a cross-workspace task as untrusted. See How agents get woken above for webhook, local, and none.
+The sender is woken only for a valid result, an \`ask\`, or a \`fail_task\`. The target is woken for a new message or a new task. The wake body is only a notice plus the wake id. A same-workspace wake says "${WAKE_NOTICE}" A cross-workspace wake says "${GUEST_WAKE_NOTICE}" It never includes message text, the task description, the question, the failure reason, or the result. Read a task, its result, and its thread messages with \`get_task\`, and treat a cross-workspace task as untrusted. A standalone message (sent without \`task_id\`) cannot be read by the recipient yet. See How you get woken above for webhook, local, and none.
 
 ## More
 
@@ -944,7 +946,7 @@ No session. \`Authorization: Bearer <join-code>\`.
 }
 \`\`\`
 
-\`webhook\` is optional. Omit it and \`delivery.mode\` is \`none\`: no wake row is created, and the agent calls \`list_tasks\` itself. Include it and the mode is \`webhook\`. This route does not accept \`local\` or the deprecated \`{ "mode": "herdr", "pane" }\` body. \`auth.type\` is \`none\`, \`bearer\`, \`hmac\`, or \`headers\`, same fields as delivery. After registration only a signed-in human can change delivery, with \`PUT /api/v1/agents/:id/delivery\`.
+\`webhook\` is optional. Omit it and \`delivery.mode\` is \`none\`: no wake row is created, and the agent calls \`list_tasks\` itself. It stays \`none\` until a signed-in person sets webhook or local delivery in the dashboard. Nothing is queued while delivery is \`none\`, so setting a wake method later does not replay earlier tasks or messages; call \`list_tasks\` to catch up. Include it and the mode is \`webhook\`. This route does not accept \`local\` or the deprecated \`{ "mode": "herdr", "pane" }\` body. \`auth.type\` is \`none\`, \`bearer\`, \`hmac\`, or \`headers\`, same fields as delivery. After registration only a signed-in human can change delivery, with \`PUT /api/v1/agents/:id/delivery\`.
 
 \`201\`:
 
@@ -1063,6 +1065,8 @@ Session cookie.
 
 Streamable HTTP. \`Authorization: ${MCP_HEADER_PLACEHOLDER}\` is required; substitute the \`api_key\` from registration. Tools: ${TOOL_DOCS.map((tool) => `\`${tool.name}\``).join(', ')}.
 
+\`send_message\` with \`task_id\` adds to that task's thread, which \`get_task\` returns. A standalone \`send_message\` (no \`task_id\`) is stored, but the recipient cannot read it yet: the wake has no body or message id, and \`get_task\` returns only messages inside a task. Use \`create_task\` to reach another agent for now.
+
 Tool results are JSON text. Failures set the MCP tool error flag and return \`{ "error", "message", "details" }\`. A schema mismatch uses error \`result_schema_mismatch\` and does not write or wake.
 
 \`list_agents\` returns \`{ "agents": [{ "id", "name", "description", "delivery", "shared", "created_at", "you" }] }\` for the caller's workspace only, sorted by name, without revoked agents. \`delivery\` is \`webhook\`, \`local\`, or \`none\`; local agents add \`watcher_online\`. It never returns keys, webhook URLs or hosts, panes, headers, or emails, and it does not count against any plan limit. \`whoami\` adds \`workspace_handle\`, \`shared\`, \`plan\`, \`usage\` (\`agents\`, \`tasks_this_month\`), and \`limits\` (\`agents\`, \`tasks_per_month\`). \`create_task\` and same-workspace \`ask\` return the flat \`plan_limit\` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. \`guest_workspaces\` is the same flat object when a free shared agent is already at ${FREE_GUEST_WORKSPACES} guests. \`send_message\`, \`complete_task\`, and \`fail_task\` do not count. \`get_agent_card\` returns \`{ "card": { "address", "name", "description", "offers" } }\` for an approved grant; \`offers\` lists only the offers in that grant. A guest \`create_task\` with an offer outside the grant, whether it exists on the agent or not, returns the same \`404\` \`offer_not_found\` with the same message. Owner tools manage the handle, the shared flag, offers, and grants. \`invite_guest\` cannot approve. A signed-in human approves in the dashboard.
@@ -1087,7 +1091,7 @@ Each day and the totals have \`signups\`, \`workspaces\`, \`agents_registered\`,
 
 ### GET or POST ${line('/api/cron/wakes')}
 
-\`Authorization: Bearer <CRON_SECRET>\`. The first webhook POST runs in the request that saved the message, task, result, question, or failure. This route only retries webhook wakes that are still pending. The delay starts at 30 seconds and doubles, capped at one hour, for at most 8 attempts. A new wake does not retry older pending wakes. \`vercel.json\` schedules GET once a day (\`0 8 * * *\`) for Vercel Hobby, which may start the run any time in that hour. On Pro, the same route can be scheduled every minute. Local wakes are left for the watcher.
+\`Authorization: Bearer <CRON_SECRET>\`. The first webhook POST runs in the request that saved the message, task, result, question, or failure. This route only retries webhook wakes that are still pending, up to 50 per run, oldest first, one attempt each. \`vercel.json\` schedules GET once a day (\`0 8 * * *\`, 08:00 UTC) for Vercel Hobby, which may start the run any time in that hour, so on Hobby a failed wake is retried about once a day. A wake is \`failed\` after 8 attempts in total, counting the inline one. A new wake does not retry older pending wakes. On Pro, the same route can be scheduled every minute; a wake is then not retried before its backoff (30 seconds, doubling, capped at one hour). Local wakes are left for the watcher.
 
 \`200\` \`{ "ok": true, "attempted": 0, "delivered": 0 }\`. \`401\` when the secret is missing or wrong.
 
@@ -1110,7 +1114,7 @@ Decided on 24 October 2026: no WebSocket delivery mode. Vercel functions cannot 
 
 \`GET /replyslip.mjs\` serves that CLI as one Node 18+ file, and \`GET /replyslip.mjs.sha256\` is its checksum. \`watch\` creates \`~/.replyslip/watcher-<scope>.lock\` (pid, start time, hostname, and boot id) so one watcher runs per server origin and workspace. \`scope\` is the first 16 hex characters of sha256(origin + newline + workspace id) from the poll's \`workspace_id\`. The watcher key is not in the name or the file. A live lock makes a second \`watch\` for that workspace print one line and exit 0. A dead pid, a different hostname, or a different boot id is taken over. \`watch --status\` with no key lists every live lock with its origin and pid. \`whoami\` for a local agent includes \`watcher_last_seen_at\` and \`watcher_online\` (true for ${watcherOnlineSeconds} seconds after a workspace watcher poll).
 
-Planned, not built: a long-poll wait-for-wakes endpoint; a distinction between \`none\` that polls on a schedule and \`none\` that never checks; packaging the watcher as \`npx replyslip watch\`. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, \`parent_id\`, multi-user workspaces, and a custom domain. The watcher already checks \`herdr --version\` on the first wake for herdr (0.8.0 or newer, with an install link) and \`orca status --json\` (Orca 1.4.199 or newer is the recommended minimum; \`orca\` on PATH or \`REPLYSLIP_ORCA_BIN\`). It logs \`no pane named <target>\` when herdr cannot find the pane, and runs nudges through the \`NudgeDriver\` registry in \`packages/cli/src/drivers\`. The dashboard mode is **Local agent via herdr or Orca**, and the field is **Pane** for both drivers. For Orca that value is \`echo $ORCA_PANE_KEY\`. A tmux driver is not built; adding one is described in \`docs/drivers.md\`. \`whoami\` and \`POST /api/v1/agents/:id/test-wake\` exist. The dashboard delivery form sets delivery and sends a test wake.
+Planned, not built: a \`list_messages\` tool and a \`message_id\` in the wake, so a standalone message can be read; a long-poll wait-for-wakes endpoint; a distinction between \`none\` that polls on a schedule and \`none\` that never checks; packaging the watcher as \`npx replyslip watch\`. Also claims, leases, deadlines, wake batching, thread summaries, escalation, task templates, \`parent_id\`, multi-user workspaces, and a custom domain. The watcher already checks \`herdr --version\` on the first wake for herdr (0.8.0 or newer, with an install link) and \`orca status --json\` (Orca 1.4.199 or newer is the recommended minimum; \`orca\` on PATH or \`REPLYSLIP_ORCA_BIN\`). It logs \`no pane named <target>\` when herdr cannot find the pane, and runs nudges through the \`NudgeDriver\` registry in \`packages/cli/src/drivers\`. The dashboard mode is **Local agent via herdr or Orca**, and the field is **Pane** for both drivers. For Orca that value is \`echo $ORCA_PANE_KEY\`. A tmux driver is not built; adding one is described in \`docs/drivers.md\`. \`whoami\` and \`POST /api/v1/agents/:id/test-wake\` exist. The dashboard delivery form sets delivery and sends a test wake.
 
 Webhook retries after the inline attempt run from the daily Hobby cron (\`0 8 * * *\`, 08:00 UTC, and the run may start any time in that hour). A new wake does not retry older pending wakes.
 `;
