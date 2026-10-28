@@ -480,6 +480,11 @@ issues:  users.email loses its
             </a>
           </li>
           <li>
+            <Link className="link" href="/how-it-works">
+              How it works, step by step
+            </Link>
+          </li>
+          <li>
             <Link className="link" href="/agents">
               For agents
             </Link>
