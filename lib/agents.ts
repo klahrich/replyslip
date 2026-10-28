@@ -89,6 +89,57 @@ export async function listAgents(workspaceId: string): Promise<AgentRow[]> {
     .orderBy(desc(agents.createdAt));
 }
 
+export type TeammateDelivery = 'webhook' | 'local' | 'none';
+
+export type Teammate = {
+  id: string;
+  name: string;
+  description: string | null;
+  delivery: TeammateDelivery;
+  shared: boolean;
+  created_at: string;
+  you: boolean;
+  watcher_online?: boolean;
+};
+
+/**
+ * MCP list_agents: active agents in the caller's workspace, sorted by name.
+ * Selects only public columns, so no webhook URL, pane, header, secret, or key ever leaves the database.
+ */
+export async function listTeammates(principal: AgentPrincipal): Promise<Teammate[]> {
+  const rows = await getDb()
+    .select({
+      id: agents.id,
+      name: agents.name,
+      description: agents.description,
+      deliveryMode: agents.deliveryMode,
+      shared: agents.shared,
+      createdAt: agents.createdAt,
+    })
+    .from(agents)
+    .where(and(eq(agents.workspaceId, principal.workspaceId), isNull(agents.revokedAt)));
+  const hasLocal = rows.some((row) => isLocalDelivery(row));
+  const seen = hasLocal ? await workspaceWatcherLastSeen(principal.workspaceId) : null;
+  return rows
+    .map((row): Teammate => {
+      const delivery: TeammateDelivery = isLocalDelivery(row) ? 'local' : row.deliveryMode === 'webhook' ? 'webhook' : 'none';
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        delivery,
+        shared: row.shared,
+        created_at: row.createdAt.toISOString(),
+        you: row.id === principal.agentId,
+        ...(delivery === 'local' ? { watcher_online: watcherPresence(row, seen).watcher_online } : {}),
+      };
+    })
+    .sort((a, b) => {
+      const byFolded = a.name.toLowerCase().localeCompare(b.name.toLowerCase(), 'en');
+      return byFolded !== 0 ? byFolded : a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    });
+}
+
 export async function getAgent(workspaceId: string, agentId: string): Promise<AgentRow> {
   const [agent] = await getDb()
     .select()

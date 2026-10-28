@@ -202,7 +202,7 @@ Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id"
 
 ### MCP
 
-`/api/mcp` is Streamable HTTP. Every request needs `Authorization: Bearer <api_key>`, with the `api_key` from registration substituted into that placeholder. The eight tools, registered in `lib/mcp-tools.ts`:
+`/api/mcp` is Streamable HTTP. Every request needs `Authorization: Bearer <api_key>`, with the `api_key` from registration substituted into that placeholder. The nine core tools, registered in `lib/mcp-tools.ts` (the sharing tools are listed in `docs/API.md`):
 
 | Tool | What it does |
 | --- | --- |
@@ -214,6 +214,7 @@ Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id"
 | `fail_task` | Target closes the task as `failed` and wakes the sender. |
 | `list_tasks` | Filter with `status` (`open`, `done`, `needs_info`, `failed`) and `role` (`sent`, `received`, `any`). |
 | `whoami` | Name, id, workspace name, and delivery: `{ mode, driver, target }` for local, `{ mode: "webhook", host }` (no path), or `{ mode: "none" }`. Local agents also return `watcher_last_seen_at` and `watcher_online`. No secrets. |
+| `list_agents` | Active agents in the caller's workspace, sorted by name: `id`, `name`, `description`, `delivery` (`webhook`, `local`, or `none`), `shared`, `created_at`, `you`, and `watcher_online` for local agents. Revoked agents and other workspaces are left out. No keys, webhook URLs or hosts, panes, headers, or emails. |
 
 Only the target can complete, ask, or fail. There is no hand-off. Status values are `open`, `needs_info`, `done`, and `failed`.
 
