@@ -193,11 +193,16 @@ export const agentOffers = pgTable(
     name: text('name').notNull(),
     description: text('description').notNull(),
     resultSchema: jsonb('result_schema').$type<Record<string, unknown>>().notNull(),
+    /** Optional form a guest fills in (normalized profile schema). Null = free-text offer. */
+    inputSchema: jsonb('input_schema').$type<Record<string, unknown>>(),
+    /** Whether a guest may add notes (tasks.description) to a form task. Only false with input_schema set. */
+    notesEnabled: boolean('notes_enabled').notNull().default(true),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex('agent_offers_agent_name_unique').on(table.agentId, table.name),
     check('agent_offers_name_check', sql`${table.name} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
+    check('agent_offers_notes_check', sql`${table.notesEnabled} or ${table.inputSchema} is not null`),
   ],
 );
 
@@ -225,12 +230,17 @@ export const tasks = pgTable(
     fromWorkspaceId: uuid('from_workspace_id').references(() => workspaces.id),
     /** Set when the task used a shared-agent offer. The stored result_schema is a copy of that offer. */
     offerId: uuid('offer_id').references(() => agentOffers.id),
+    /** Copy of the offer input_schema when the task was created. Set together with input. */
+    inputSchema: jsonb('input_schema').$type<Record<string, unknown>>(),
+    /** The guest's form fields, already validated against inputSchema. */
+    input: jsonb('input').$type<Record<string, unknown>>(),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     completedAt: ts('completed_at'),
   },
   (table) => [
     check('tasks_status_check', sql`${table.status} in ('open', 'done', 'needs_info', 'failed')`),
+    check('tasks_input_pair_check', sql`(${table.input} is null) = (${table.inputSchema} is null)`),
     index('tasks_workspace_created_idx').on(table.workspaceId, table.createdAt),
     index('tasks_to_agent_idx').on(table.toAgentId, table.status),
     index('tasks_from_agent_idx').on(table.fromAgentId, table.status),

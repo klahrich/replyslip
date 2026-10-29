@@ -10,6 +10,8 @@ const bodySchema = z.object({
   name: z.string(),
   description: z.string(),
   result_schema: z.record(z.string(), z.json()),
+  input_schema: z.record(z.string(), z.json()).nullable().optional(),
+  notes_enabled: z.boolean().optional(),
 });
 
 export function GET(req: Request, context: { params: Promise<{ id: string }> }) {
@@ -30,6 +32,8 @@ export function POST(req: Request, context: { params: Promise<{ id: string }> })
       name: body.name,
       description: body.description,
       resultSchema: body.result_schema,
+      inputSchema: body.input_schema,
+      notesEnabled: body.notes_enabled,
     });
     return json({ offer }, 201);
   });

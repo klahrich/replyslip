@@ -64,6 +64,13 @@
       "when": 1762700000000,
       "tag": "0008_agent_sharing",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1762800000000,
+      "tag": "0009_offer_input_schema",
+      "breakpoints": true
     }
   ]
 }

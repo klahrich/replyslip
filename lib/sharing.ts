@@ -14,6 +14,7 @@ import {
   ACCESS_REVOKED_REASON,
   AGENT_NAME_PATTERN,
   DEFAULT_SHARE_DAILY_CAP,
+  FORM_NOTES_MAX,
   GUEST_TASK_RATE_KIND,
   HANDLE_PATTERN,
   MAX_SHARE_DAILY_CAP,
@@ -21,8 +22,11 @@ import {
   OFFER_NAME_PATTERN,
   SHARE_CAP_WINDOW_MS,
   SHARED_ADDRESS_PATTERN,
+  TASK_DESCRIPTION_MAX,
+  TASK_TITLE_MAX,
 } from './constants';
 import { HttpError, isForeignKeyViolation, isUniqueViolation } from './errors';
+import { assertInputSchema, validateInput, type InputSchema } from './input-schema';
 import { assertGuestWorkspaceLimit } from './plans';
 import { consumeKeyedRateLimit } from './rate-limit';
 import { assertResultSchema } from './validate';
@@ -242,8 +246,35 @@ export function serializeOffer(offer: typeof agentOffers.$inferSelect) {
     name: offer.name,
     description: offer.description,
     result_schema: offer.resultSchema,
+    input_schema: offer.inputSchema ?? null,
+    notes_enabled: offer.notesEnabled,
     created_at: offer.createdAt.toISOString(),
   };
+}
+
+/** Max notes length a guest may send on this offer: null for a free-text offer, 0 when notes are off. */
+export function notesMaxFor(offer: { inputSchema: Record<string, unknown> | null; notesEnabled: boolean }): number | null {
+  if (!offer.inputSchema) return null;
+  return offer.notesEnabled ? FORM_NOTES_MAX : 0;
+}
+
+export const INPUT_SCHEMA_CLEARED_WARNING = 'Guests can now send free text for this offer.';
+
+/** undefined keeps the stored value, null clears it, anything else must pass the input profile. */
+function parseInputSchemaArg(raw: unknown): InputSchema | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  return assertInputSchema(raw);
+}
+
+function assertNotesSetting(inputSchema: unknown, notesEnabled: boolean): void {
+  if (!notesEnabled && !inputSchema) {
+    throw new HttpError(
+      400,
+      'notes_required_without_input_schema',
+      'notes_enabled can only be false on an offer with input_schema. A free-text offer needs its description.',
+    );
+  }
 }
 
 export async function listOffers(workspaceId: string, agentId: string) {
@@ -259,17 +290,20 @@ export async function listOffers(workspaceId: string, agentId: string) {
 export async function createOffer(
   workspaceId: string,
   agentId: string,
-  input: { name: string; description: string; resultSchema: unknown },
+  input: { name: string; description: string; resultSchema: unknown; inputSchema?: unknown; notesEnabled?: boolean },
 ) {
   const name = assertOfferName(input.name);
   const description = assertOfferDescription(input.description);
   const resultSchema = assertResultSchema(input.resultSchema);
+  const inputSchema = parseInputSchemaArg(input.inputSchema) ?? null;
+  const notesEnabled = input.notesEnabled ?? true;
+  assertNotesSetting(inputSchema, notesEnabled);
   try {
     const [offer] = await getDb().transaction(async (tx) => {
       const agent = await lockOwnerAgent(tx, workspaceId, agentId);
       return tx
         .insert(agentOffers)
-        .values({ agentId: agent.id, name, description, resultSchema })
+        .values({ agentId: agent.id, name, description, resultSchema, inputSchema, notesEnabled })
         .returning();
     });
     if (!offer) throw new HttpError(500, 'internal_error', 'Something went wrong.');
@@ -284,14 +318,22 @@ export async function updateOffer(
   workspaceId: string,
   agentId: string,
   offerId: string,
-  input: { name?: string; description?: string; resultSchema?: unknown },
+  input: { name?: string; description?: string; resultSchema?: unknown; inputSchema?: unknown; notesEnabled?: boolean },
 ) {
-  if (input.name === undefined && input.description === undefined && input.resultSchema === undefined) {
-    throw new HttpError(400, 'validation_error', 'Send a name, description, or result_schema to update.');
+  if (
+    input.name === undefined &&
+    input.description === undefined &&
+    input.resultSchema === undefined &&
+    input.inputSchema === undefined &&
+    input.notesEnabled === undefined
+  ) {
+    throw new HttpError(400, 'validation_error', 'Send a name, description, result_schema, input_schema, or notes_enabled to update.');
   }
   const name = input.name === undefined ? undefined : assertOfferName(input.name);
   const description = input.description === undefined ? undefined : assertOfferDescription(input.description);
   const resultSchema = input.resultSchema === undefined ? undefined : assertResultSchema(input.resultSchema);
+  const inputSchema = parseInputSchemaArg(input.inputSchema);
+  const notesEnabled = input.notesEnabled;
   try {
     const offer = await getDb().transaction(async (tx) => {
       const agent = await lockOwnerAgent(tx, workspaceId, agentId);
@@ -301,19 +343,25 @@ export async function updateOffer(
         .where(and(eq(agentOffers.id, offerId), eq(agentOffers.agentId, agent.id)))
         .limit(1);
       if (!existing) throw new HttpError(404, 'not_found', 'No offer was found.');
+      assertNotesSetting(
+        inputSchema === undefined ? existing.inputSchema : inputSchema,
+        notesEnabled ?? existing.notesEnabled,
+      );
       const [updated] = await tx
         .update(agentOffers)
         .set({
           ...(name !== undefined ? { name } : {}),
           ...(description !== undefined ? { description } : {}),
           ...(resultSchema !== undefined ? { resultSchema } : {}),
+          ...(inputSchema !== undefined ? { inputSchema } : {}),
+          ...(notesEnabled !== undefined ? { notesEnabled } : {}),
         })
         .where(eq(agentOffers.id, existing.id))
         .returning();
-      return updated ?? null;
+      return updated ? { row: updated, cleared: inputSchema === null && existing.inputSchema !== null } : null;
     });
     if (!offer) throw new HttpError(500, 'internal_error', 'Something went wrong.');
-    return serializeOffer(offer);
+    return { offer: serializeOffer(offer.row), ...(offer.cleared ? { warning: INPUT_SCHEMA_CLEARED_WARNING } : {}) };
   } catch (err) {
     if (isUniqueViolation(err)) throw new HttpError(409, 'offer_taken', 'An offer with that name already exists on this agent.');
     throw err;
@@ -342,11 +390,14 @@ export async function deleteOffer(workspaceId: string, agentId: string, offerId:
 export async function upsertOfferByName(
   workspaceId: string,
   agentId: string,
-  input: { name: string; description: string; resultSchema: unknown },
+  input: { name: string; description: string; resultSchema: unknown; inputSchema?: unknown; notesEnabled?: boolean },
 ) {
   const name = assertOfferName(input.name);
   const description = assertOfferDescription(input.description);
   const resultSchema = assertResultSchema(input.resultSchema);
+  // Omitting input_schema keeps the stored shape; only an explicit null reopens free text.
+  const inputSchema = parseInputSchemaArg(input.inputSchema);
+  const notesEnabled = input.notesEnabled;
   const written = await getDb().transaction(async (tx) => {
     const agent = await lockOwnerAgent(tx, workspaceId, agentId);
     const [existing] = await tx
@@ -355,22 +406,35 @@ export async function upsertOfferByName(
       .where(and(eq(agentOffers.agentId, agent.id), eq(agentOffers.name, name)))
       .limit(1);
     if (!existing) {
+      const finalSchema = inputSchema ?? null;
+      const finalNotes = notesEnabled ?? true;
+      assertNotesSetting(finalSchema, finalNotes);
       const [created] = await tx
         .insert(agentOffers)
-        .values({ agentId: agent.id, name, description, resultSchema })
+        .values({ agentId: agent.id, name, description, resultSchema, inputSchema: finalSchema, notesEnabled: finalNotes })
         .returning();
       if (!created) throw new HttpError(500, 'internal_error', 'Something went wrong.');
-      return { offer: created, created: true };
+      return { offer: created, created: true, cleared: false };
     }
+    assertNotesSetting(inputSchema === undefined ? existing.inputSchema : inputSchema, notesEnabled ?? existing.notesEnabled);
     const [updated] = await tx
       .update(agentOffers)
-      .set({ description, resultSchema })
+      .set({
+        description,
+        resultSchema,
+        ...(inputSchema !== undefined ? { inputSchema } : {}),
+        ...(notesEnabled !== undefined ? { notesEnabled } : {}),
+      })
       .where(eq(agentOffers.id, existing.id))
       .returning();
     if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
-    return { offer: updated, created: false };
+    return { offer: updated, created: false, cleared: inputSchema === null && existing.inputSchema !== null };
   });
-  return { offer: serializeOffer(written.offer), created: written.created };
+  return {
+    offer: serializeOffer(written.offer),
+    created: written.created,
+    ...(written.cleared ? { warning: INPUT_SCHEMA_CLEARED_WARNING } : {}),
+  };
 }
 
 export async function deleteOfferByName(workspaceId: string, agentId: string, name: string): Promise<void> {
@@ -675,13 +739,85 @@ export type ResolvedShare = {
   offerId: string;
   resultSchema: Record<string, unknown>;
   ownerHandle: string;
+  /** What to store on the task: the server title for a form offer, or the sender's. */
+  title: string;
+  description: string;
+  inputSchema: Record<string, unknown> | null;
+  input: Record<string, unknown> | null;
 };
+
+/** What a guest sent besides to/offer. Which fields are required depends on the offer. */
+export type GuestTaskFields = { title?: string; description?: string; input?: unknown };
+
+export function assertFreeTextFields(fields: GuestTaskFields): { title: string; description: string } {
+  if (fields.input !== undefined) {
+    throw new HttpError(
+      400,
+      'input_not_allowed',
+      'input is only for an offer with input_schema. Send title and description for this offer.',
+    );
+  }
+  const title = fields.title ?? '';
+  const description = fields.description ?? '';
+  if (title.trim().length < 1 || title.length > TASK_TITLE_MAX) {
+    throw new HttpError(400, 'validation_error', `Title must be 1-${TASK_TITLE_MAX} characters.`);
+  }
+  if (description.length < 1 || description.length > TASK_DESCRIPTION_MAX) {
+    throw new HttpError(400, 'validation_error', `Description must be 1-${TASK_DESCRIPTION_MAX} characters.`);
+  }
+  return { title: title.trim(), description };
+}
+
+/**
+ * Form offer: the server sets the title, notes go in description, and input must match the
+ * offer's schema. Runs after the grant lookup and before the daily cap, inside the same transaction.
+ */
+function assertFormFields(
+  offer: { name: string; inputSchema: Record<string, unknown>; notesEnabled: boolean },
+  fields: GuestTaskFields,
+): { title: string; description: string; input: Record<string, unknown> } {
+  if (fields.title !== undefined) {
+    throw new HttpError(
+      400,
+      'validation_error',
+      'Leave out title for an offer with input_schema. The server sets it. Put any notes in description.',
+    );
+  }
+  const notes = fields.description ?? '';
+  if (!offer.notesEnabled && notes.length > 0) {
+    throw new HttpError(400, 'validation_error', 'This offer does not take notes. Leave out description.');
+  }
+  if (notes.length > FORM_NOTES_MAX) {
+    throw new HttpError(400, 'validation_error', `Notes (description) must be at most ${FORM_NOTES_MAX} characters on a form offer.`);
+  }
+  if (fields.input === undefined) {
+    throw new HttpError(400, 'input_required', 'This offer has input_schema. Send input that matches it.', {
+      input_schema: offer.inputSchema,
+    });
+  }
+  const checked = validateInput(offer.inputSchema, fields.input);
+  if (!checked.ok) {
+    if (checked.errors.some((error) => error.keyword === 'schema')) {
+      console.error('input_schema failed to compile at create time', { offerName: offer.name });
+    }
+    throw new HttpError(400, 'invalid_input', 'input does not match the offer input_schema.', {
+      validation_errors: checked.errors,
+    });
+  }
+  const schemaTitle = typeof offer.inputSchema.title === 'string' ? offer.inputSchema.title.trim() : '';
+  return {
+    title: (schemaTitle || offer.name).slice(0, TASK_TITLE_MAX),
+    description: notes,
+    input: fields.input as Record<string, unknown>,
+  };
+}
 
 export async function resolveSharedTask(
   tx: Db,
   caller: AgentPrincipal,
   address: { handle: string; agentName: string },
   offerName: string,
+  fields: GuestTaskFields = {},
 ): Promise<ResolvedShare> {
   const shown = addressOf(address.handle, address.agentName);
   const offer = assertOfferName(offerName);
@@ -719,12 +855,23 @@ export async function resolveSharedTask(
   // One lookup through the grant: an offer the owner has but did not grant looks exactly like an unknown name,
   // so a guest cannot probe which offers exist.
   const [menu] = await tx
-    .select({ id: agentOffers.id, resultSchema: agentOffers.resultSchema })
+    .select({
+      id: agentOffers.id,
+      name: agentOffers.name,
+      resultSchema: agentOffers.resultSchema,
+      inputSchema: agentOffers.inputSchema,
+      notesEnabled: agentOffers.notesEnabled,
+    })
     .from(agentShareOffers)
     .innerJoin(agentOffers, eq(agentOffers.id, agentShareOffers.offerId))
     .where(and(eq(agentShareOffers.shareId, fresh.id), eq(agentOffers.agentId, recipient.id), eq(agentOffers.name, offer)))
     .limit(1);
   if (!menu) throw offerNotAvailable(offer, shown);
+  // Input checks come after the grant lookup (an ungranted offer stays offer_not_found) and before the
+  // cap, so a rejected input never uses the guest's daily cap.
+  const accepted = menu.inputSchema
+    ? assertFormFields({ name: menu.name, inputSchema: menu.inputSchema, notesEnabled: menu.notesEnabled }, fields)
+    : { ...assertFreeTextFields(fields), input: null };
   const cap = await consumeKeyedRateLimit(tx, {
     kind: GUEST_TASK_RATE_KIND,
     key: fresh.id,
@@ -737,7 +884,16 @@ export async function resolveSharedTask(
       daily_cap: fresh.dailyCap,
     });
   }
-  return { recipient, offerId: menu.id, resultSchema: menu.resultSchema, ownerHandle: address.handle };
+  return {
+    recipient,
+    offerId: menu.id,
+    resultSchema: menu.resultSchema,
+    ownerHandle: address.handle,
+    title: accepted.title,
+    description: accepted.description,
+    inputSchema: accepted.input ? menu.inputSchema : null,
+    input: accepted.input,
+  };
 }
 
 export async function getAgentCard(caller: AgentPrincipal, to: string) {
@@ -767,7 +923,13 @@ export async function getAgentCard(caller: AgentPrincipal, to: string) {
   if (share.status === 'revoked') throw new HttpError(403, 'share_revoked', `Access to ${shown} was revoked.`);
   if (share.status !== 'approved') throw new HttpError(403, 'share_pending', `Access to ${shown} is not approved yet.`);
   const offers = await db
-    .select({ name: agentOffers.name, description: agentOffers.description, resultSchema: agentOffers.resultSchema })
+    .select({
+      name: agentOffers.name,
+      description: agentOffers.description,
+      resultSchema: agentOffers.resultSchema,
+      inputSchema: agentOffers.inputSchema,
+      notesEnabled: agentOffers.notesEnabled,
+    })
     .from(agentShareOffers)
     .innerJoin(agentOffers, eq(agentOffers.id, agentShareOffers.offerId))
     .where(eq(agentShareOffers.shareId, share.id))
@@ -780,6 +942,9 @@ export async function getAgentCard(caller: AgentPrincipal, to: string) {
       name: offer.name,
       description: offer.description,
       result_schema: offer.resultSchema,
+      input_schema: offer.inputSchema ?? null,
+      notes_enabled: offer.notesEnabled,
+      notes_max: notesMaxFor(offer),
     })),
   };
 }
