@@ -19,8 +19,7 @@ import {
   setWorkspaceHandle,
   upsertOfferByName,
 } from './sharing';
-import { SITE_URL } from '@/components/site/seo';
-import { createInvite, invitePrompt, inviteUrl, listInvites, redeemInvite, revokeInvite } from './invites';
+import { redeemInvite } from './invites';
 import { askTask, completeTask, createTask, failTask, getTask, listTasks, sendMessage } from './tasks';
 
 type ToolCtx = {
@@ -424,76 +423,9 @@ export const mcpHandler = createMcpHandler(
         try {
           const principal = principalFrom(ctx as ToolCtx);
           const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
-          const shares = await listShares(principal.workspaceId, agent.id);
+          // Agent tools never see customer emails; the signed-in owner sees them in the dashboard.
+          const shares = (await listShares(principal.workspaceId, agent.id)).map((share) => ({ ...share, customer_email: undefined }));
           return ok({ shares });
-        } catch (err) {
-          return fail(err);
-        }
-      },
-    );
-
-    server.registerTool(
-      'create_invite',
-      {
-        title: docsByName.get('create_invite')!.title,
-        description: docsByName.get('create_invite')!.description,
-        inputSchema: toolInputs.create_invite,
-      },
-      async (args, ctx) => {
-        try {
-          const principal = principalFrom(ctx as ToolCtx);
-          const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
-          const { invite, token } = await createInvite(
-            principal.workspaceId,
-            agent.id,
-            { agentId: principal.agentId },
-            {
-              offerNames: args.offers,
-              dailyCap: args.daily_cap,
-              maxUses: args.max_uses,
-              expiresInDays: args.expires_in_days,
-              label: args.label,
-            },
-          );
-          return ok({ invite, token, url: inviteUrl(SITE_URL, token), agent_prompt: invitePrompt(SITE_URL, token) });
-        } catch (err) {
-          return fail(err);
-        }
-      },
-    );
-
-    server.registerTool(
-      'list_invites',
-      {
-        title: docsByName.get('list_invites')!.title,
-        description: docsByName.get('list_invites')!.description,
-        inputSchema: toolInputs.list_invites,
-      },
-      async (args, ctx) => {
-        try {
-          const principal = principalFrom(ctx as ToolCtx);
-          const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
-          return ok({ invites: await listInvites(principal.workspaceId, agent.id) });
-        } catch (err) {
-          return fail(err);
-        }
-      },
-    );
-
-    server.registerTool(
-      'revoke_invite',
-      {
-        title: docsByName.get('revoke_invite')!.title,
-        description: docsByName.get('revoke_invite')!.description,
-        inputSchema: toolInputs.revoke_invite,
-      },
-      async (args, ctx) => {
-        try {
-          const principal = principalFrom(ctx as ToolCtx);
-          const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
-          return ok(
-            await revokeInvite(principal.workspaceId, agent.id, args.invite_id, { revokeShares: args.revoke_shares ?? false }),
-          );
         } catch (err) {
           return fail(err);
         }

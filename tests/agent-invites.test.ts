@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { POST as postOffer } from '@/app/api/v1/agents/[id]/offers/route';
 import { GET as listInvitesRoute, POST as postInvite } from '@/app/api/v1/agents/[id]/invites/route';
 import { POST as revokeInviteRoute } from '@/app/api/v1/agents/[id]/invites/[inviteId]/revoke/route';
@@ -68,27 +68,37 @@ async function createInvite(o: Owner, body: Record<string, unknown> = {}) {
   const res = await call(postInvite, `http://localhost/api/v1/agents/${o.agentId}/invites`, {
     cookie: o.cookie,
     params: { id: o.agentId },
-    body: { offers: ['draft'], ...body },
+    body: { kind: 'agent', offers: ['draft'], approve_on_redeem: true, ...body },
   });
   expect(res.status).toBe(201);
   return res.data as { invite: any; token: string; url: string; agent_prompt: string };
 }
 
-async function redeemNew(token: string, extra: Record<string, unknown> = {}) {
+function randomIp(): string {
+  return `10.0.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+}
+
+async function redeemNew(token: string, extra: Record<string, unknown> = {}, ip = randomIp()) {
   return call(redeemRoute, 'http://localhost/api/v1/invites/redeem', {
     body: { invite: token, name: 'CustomerBot', ...extra },
-    headers: { 'x-forwarded-for': `10.0.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` },
+    headers: { 'x-forwarded-for': ip },
   });
 }
 
+// Anonymous agent guests ship behind VALETTO_AGENT_GUESTS=1; these tests run with it on unless they say otherwise.
+beforeEach(() => {
+  process.env.VALETTO_AGENT_GUESTS = '1';
+});
+
 afterEach(() => {
   setGuestWorkspaceLimitForTests(null);
+  delete process.env.VALETTO_AGENT_GUESTS;
 });
 
 describe('invite links', () => {
-  it('creates an approving invite from the dashboard and returns the link and prompt once', async () => {
+  it('creates an invite from the dashboard, pending by default, and returns the link and prompt once', async () => {
     const o = await owner();
-    const created = await createInvite(o, { label: 'Initech', daily_cap: 20 });
+    const created = await createInvite(o, { label: 'Initech', daily_cap: 20, approve_on_redeem: undefined });
     expect(created.token.startsWith('rsi_')).toBe(true);
     expect(created.url).toBe(`http://localhost/i#${created.token}`);
     expect(created.agent_prompt).toContain(created.token);
@@ -98,7 +108,7 @@ describe('invite links', () => {
       daily_cap: 20,
       max_uses: 1,
       uses: 0,
-      approve_on_redeem: true,
+      approve_on_redeem: false,
       status: 'active',
       offers: [{ name: 'draft' }],
     });
@@ -109,25 +119,24 @@ describe('invite links', () => {
     });
     expect(listed.status).toBe(200);
     expect(listed.text.includes(created.token)).toBe(false);
-    expect(listed.data.invites[0].prefix).toBe(created.invite.prefix);
+    expect(listed.data.agent_guests_enabled).toBe(true);
+    expect(listed.data.agent_invites[0].prefix).toBe(created.invite.prefix);
   });
 
-  it('refuses an agent key on the REST route and makes agent-created invites pending', async () => {
+  it('refuses an agent key on the REST route, has no MCP owner tools, and leaves default invites pending', async () => {
     const o = await owner();
     const rest = await call(postInvite, `http://localhost/api/v1/agents/${o.agentId}/invites`, {
       bearer: o.agentKey,
       params: { id: o.agentId },
-      body: { offers: ['draft'] },
+      body: { kind: 'agent', offers: ['draft'] },
     });
     expect(rest.status).toBe(403);
     expect(rest.data.error.code).toBe('human_required');
-
     const viaMcp = await mcpTool(o.agentKey, 'create_invite', { agent: 'Grok', offers: ['draft'] });
-    expect(viaMcp.isError).toBe(false);
-    expect(viaMcp.payload.invite.approve_on_redeem).toBe(false);
-    expect(viaMcp.payload.url).toContain('/i#rsi_');
+    expect(viaMcp.isError).toBe(true);
 
-    const redeemed = await redeemNew(viaMcp.payload.token);
+    const made = await createInvite(o, { approve_on_redeem: undefined });
+    const redeemed = await redeemNew(made.token);
     expect(redeemed.status).toBe(201);
     expect(redeemed.data.share.status).toBe('pending');
     expect(redeemed.data.next_steps).toContain('pending');
@@ -139,7 +148,8 @@ describe('invite links', () => {
       params: { id: o.agentId },
     });
     const share = shares.data.shares[0];
-    expect(share.invite_prefix).toBe(viaMcp.payload.invite.prefix);
+    expect(share.invite_prefix).toBe(made.invite.prefix);
+    expect(share.source).toBe('agent_invite');
     const approved = await call(approveShare, `http://localhost/api/v1/agents/${o.agentId}/shares/${share.id}/approve`, {
       method: 'POST',
       cookie: o.cookie,
@@ -158,16 +168,17 @@ describe('invite links', () => {
         params: { id: o.agentId },
         body,
       });
-    expect((await bad({ offers: ['nope'] })).data.error.code).toBe('offer_not_found');
-    expect((await bad({ offers: ['draft'], expires_in_days: 91 })).status).toBe(400);
-    expect((await bad({ offers: ['draft'], max_uses: 1001 })).status).toBe(400);
+    expect((await bad({ kind: 'agent', offers: ['nope'] })).data.error.code).toBe('offer_not_found');
+    expect((await bad({ kind: 'agent', offers: ['draft'], expires_in_days: 91 })).status).toBe(400);
+    expect((await bad({ kind: 'agent', offers: ['draft'], max_uses: 1001 })).status).toBe(400);
+    expect((await bad({ offers: ['draft'] })).status).toBe(400);
     await call(putSharing, `http://localhost/api/v1/agents/${o.agentId}/sharing`, {
       method: 'PUT',
       cookie: o.cookie,
       params: { id: o.agentId },
       body: { shared: false },
     });
-    expect((await bad({ offers: ['draft'] })).data.error.code).toBe('agent_not_shared');
+    expect((await bad({ kind: 'agent', offers: ['draft'] })).data.error.code).toBe('agent_not_shared');
   });
 
   it('redeems into a new workspace whose key can send guest tasks and get webhook results', async () => {
@@ -353,12 +364,102 @@ describe('invite links', () => {
     expect(used.data).toEqual(unknown.data);
   });
 
-  it('lists the new MCP tools', async () => {
+  it('lists redeem_invite but no owner invite tools over MCP', async () => {
     const o = await owner();
     const names = (await mcpListTools(o.agentKey)).map((tool) => tool.name);
-    for (const name of ['create_invite', 'list_invites', 'revoke_invite', 'redeem_invite']) {
-      expect(names).toContain(name);
-    }
+    expect(names).toContain('redeem_invite');
+    for (const name of ['create_invite', 'list_invites', 'revoke_invite']) expect(names).not.toContain(name);
+  });
+
+  it('never lets a revoked guest back in through an invite, in an existing or a fresh workspace', async () => {
+    const o = await owner();
+    const { token, invite } = await createInvite(o, { max_uses: 10 });
+    const guest = await signIn();
+    const bot = await createAgent(guest.cookie, 'Helper');
+    const key = await createKey(guest.cookie, bot.id);
+    expect((await mcpTool(key, 'redeem_invite', { invite: token })).isError).toBe(false);
+    const ip = randomIp();
+    const fresh = await redeemNew(token, {}, ip);
+    expect(fresh.status).toBe(201);
+
+    const shares = await call(listSharesRoute, `http://localhost/api/v1/agents/${o.agentId}/shares`, {
+      cookie: o.cookie,
+      params: { id: o.agentId },
+    });
+    expect(shares.data.shares).toHaveLength(2);
+    const revoke = await call(revokeInviteRoute, `http://localhost/api/v1/agents/${o.agentId}/invites/${invite.id}/revoke`, {
+      cookie: o.cookie,
+      params: { id: o.agentId, inviteId: invite.id },
+      body: { revoke_shares: true },
+    });
+    expect(revoke.data.revoked_shares).toBe(2);
+    // Revoking the shares revoked the link too, so make a second link: an invite still must not revive the guest.
+    const second = await createInvite(o, { max_uses: 10 });
+    const again = await mcpTool(key, 'redeem_invite', { invite: second.token });
+    expect(again.payload.error).toBe('share_revoked');
+
+    // A fresh workspace from the same source on the same link is refused; the link stays usable for others.
+    await getDb().update(agentInvites).set({ revokedAt: null }).where(eq(agentInvites.id, invite.id));
+    const sameSource = await redeemNew(token, {}, ip);
+    expect(sameSource.status).toBe(403);
+    expect(sameSource.data.error.code).toBe('share_revoked');
+    expect((await redeemNew(token)).status).toBe(201);
+  });
+
+  it('keeps the revoked-source block through workspace cleanup', async () => {
+    const o = await owner();
+    const { token, invite } = await createInvite(o, { max_uses: 10 });
+    const ip = randomIp();
+    const fresh = await redeemNew(token, {}, ip);
+    await call(revokeInviteRoute, `http://localhost/api/v1/agents/${o.agentId}/invites/${invite.id}/revoke`, {
+      cookie: o.cookie,
+      params: { id: o.agentId, inviteId: invite.id },
+      body: { revoke_shares: true },
+    });
+    await getDb()
+      .update(workspaces)
+      .set({ createdAt: new Date(Date.now() - (INVITE_WORKSPACE_IDLE_DAYS + 1) * 24 * 60 * 60 * 1000) })
+      .where(eq(workspaces.id, fresh.data.workspace.id));
+    await cleanupUnclaimedInviteWorkspaces();
+    const kept = await getDb().select().from(workspaces).where(eq(workspaces.id, fresh.data.workspace.id));
+    expect(kept).toHaveLength(1);
+  });
+});
+
+describe('agent guests flag off', () => {
+  it('hides create, preview, redeem, and claim behind 404 and reports the flag', async () => {
+    const o = await owner();
+    const made = await createInvite(o);
+    const redeemed = await redeemNew(made.token);
+    const claimToken = (redeemed.data.workspace.claim_url as string).split('#')[1]!;
+    delete process.env.VALETTO_AGENT_GUESTS;
+
+    const create = await call(postInvite, `http://localhost/api/v1/agents/${o.agentId}/invites`, {
+      cookie: o.cookie,
+      params: { id: o.agentId },
+      body: { kind: 'agent', offers: ['draft'] },
+    });
+    expect(create.status).toBe(404);
+    expect((await call(invitePreview, 'http://localhost/api/v1/invites/preview', { bearer: made.token })).status).toBe(404);
+    expect((await redeemNew(made.token)).status).toBe(404);
+    expect((await call(claimPreview, 'http://localhost/api/v1/claims/preview', { bearer: claimToken })).status).toBe(404);
+    const email = emailAddress('flagoff');
+    await call(requestCode, 'http://localhost/api/v1/auth/request-code', { body: { email } });
+    const verified = await call(verifyCode, 'http://localhost/api/v1/auth/verify-code', {
+      body: { email, code: latestCode(email), claim_token: claimToken },
+    });
+    expect(verified.status).toBe(404);
+    const guest = await signIn();
+    const bot = await createAgent(guest.cookie, 'Helper');
+    const key = await createKey(guest.cookie, bot.id);
+    expect((await mcpTool(key, 'redeem_invite', { invite: made.token })).payload.error).toBe('not_found');
+
+    const listed = await call(listInvitesRoute, `http://localhost/api/v1/agents/${o.agentId}/invites`, {
+      cookie: o.cookie,
+      params: { id: o.agentId },
+    });
+    expect(listed.data.agent_guests_enabled).toBe(false);
+    expect(listed.data.agent_invites).toEqual([]);
   });
 });
 
@@ -397,6 +498,20 @@ describe('claiming an invite workspace', () => {
     const second = await verifyWithClaim(emailAddress('late'), claimToken);
     expect(second.status).toBe(404);
     expect(second.data.error.code).toBe('claim_not_found');
+  });
+
+  it('expires the claim link after 7 days', async () => {
+    const { redeemed, claimToken } = await claimSetup();
+    const [ws] = await getDb().select().from(workspaces).where(eq(workspaces.id, redeemed.data.workspace.id));
+    expect(ws!.claimExpiresAt!.getTime() - Date.now()).toBeGreaterThan(6.9 * 24 * 60 * 60 * 1000);
+    await getDb()
+      .update(workspaces)
+      .set({ claimExpiresAt: new Date(Date.now() - 1000) })
+      .where(eq(workspaces.id, redeemed.data.workspace.id));
+    expect((await call(claimPreview, 'http://localhost/api/v1/claims/preview', { bearer: claimToken })).status).toBe(404);
+    const verified = await verifyWithClaim(emailAddress('expired'), claimToken);
+    expect(verified.status).toBe(404);
+    expect(verified.data.error.code).toBe('claim_not_found');
   });
 
   it('refuses an email that already has a workspace without burning the code', async () => {

@@ -2,6 +2,7 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { agents, loginCodes, sessions, users, workspaces } from '@/db/schema';
 import {
+  agentGuestsEnabled,
   EMAIL_PATTERN,
   LOGIN_CODE_MAX_ATTEMPTS,
   LOGIN_CODE_TTL_MS,
@@ -129,13 +130,15 @@ const ALREADY_IN_WORKSPACE =
   "This email already has a workspace. Ask your agent to call redeem_invite to add the share to it.";
 
 /** Public summary for the claim page. One 404 for an unknown or already claimed token. */
+/** An open claim: not yet claimed and inside its 7-day window. */
+function claimOpen(hash: string) {
+  return and(eq(workspaces.claimTokenHash, hash), isNull(workspaces.claimedAt), sql`${workspaces.claimExpiresAt} > now()`);
+}
+
 export async function previewClaim(claimToken: string) {
+  if (!agentGuestsEnabled()) throw new HttpError(404, 'claim_not_found', CLAIM_NOT_FOUND);
   const db = getDb();
-  const [workspace] = await db
-    .select()
-    .from(workspaces)
-    .where(and(eq(workspaces.claimTokenHash, sha256(claimToken)), isNull(workspaces.claimedAt)))
-    .limit(1);
+  const [workspace] = await db.select().from(workspaces).where(claimOpen(sha256(claimToken))).limit(1);
   if (!workspace) throw new HttpError(404, 'claim_not_found', CLAIM_NOT_FOUND);
   const agentRows = await db
     .select({ name: agents.name })
@@ -199,13 +202,14 @@ export async function verifyLoginCode(
 
   // A claim that cannot succeed is refused before the code is consumed, so the person can retry without a new code.
   const claimHash = claimToken ? sha256(claimToken) : null;
+  if (claimHash && !agentGuestsEnabled()) throw new HttpError(404, 'claim_not_found', CLAIM_NOT_FOUND);
   if (claimHash) {
     const [owner] = await db.select({ workspaceId: users.workspaceId }).from(users).where(eq(users.email, email)).limit(1);
     if (owner?.workspaceId) throw new HttpError(409, 'already_in_workspace', ALREADY_IN_WORKSPACE);
     const [claimable] = await db
       .select({ id: workspaces.id })
       .from(workspaces)
-      .where(and(eq(workspaces.claimTokenHash, claimHash), isNull(workspaces.claimedAt)))
+      .where(claimOpen(claimHash))
       .limit(1);
     if (!claimable) throw new HttpError(404, 'claim_not_found', CLAIM_NOT_FOUND);
   }
@@ -244,8 +248,8 @@ export async function verifyLoginCode(
         await tx.execute(sql`select id from workspaces where claim_token_hash = ${claimHash} for update`);
         [created] = await tx
           .update(workspaces)
-          .set({ claimTokenHash: null, claimedAt: new Date() })
-          .where(and(eq(workspaces.claimTokenHash, claimHash), isNull(workspaces.claimedAt)))
+          .set({ claimTokenHash: null, claimedAt: new Date(), claimExpiresAt: null })
+          .where(claimOpen(claimHash))
           .returning();
         if (!created) throw new HttpError(404, 'claim_not_found', CLAIM_NOT_FOUND);
       } else {

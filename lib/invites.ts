@@ -20,6 +20,8 @@ import {
 import type { AgentPrincipal } from './agents';
 import {
   AGENT_NAME_PATTERN,
+  agentGuestsEnabled,
+  CLAIM_TOKEN_TTL_DAYS,
   DEFAULT_SHARE_DAILY_CAP,
   INVITE_DEFAULT_TTL_DAYS,
   INVITE_HANDLE_PREFIX,
@@ -33,18 +35,30 @@ import {
 import { randomToken, sha256, tokenPrefix } from './crypto';
 import { deliveryColumns, type DeliveryInput } from './delivery';
 import { HttpError, isUniqueViolation } from './errors';
-import { assertGuestWorkspaceLimit, PlanLimitError } from './plans';
 import { consumeRateLimit } from './rate-limit';
 import {
   assertClaimed,
+  assertGuestSlot,
   assertDailyCap,
   dedupeOfferNames,
   deliverWakeIds,
   loadOffersByName,
   lockOwnerAgent,
+  notesMaxFor,
   replaceShareOffers,
   revokeShareRow,
 } from './sharing';
+
+/**
+ * Anonymous agent guests sit behind VALETTO_AGENT_GUESTS=1. When it is off, every entry point
+ * (create, preview, redeem, claim) answers like a route that does not exist.
+ */
+export function assertAgentGuestsEnabled(): void {
+  if (!agentGuestsEnabled()) throw new HttpError(404, 'not_found', 'Not found.');
+}
+
+const GUEST_SLOT_MESSAGE = "The owner's plan has no room for another guest. Ask them to upgrade or remove a guest.";
+const SHARE_REVOKED_MESSAGE = 'The owner revoked this access. An invite cannot restore it; ask the owner.';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HANDLE_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -165,7 +179,9 @@ export async function createInvite(
   const label = cleanLabel(input.label);
   const offerNames = dedupeOfferNames(input.offerNames);
   // An agent key never approves. The database check enforces this as well.
-  const approveOnRedeem = 'userId' in creator ? (input.approveOnRedeem ?? true) : false;
+  // Default off: the owner approves each redeemed guest unless they opt in when creating the invite.
+  const approveOnRedeem = 'userId' in creator ? (input.approveOnRedeem ?? false) : false;
+  assertAgentGuestsEnabled();
   const secret = randomToken('rsi_');
   const db = getDb();
 
@@ -290,11 +306,24 @@ async function workspaceHandle(db: Db, workspaceId: string): Promise<string> {
 async function offerCards(db: Db, offerIds: string[]) {
   if (offerIds.length === 0) return [];
   const rows = await db
-    .select({ name: agentOffers.name, description: agentOffers.description, resultSchema: agentOffers.resultSchema })
+    .select({
+      name: agentOffers.name,
+      description: agentOffers.description,
+      resultSchema: agentOffers.resultSchema,
+      inputSchema: agentOffers.inputSchema,
+      notesEnabled: agentOffers.notesEnabled,
+    })
     .from(agentOffers)
     .where(inArray(agentOffers.id, offerIds))
     .orderBy(agentOffers.name);
-  return rows.map((offer) => ({ name: offer.name, description: offer.description, result_schema: offer.resultSchema }));
+  return rows.map((offer) => ({
+    name: offer.name,
+    description: offer.description,
+    result_schema: offer.resultSchema,
+    input_schema: offer.inputSchema ?? null,
+    notes_enabled: offer.notesEnabled,
+    notes_max: notesMaxFor(offer),
+  }));
 }
 
 async function inviteOfferIds(db: Db, inviteId: string): Promise<string[]> {
@@ -317,6 +346,7 @@ async function consumeInviteRate(kind: 'redeem' | 'invitePreview', key: RateKey)
 
 /** Public card for the /i page and for agents deciding whether to redeem. One 404 for every invalid state. */
 export async function previewInvite(token: string, key: RateKey) {
+  assertAgentGuestsEnabled();
   await consumeInviteRate('invitePreview', key);
   const db = getDb();
   const invite = await findInviteByToken(db, token);
@@ -354,7 +384,7 @@ type ShareCard = {
   address: string;
   status: string;
   daily_cap: number;
-  offers: { name: string; description: string; result_schema: Record<string, unknown> }[];
+  offers: Awaited<ReturnType<typeof offerCards>>;
 };
 
 export type RedeemResult =
@@ -377,26 +407,8 @@ async function shareCard(db: Db, share: AgentShareRow, address: string): Promise
   };
 }
 
-/** Same rule as inviteGuest: pending and approved shares use a slot. The guest sees the owner limit reworded. */
-async function assertGuestSlot(tx: Db, owner: AgentRow): Promise<void> {
-  const [row] = await tx
-    .select({ count: sql<number>`count(*)::int` })
-    .from(agentShares)
-    .where(and(eq(agentShares.agentId, owner.id), inArray(agentShares.status, ['pending', 'approved'])));
-  try {
-    await assertGuestWorkspaceLimit(owner.workspaceId, Number(row?.count ?? 0), tx);
-  } catch (err) {
-    if (err instanceof PlanLimitError) {
-      throw new PlanLimitError({
-        ...err.body,
-        message: "The owner's plan has no room for another guest. Ask them to upgrade or remove a guest.",
-      });
-    }
-    throw err;
-  }
-}
-
 export async function redeemInvite(input: { token: string; label?: string; target: RedeemTarget; rateKey: RateKey }): Promise<RedeemResult> {
+  assertAgentGuestsEnabled();
   await consumeInviteRate('redeem', input.rateKey);
   const { target } = input;
   if (target.kind === 'new' && !AGENT_NAME_PATTERN.test(target.name)) {
@@ -413,7 +425,9 @@ export async function redeemInvite(input: { token: string; label?: string; targe
   // Only the random handle can collide on insert. Retry that case with a fresh one.
   for (let attempt = 0; ; attempt++) {
     try {
-      const result = await db.transaction((tx) => redeemInTx(tx, { token: input.token, label, target, columns }));
+      const result = await db.transaction((tx) =>
+        redeemInTx(tx, { token: input.token, label, target, columns, ip: input.rateKey.ip }),
+      );
       return result;
     } catch (err) {
       if (target.kind === 'new' && attempt < 2 && isUniqueViolation(err)) continue;
@@ -424,7 +438,13 @@ export async function redeemInvite(input: { token: string; label?: string; targe
 
 async function redeemInTx(
   tx: Db,
-  input: { token: string; label: string | null; target: RedeemTarget; columns: ReturnType<typeof deliveryColumns> | null },
+  input: {
+    token: string;
+    label: string | null;
+    target: RedeemTarget;
+    columns: ReturnType<typeof deliveryColumns> | null;
+    ip: string;
+  },
 ): Promise<RedeemResult> {
   const found = await findInviteByToken(tx, input.token);
   if (!found) throw new HttpError(404, 'invite_not_found', INVITE_NOT_FOUND);
@@ -459,31 +479,57 @@ async function redeemInTx(
       .from(agentShares)
       .where(and(eq(agentShares.agentId, owner.id), eq(agentShares.guestWorkspaceId, guestWorkspaceId)))
       .limit(1);
+    // An invite never undoes a revoke: only the owner can grant a revoked guest again (invite_guest).
+    if (existing?.status === 'revoked') throw new HttpError(403, 'share_revoked', SHARE_REVOKED_MESSAGE);
     // A live share is left alone: redeeming again is idempotent and consumes no use.
-    if (existing && existing.status !== 'revoked') {
-      return { kind: 'existing', share: await shareCard(tx, existing, address), created: false };
-    }
-    await assertGuestSlot(tx, owner);
-    const values = { status: shareStatus, dailyCap: invite.dailyCap, inviteId: invite.id, label, updatedAt: new Date() };
-    const [share] = existing
-      ? await tx.update(agentShares).set(values).where(eq(agentShares.id, existing.id)).returning()
-      : await tx
-          .insert(agentShares)
-          .values({ agentId: owner.id, guestWorkspaceId, ...values })
-          .returning();
+    if (existing) return { kind: 'existing', share: await shareCard(tx, existing, address), created: false };
+    await assertGuestSlot(tx, owner, GUEST_SLOT_MESSAGE);
+    const [share] = await tx
+      .insert(agentShares)
+      .values({
+        agentId: owner.id,
+        guestWorkspaceId,
+        status: shareStatus,
+        dailyCap: invite.dailyCap,
+        inviteId: invite.id,
+        label,
+        source: 'agent_invite',
+      })
+      .returning();
     if (!share) throw new HttpError(500, 'internal_error', 'Something went wrong.');
     await replaceShareOffers(tx, share.id, offerIds);
     await consumeUse(tx, invite.id);
     return { kind: 'existing', share: await shareCard(tx, share, address), created: true };
   }
 
-  await assertGuestSlot(tx, owner);
+  // A new workspace has no history to check, so the redeem source stands in for the person: a source
+  // (client IP, per invite) whose earlier redeem was revoked cannot mint a fresh workspace from the same link.
+  const redeemSourceHash = sha256(`${invite.id}:${input.ip}`);
+  const [revokedSource] = await tx
+    .select({ id: agentShares.id })
+    .from(agentShares)
+    .where(
+      and(
+        eq(agentShares.inviteId, invite.id),
+        eq(agentShares.redeemSourceHash, redeemSourceHash),
+        eq(agentShares.status, 'revoked'),
+      ),
+    )
+    .limit(1);
+  if (revokedSource) throw new HttpError(403, 'share_revoked', SHARE_REVOKED_MESSAGE);
+  await assertGuestSlot(tx, owner, GUEST_SLOT_MESSAGE);
   const claimToken = randomToken('rsc_');
   const apiKey = randomToken('rsk_');
   const name = `${label ?? 'Guest'} (guest of @${ownerHandle})`.slice(0, WORKSPACE_NAME_MAX);
   const [workspace] = await tx
     .insert(workspaces)
-    .values({ name, handle: inviteHandle(), origin: 'invite', claimTokenHash: sha256(claimToken) })
+    .values({
+      name,
+      handle: inviteHandle(),
+      origin: 'invite',
+      claimTokenHash: sha256(claimToken),
+      claimExpiresAt: new Date(Date.now() + CLAIM_TOKEN_TTL_DAYS * DAY_MS),
+    })
     .returning();
   if (!workspace?.handle) throw new HttpError(500, 'internal_error', 'Something went wrong.');
   const [agent] = await tx
@@ -506,6 +552,8 @@ async function redeemInTx(
       dailyCap: invite.dailyCap,
       inviteId: invite.id,
       label,
+      source: 'agent_invite',
+      redeemSourceHash,
     })
     .returning();
   if (!share) throw new HttpError(500, 'internal_error', 'Something went wrong.');
@@ -569,6 +617,13 @@ export async function cleanupUnclaimedInviteWorkspaces(limit = 200, now = new Da
       if (message) return false;
       const [wake] = await tx.select({ id: wakes.id }).from(wakes).where(eq(wakes.workspaceId, workspace.id)).limit(1);
       if (wake) return false;
+      // A revoked share carries the redeem-source block. Keep the workspace so the block outlives cleanup.
+      const [revoked] = await tx
+        .select({ id: agentShares.id })
+        .from(agentShares)
+        .where(and(eq(agentShares.guestWorkspaceId, workspace.id), eq(agentShares.status, 'revoked')))
+        .limit(1);
+      if (revoked) return false;
       await tx.delete(agentShares).where(eq(agentShares.guestWorkspaceId, workspace.id));
       if (agentIds.length > 0) await tx.delete(agents).where(inArray(agents.id, agentIds));
       await tx.delete(workspaces).where(eq(workspaces.id, workspace.id));

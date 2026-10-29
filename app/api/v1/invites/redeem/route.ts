@@ -5,7 +5,7 @@ import { INVITE_LABEL_MAX } from '@/lib/constants';
 import { webhookAuthSchema } from '@/lib/delivery';
 import { HttpError } from '@/lib/errors';
 import { bearerToken, handle, json, parseBody, readJson } from '@/lib/http';
-import { redeemInvite } from '@/lib/invites';
+import { assertAgentGuestsEnabled, redeemInvite } from '@/lib/invites';
 import { clientIp, requestOrigin } from '@/lib/origin';
 
 export const runtime = 'nodejs';
@@ -26,6 +26,7 @@ const bodySchema = z.object({
 
 export function POST(req: Request) {
   return handle(async () => {
+    assertAgentGuestsEnabled();
     const body = parseBody(bodySchema, await readJson(req));
     const bearer = bearerToken(req);
     const rateKey = { ip: clientIp(req) };
