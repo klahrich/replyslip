@@ -1,26 +1,29 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
+import postgres from 'postgres';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GET as listAgentsRoute } from '@/app/api/v1/agents/route';
-import { PUT as putAccess } from '@/app/api/v1/agents/[id]/customer-access/route';
+import { GET as getAccess, PUT as putAccess } from '@/app/api/v1/agents/[id]/customer-access/route';
 import { GET as listInvitesRoute, POST as postInvite } from '@/app/api/v1/agents/[id]/invites/route';
 import { PATCH as patchInvite } from '@/app/api/v1/agents/[id]/invites/[inviteId]/route';
 import { POST as revokeInviteRoute } from '@/app/api/v1/agents/[id]/invites/[inviteId]/revoke/route';
 import { POST as rotateRoute } from '@/app/api/v1/agents/[id]/invites/[inviteId]/rotate/route';
 import { POST as postOffer } from '@/app/api/v1/agents/[id]/offers/route';
-import { GET as listSharesRoute } from '@/app/api/v1/agents/[id]/shares/route';
+import { GET as listSharesRoute, POST as inviteGuestRoute } from '@/app/api/v1/agents/[id]/shares/route';
 import { POST as approveShare } from '@/app/api/v1/agents/[id]/shares/[shareId]/approve/route';
+import { POST as restoreShare } from '@/app/api/v1/agents/[id]/shares/[shareId]/restore/route';
 import { POST as revokeShare } from '@/app/api/v1/agents/[id]/shares/[shareId]/revoke/route';
 import { PUT as putSharing } from '@/app/api/v1/agents/[id]/sharing/route';
 import { GET as resolveLink } from '@/app/api/v1/c/links/[token]/route';
 import { POST as acceptLink } from '@/app/api/v1/c/links/[token]/accept/route';
 import { PATCH as patchWorkspace } from '@/app/api/v1/workspaces/current/route';
 import { getDb } from '@/db';
-import { agents, agentShares, workspaces } from '@/db/schema';
+import { agents, agentShares, customerInvites, workspaces } from '@/db/schema';
 import { MAX_PENDING_PER_BOT, PENDING_REQUEST_TTL_DAYS } from '@/lib/constants';
+import { sha256 } from '@/lib/crypto';
 import { cleanupExpiredCustomerRequests } from '@/lib/customer-invites';
 import { flushFirstAgentAlerts } from '@/lib/first-agent-alert';
-import { setGuestWorkspaceLimitForTests } from '@/lib/plans';
+import { FREE_CUSTOMERS_PER_BOT, setGuestWorkspaceLimitForTests } from '@/lib/plans';
 import { createTask } from '@/lib/tasks';
 import { call, createAgent, createKey, emailAddress, mcpListTools, mcpTool, signIn } from './helpers';
 import { pendingNotices } from './inbox';
@@ -143,7 +146,8 @@ describe('customer links: resolve and accept', () => {
     const o = await owner();
     const { token, url } = await createLink(o, { kind: 'personal', label: 'Initech' });
     expect(token.startsWith('rsl_')).toBe(true);
-    expect(url).toBe(`http://localhost/i/${token}`);
+    // The token rides in the fragment, so it never reaches a server log.
+    expect(url).toBe(`http://localhost/i#${token}`);
 
     const out = await resolve(token);
     expect(out.status).toBe(200);
@@ -152,9 +156,35 @@ describe('customer links: resolve and accept', () => {
     expect(out.data.next).toBe('sign_in');
     expect(out.data.viewer).toEqual({ signed_in: false });
     expect(out.data.access_mode).toBe('open_link');
-    expect(out.data.bot.branding.display_name).toBe('Grok');
-    // Trimmed: no offers, handle, owner email, label, or use counts in a link that gets forwarded.
-    for (const leak of ['draft', 'review', o.handle, o.email, 'Initech', 'uses']) expect(out.text).not.toContain(leak);
+    expect(out.res.headers.get('x-robots-tag')).toBe('noindex, nofollow');
+    // Exact allowlist: anything new in R1 must be added here on purpose, because a public link gets forwarded.
+    expect(Object.keys(out.data).sort()).toEqual(['access_mode', 'bot', 'link', 'next', 'viewer']);
+    expect(Object.keys(out.data.link).sort()).toEqual(['email_bound', 'expires_at', 'kind']);
+    expect(Object.keys(out.data.bot).sort()).toEqual(['agent_id', 'branding']);
+    expect(Object.keys(out.data.bot.branding).sort()).toEqual([
+      'accent_color',
+      'accent_foreground',
+      'display_name',
+      'logo_height',
+      'logo_url',
+      'logo_width',
+      'on_primary',
+      'primary_color',
+      'primary_foreground',
+      'primary_on_white_ok',
+      'show_footer',
+    ]);
+    // Never the agent's name, and never the default workspace name made from the owner's email.
+    expect(out.data.bot.branding.display_name).toBe('This business');
+    for (const leak of ['draft', 'review', 'Grok', o.handle, o.email, o.email.split('@')[0], 'Initech', 'uses']) {
+      expect(out.text).not.toContain(leak);
+    }
+    await call(patchWorkspace, 'http://localhost/api/v1/workspaces/current', {
+      method: 'PATCH',
+      cookie: o.cookie,
+      body: { name: 'Acme Studio' },
+    });
+    expect((await resolve(token)).data.bot.branding.display_name).toBe('Acme Studio');
 
     const unknown = await resolve('rsl_nope');
     expect(unknown.status).toBe(404);
@@ -410,6 +440,8 @@ describe('customer links: owner routes', () => {
     const o = await owner();
     const made = await createLink(o, { kind: 'public' });
     const base = `http://localhost/api/v1/agents/${o.agentId}`;
+    await accept(made.token, await signIn(emailAddress('keyed')));
+    const [share] = await shares(o);
     const byKey = [
       await call(postInvite, `${base}/invites`, { bearer: o.agentKey, params: { id: o.agentId }, body: { kind: 'personal' } }),
       await call(putAccess, `${base}/customer-access`, {
@@ -434,11 +466,22 @@ describe('customer links: owner routes', () => {
         bearer: o.agentKey,
         params: { id: o.agentId, inviteId: made.invite.id },
       }),
+      await call(listInvitesRoute, `${base}/invites`, { bearer: o.agentKey, params: { id: o.agentId } }),
+      await call(getAccess, `${base}/customer-access`, { bearer: o.agentKey, params: { id: o.agentId } }),
+      ...(await Promise.all(
+        [approveShare, revokeShare, restoreShare].map((route) =>
+          call(route, `${base}/shares/${share.id}/x`, { method: 'POST', bearer: o.agentKey, params: { id: o.agentId, shareId: share.id } }),
+        ),
+      )),
     ];
+    expect(byKey).toHaveLength(10);
     for (const res of byKey) {
       expect(res.status).toBe(403);
       expect(res.data.error.code).toBe('human_required');
     }
+    // Nothing changed: the request is still pending and the link still works.
+    expect((await shares(o))[0].status).toBe('pending');
+    expect((await resolve(made.token)).status).toBe(200);
     const names = (await mcpListTools(o.agentKey)).map((tool) => tool.name);
     for (const name of ['create_invite', 'list_invites', 'revoke_invite']) expect(names).not.toContain(name);
   });
@@ -474,5 +517,343 @@ describe('customer links: owner routes', () => {
       body: { kind: 'agent', offers: ['draft'] },
     });
     expect(agentInvite.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Second-review fixes: lock order, revoke durability, restore, Origin, real caps.
+// ---------------------------------------------------------------------------
+
+/**
+ * A second database connection, so a test can hold row locks while the app (one pooled connection)
+ * runs a real request against them.
+ */
+async function withSecondConnection<T>(fn: (sql: postgres.Sql) => Promise<T>): Promise<T> {
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1, prepare: false });
+  try {
+    return await fn(sql);
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
+/**
+ * Holds row locks on a second connection: `before` takes them, then the app request starts and blocks on
+ * them, then `after` finishes the concurrent write and commits. Returns the app request's result.
+ */
+async function raceAgainst<R>(
+  before: (tx: postgres.TransactionSql) => Promise<unknown>,
+  start: () => Promise<R>,
+  after: (tx: postgres.TransactionSql) => Promise<unknown>,
+): Promise<R> {
+  return withSecondConnection(async (sql) => {
+    let pending: Promise<R> | undefined;
+    await sql.begin(async (tx) => {
+      await before(tx);
+      pending = start();
+      await waitForLockWaiter(tx);
+      await after(tx);
+    });
+    return pending!;
+  });
+}
+
+/** Resolves once some backend is waiting on a row lock. */
+async function waitForLockWaiter(sql: postgres.TransactionSql) {
+  for (let i = 0; i < 200; i += 1) {
+    const [row] = await sql`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()`;
+    if (row && row.n > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('no backend ever waited on the lock');
+}
+
+async function inviteRow(id: string) {
+  const [row] = await getDb().select().from(customerInvites).where(eq(customerInvites.id, id));
+  return row!;
+}
+
+describe('customer links: concurrency (spec 13.8 #18)', () => {
+  it('an accept racing a rotate waits on the agent lock, then fails like an unknown link, with no deadlock', async () => {
+    const o = await owner();
+    await setAccess(o, { mode: 'open_link' });
+    const { token, invite } = await createLink(o, { kind: 'public' });
+    const customer = await signIn(emailAddress('race'));
+    const next = `rsl_${randomUUID().replace(/-/g, '')}`;
+    // Rotate's lock order: the agent, then the invite (lockOwnerAgent, then lockInvite). Before the fix,
+    // accept locked the invite first and this deadlocked.
+    const outcome = await raceAgainst(
+      (tx) => tx`select id from agents where id = ${o.agentId} for update`,
+      () => accept(token, customer),
+      async (tx) => {
+        await tx`select id from customer_invites where id = ${invite.id} for update`;
+        await tx`update customer_invites set token_hash = ${sha256(next)}, token_prefix = 'rsl_x', rotated_at = now() where id = ${invite.id}`;
+      },
+    );
+    expect(outcome.status).toBe(404);
+    expect(outcome.data.error.code).toBe('invite_not_found');
+    expect(await shares(o)).toHaveLength(0);
+    expect((await inviteRow(invite.id)).uses).toBe(0);
+  });
+
+  it('an accept racing a revoke waits, then fails, and never leaves a share behind', async () => {
+    const o = await owner();
+    await setAccess(o, { mode: 'open_link' });
+    const { token, invite } = await createLink(o, { kind: 'public' });
+    const customer = await signIn(emailAddress('race2'));
+    const outcome = await raceAgainst(
+      (tx) => tx`select id from agents where id = ${o.agentId} for update`,
+      () => accept(token, customer),
+      async (tx) => {
+        await tx`select id from customer_invites where id = ${invite.id} for update`;
+        await tx`update customer_invites set revoked_at = now() where id = ${invite.id}`;
+      },
+    );
+    expect(outcome.status).toBe(404);
+    expect(await shares(o)).toHaveLength(0);
+  });
+
+  it('real rotate, revoke, and accept requests interleaved all finish without a 500', async () => {
+    const o = await owner();
+    await setAccess(o, { mode: 'open_link' });
+    const { token, invite } = await createLink(o, { kind: 'public' });
+    const customers = await Promise.all([1, 2, 3].map((i) => signIn(emailAddress(`mix${i}`))));
+    const base = `http://localhost/api/v1/agents/${o.agentId}/invites/${invite.id}`;
+    const results = await Promise.all([
+      accept(token, customers[0]!),
+      call(rotateRoute, `${base}/rotate`, { method: 'POST', cookie: o.cookie, params: { id: o.agentId, inviteId: invite.id } }),
+      accept(token, customers[1]!),
+      call(revokeInviteRoute, `${base}/revoke`, { method: 'POST', cookie: o.cookie, params: { id: o.agentId, inviteId: invite.id } }),
+      accept(token, customers[2]!),
+    ]);
+    for (const r of results) expect(r.status).toBeLessThan(500);
+    const approved = results.filter((r, i) => i % 2 === 0 && r.status === 200).length;
+    expect(await shares(o)).toHaveLength(approved);
+    expect((await inviteRow(invite.id)).uses).toBe(approved);
+  });
+
+  it('holds the real free cap of 250 customers per bot when two accepts race for the last slot', async () => {
+    const o = await owner();
+    await setAccess(o, { mode: 'open_link' });
+    const { token } = await createLink(o, { kind: 'public' });
+    const db = getDb();
+    const seeded = await db
+      .insert(workspaces)
+      .values(Array.from({ length: FREE_CUSTOMERS_PER_BOT - 2 }, (_, i) => ({ name: `Customer ${i}` })))
+      .returning({ id: workspaces.id });
+    await db
+      .insert(agentShares)
+      .values(seeded.map((g) => ({ agentId: o.agentId, guestWorkspaceId: g.id, status: 'approved', source: 'customer' })));
+    // 248 seeded + this one = 249: one slot left.
+    expect((await accept(token, await signIn(emailAddress('c249')))).data.share.status).toBe('approved');
+
+    const [rival] = await db.insert(workspaces).values({ name: 'Rival' }).returning({ id: workspaces.id });
+    const late = await signIn(emailAddress('c251'));
+    // A concurrent accept takes the 250th slot under the agent lock; this one waits, then sees the cap.
+    const outcome = await raceAgainst(
+      (tx) => tx`select id from agents where id = ${o.agentId} for update`,
+      () => accept(token, late),
+      (tx) => tx`insert into agent_shares (agent_id, guest_workspace_id, status, source) values (${o.agentId}, ${rival!.id}, 'approved', 'customer')`,
+    );
+    expect(outcome.status).toBe(403);
+    expect(outcome.data.error.code).toBe('plan_limit');
+    const all = await shares(o);
+    expect(all.filter((s) => s.status === 'approved')).toHaveLength(FREE_CUSTOMERS_PER_BOT);
+    // Pending requests still queue at the cap; approving one is refused.
+    await setAccess(o, { mode: 'approve_each' });
+    const asked = await accept(token, await signIn(emailAddress('c252')));
+    expect(asked.data.share.status).toBe('pending');
+    const pending = (await shares(o)).find((s) => s.status === 'pending');
+    const approve = await call(approveShare, `http://localhost/api/v1/agents/${o.agentId}/shares/${pending.id}/approve`, {
+      method: 'POST',
+      cookie: o.cookie,
+      params: { id: o.agentId, shareId: pending.id },
+    });
+    expect(approve.status).toBe(403);
+  });
+});
+
+async function revokeShareOf(o: Owner, shareId: string) {
+  const res = await call(revokeShare, `http://localhost/api/v1/agents/${o.agentId}/shares/${shareId}/revoke`, {
+    method: 'POST',
+    cookie: o.cookie,
+    params: { id: o.agentId, shareId },
+  });
+  expect(res.status).toBe(200);
+}
+
+async function restoreShareOf(o: Owner, shareId: string) {
+  return call(restoreShare, `http://localhost/api/v1/agents/${o.agentId}/shares/${shareId}/restore`, {
+    method: 'POST',
+    cookie: o.cookie,
+    params: { id: o.agentId, shareId },
+  });
+}
+
+async function ageShares(o: Owner) {
+  await getDb()
+    .update(agentShares)
+    .set({ createdAt: new Date(Date.now() - (PENDING_REQUEST_TTL_DAYS + 1) * 24 * 60 * 60 * 1000) })
+    .where(eq(agentShares.agentId, o.agentId));
+}
+
+describe('customer links: revoke, deny, re-invite, restore', () => {
+  it('a denied customer cannot ask again through any link', async () => {
+    const o = await owner();
+    const { token } = await createLink(o, { kind: 'public' });
+    const customer = await signIn(emailAddress('denied'));
+    expect((await accept(token, customer)).data.share.status).toBe('pending');
+    const [share] = await shares(o);
+    await revokeShareOf(o, share.id);
+    const again = await accept(token, customer);
+    expect(again.status).toBe(403);
+    expect(again.data.error.code).toBe('share_revoked');
+    expect((await resolve(token, customer.cookie)).data.next).toBe('blocked');
+    // The 14-day cleanup never deletes a denied request: the row is what keeps them out.
+    await ageShares(o);
+    await cleanupExpiredCustomerRequests();
+    expect((await shares(o))[0].status).toBe('revoked');
+    await setAccess(o, { mode: 'open_link' });
+    expect((await accept(token, customer)).status).toBe(403);
+  });
+
+  it('re-inviting a revoked customer by handle makes a handle grant the cron cannot wipe', async () => {
+    const o = await owner();
+    const { token } = await createLink(o, { kind: 'public' });
+    await setAccess(o, { mode: 'open_link' });
+    const customer = await signIn(emailAddress('reinv'));
+    await accept(token, customer);
+    const [share] = await shares(o);
+    await revokeShareOf(o, share.id);
+
+    const handle = `c${randomUUID().replace(/-/g, '').slice(0, 10)}`;
+    await call(patchWorkspace, 'http://localhost/api/v1/workspaces/current', { method: 'PATCH', cookie: customer.cookie, body: { handle } });
+    const invited = await call(inviteGuestRoute, `http://localhost/api/v1/agents/${o.agentId}/shares`, {
+      cookie: o.cookie,
+      params: { id: o.agentId },
+      body: { guest_handle: handle, offers: ['draft'] },
+    });
+    expect(invited.status).toBe(201);
+    expect(invited.data.share).toMatchObject({ status: 'pending', source: 'handle' });
+
+    // Old bug: still source=customer, so 14 days later the cron deleted it and open_link let them back in.
+    await ageShares(o);
+    await cleanupExpiredCustomerRequests();
+    expect((await shares(o))[0]).toMatchObject({ id: share.id, status: 'pending', source: 'handle' });
+    // Even forced back to customer, a share that was ever revoked survives the cron.
+    await getDb().update(agentShares).set({ source: 'customer' }).where(eq(agentShares.id, share.id));
+    await cleanupExpiredCustomerRequests();
+    expect(await shares(o)).toHaveLength(1);
+    await getDb().update(agentShares).set({ source: 'handle' }).where(eq(agentShares.id, share.id));
+
+    // The link does not approve it; only the owner does.
+    expect((await accept(token, customer)).data.share.status).toBe('pending');
+    const approved = await call(approveShare, `http://localhost/api/v1/agents/${o.agentId}/shares/${share.id}/approve`, {
+      method: 'POST',
+      cookie: o.cookie,
+      params: { id: o.agentId, shareId: share.id },
+    });
+    expect(approved.status).toBe(200);
+    expect((await customerTask(o, customer)).status).toBe('open');
+  });
+
+  it('restores a revoked customer from the owner session only, with live all-offers grants', async () => {
+    const o = await owner();
+    const { token } = await createLink(o, { kind: 'personal' });
+    const customer = await signIn(emailAddress('restore'));
+    await accept(token, customer);
+    const [share] = await shares(o);
+    await revokeShareOf(o, share.id);
+    await expect(customerTask(o, customer)).rejects.toMatchObject({ status: 403, code: 'share_revoked' });
+    await addOffer(o, 'summarize');
+
+    const notYet = await call(restoreShare, `http://localhost/api/v1/agents/${o.agentId}/shares/${share.id}/restore`, {
+      method: 'POST',
+      bearer: o.agentKey,
+      params: { id: o.agentId, shareId: share.id },
+    });
+    expect(notYet.status).toBe(403);
+    expect(notYet.data.error.code).toBe('human_required');
+
+    const restored = await restoreShareOf(o, share.id);
+    expect(restored.status).toBe(200);
+    expect(restored.data.share).toMatchObject({ status: 'approved', source: 'customer' });
+    expect(restored.data.share.offers.map((x: { name: string }) => x.name).sort()).toEqual(['draft', 'review', 'summarize']);
+    expect((await customerTask(o, customer)).status).toBe('open');
+    expect((await resolve(token, customer.cookie)).data.next).toBe('open_bot');
+
+    const twice = await restoreShareOf(o, share.id);
+    expect(twice.status).toBe(409);
+    expect(twice.data.error.code).toBe('share_not_revoked');
+  });
+
+  it('restore takes a guest slot and refuses non-customer guests', async () => {
+    setGuestWorkspaceLimitForTests(1);
+    const o = await owner();
+    await setAccess(o, { mode: 'open_link' });
+    const { token } = await createLink(o, { kind: 'public' });
+    const a = await signIn(emailAddress('ra'));
+    await accept(token, a);
+    const [first] = await shares(o);
+    await revokeShareOf(o, first.id);
+    await accept(token, await signIn(emailAddress('rb')));
+    const full = await restoreShareOf(o, first.id);
+    expect(full.status).toBe(403);
+    expect(full.data.error).toBe('plan_limit');
+
+    setGuestWorkspaceLimitForTests(null);
+    const guest = await signIn();
+    const handle = `g${randomUUID().replace(/-/g, '').slice(0, 10)}`;
+    await call(patchWorkspace, 'http://localhost/api/v1/workspaces/current', { method: 'PATCH', cookie: guest.cookie, body: { handle } });
+    const invited = await call(inviteGuestRoute, `http://localhost/api/v1/agents/${o.agentId}/shares`, {
+      cookie: o.cookie,
+      params: { id: o.agentId },
+      body: { guest_handle: handle, offers: ['draft'] },
+    });
+    await revokeShareOf(o, invited.data.share.id);
+    const notCustomer = await restoreShareOf(o, invited.data.share.id);
+    expect(notCustomer.status).toBe(409);
+    expect(notCustomer.data.error.code).toBe('not_customer_share');
+  });
+});
+
+describe('customer links: Origin check on accept', () => {
+  const saved = process.env.APP_ORIGIN;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.APP_ORIGIN;
+    else process.env.APP_ORIGIN = saved;
+  });
+
+  it('refuses null, prefix, and subdomain Origins', async () => {
+    delete process.env.APP_ORIGIN;
+    const o = await owner();
+    const { token } = await createLink(o, { kind: 'personal' });
+    const customer = await signIn(emailAddress('orig'));
+    for (const origin of ['null', '', 'http://localhost.evil.example', 'http://evil.localhost', 'http://sub.localhost', 'https://localhost', 'http://localhost:3001']) {
+      const res = await accept(token, customer, { origin });
+      expect(res.status, origin).toBe(403);
+      expect(res.data.error.code).toBe('bad_origin');
+    }
+    expect((await accept(token, customer, { origin: 'http://localhost' })).status).toBe(200);
+  });
+
+  it('with APP_ORIGIN set, trusts only it and ignores X-Forwarded-Host', async () => {
+    process.env.APP_ORIGIN = 'https://app.example.test/';
+    const o = await owner();
+    const { token } = await createLink(o, { kind: 'personal' });
+    const customer = await signIn(emailAddress('xfh'));
+    const spoofed = await accept(token, customer, { origin: 'http://evil.example', 'x-forwarded-host': 'evil.example' });
+    expect(spoofed.status).toBe(403);
+    expect(spoofed.data.error.code).toBe('bad_origin');
+    const spoofedHttps = await accept(token, customer, {
+      origin: 'https://evil.example',
+      'x-forwarded-host': 'evil.example',
+      'x-forwarded-proto': 'https',
+    });
+    expect(spoofedHttps.status).toBe(403);
+    // The request's own Host is no longer enough either.
+    expect((await accept(token, customer, { origin: 'http://localhost' })).status).toBe(403);
+    expect(await shares(o)).toHaveLength(0);
+    expect((await accept(token, customer, { origin: 'https://app.example.test' })).status).toBe(200);
   });
 });

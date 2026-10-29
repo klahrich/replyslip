@@ -452,7 +452,8 @@ describe('agent guests flag off', () => {
     const guest = await signIn();
     const bot = await createAgent(guest.cookie, 'Helper');
     const key = await createKey(guest.cookie, bot.id);
-    expect((await mcpTool(key, 'redeem_invite', { invite: made.token })).payload.error).toBe('not_found');
+    expect((await mcpListTools(key)).map((tool) => tool.name)).not.toContain('redeem_invite');
+    expect((await mcpTool(key, 'redeem_invite', { invite: made.token })).isError).toBe(true);
 
     const listed = await call(listInvitesRoute, `http://localhost/api/v1/agents/${o.agentId}/invites`, {
       cookie: o.cookie,
