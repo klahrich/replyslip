@@ -1,0 +1,166 @@
+'use client';
+
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
+import { ChevronRight, Clock, Hourglass, ShieldOff } from 'lucide-react';
+import { getBot, listRequests } from '../_lib/api';
+import { ApiError, type BotResponse, type RequestListRow } from '../_lib/types';
+import { labelFor } from '../_lib/schema';
+import { BrandFrame } from '../_components/Frame';
+import { Notice } from '../_components/Notice';
+import { StatusBadge } from '../_components/StatusBadge';
+import { usePoll } from '../_components/usePoll';
+import { Account, Loading, NotFound, useEmail, when } from './common';
+
+export function jobTitle(job: { name: string; input_schema: { title?: string } | null }): string {
+  return job.input_schema?.title ?? labelFor(job.name);
+}
+
+export function BotView({ agentId }: { agentId: string }) {
+  const [data, setData] = useState<BotResponse | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [recent, setRecent] = useState<RequestListRow[] | null>(null);
+  const email = useEmail();
+
+  const load = useCallback(async () => {
+    try {
+      const d = await getBot(agentId);
+      setData(d);
+      if (d.share.status !== 'pending') setRecent((await listRequests(agentId, { limit: 3 })).requests);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) setMissing(true);
+    }
+  }, [agentId]);
+
+  useEffect(() => {
+    const t = setTimeout(load, 0);
+    return () => clearTimeout(t);
+  }, [load]);
+  // Waiting for approval: check every 30 s and swap in the jobs without a reload (spec 15.9).
+  usePoll(load, () => 30000, data?.share.status === 'pending');
+
+  if (missing) return <NotFound />;
+  if (!data) return <Loading />;
+  const { branding } = data.bot;
+  const name = branding.display_name;
+
+  if (data.share.status === 'pending') {
+    return (
+      <BrandFrame branding={branding} agentId={agentId} account={<Account />}>
+        <Notice icon={<Hourglass />} title={`Waiting for approval from ${name}`}>
+          <p>We&apos;ll show your jobs here as soon as they approve you. You can close this page.</p>
+          {email && (
+            <p>
+              Signed in as <span className="font-medium break-all text-foreground">{email}</span>
+            </p>
+          )}
+        </Notice>
+        <p className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden /> This page updates on its own.
+        </p>
+      </BrandFrame>
+    );
+  }
+
+  if (data.share.status === 'revoked') {
+    return (
+      <BrandFrame branding={branding} agentId={agentId} account={<Account />}>
+        <Notice icon={<ShieldOff />} title={`You can't send new requests to ${name}`}>
+          <p>Your access was turned off. If you think this is a mistake, contact {name} directly.</p>
+        </Notice>
+        {recent && recent.length > 0 && <Recent agentId={agentId} name={name} rows={recent} title="Your past requests" />}
+      </BrandFrame>
+    );
+  }
+
+  const share = data.share;
+  const capped = share.used_today >= share.daily_cap;
+
+  return (
+    <BrandFrame branding={branding} agentId={agentId} account={<Account />}>
+      <h1 className="text-[26px] leading-tight font-semibold tracking-tight">What can we help with?</h1>
+      <p className="mt-1.5 text-[15px] text-muted-foreground">Pick a job. You&apos;ll see the answer on this page.</p>
+
+      {capped && (
+        <Notice icon={<Clock />} title="You've reached today's limit" level="h2" className="mt-6">
+          <p>
+            You can send up to {share.daily_cap} requests a day to {name}. {resetText(share.resets_at)}
+          </p>
+        </Notice>
+      )}
+
+      <ul className="mt-6 grid gap-3">
+        {data.jobs.map((job) => (
+          <li key={job.name}>
+            {capped ? (
+              <div className="rounded-2xl border border-border bg-card p-5 opacity-60" aria-disabled>
+                <JobCardBody title={jobTitle(job)} description={job.description} />
+              </div>
+            ) : (
+              <Link
+                href={`/c/${agentId}/new/${job.name}`}
+                className="group flex items-center gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm transition-[border-color,box-shadow] hover:border-primary/40 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none"
+              >
+                <JobCardBody title={jobTitle(job)} description={job.description} />
+                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-primary-text transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                  <ChevronRight className="size-5" />
+                </span>
+              </Link>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {recent && recent.length > 0 && <Recent agentId={agentId} name={name} rows={recent} title="Recent requests" />}
+    </BrandFrame>
+  );
+}
+
+function resetText(iso: string): string {
+  const d = new Date(iso);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (d.toDateString() === new Date().toDateString() || d.toDateString() === tomorrow.toDateString()) return 'You can send more tomorrow.';
+  return `You can send more on ${d.toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' })}.`;
+}
+
+function JobCardBody({ title, description }: { title: string; description: string }) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className="block text-[17px] font-semibold tracking-tight">{title}</span>
+      <span className="mt-1 block text-[15px] leading-snug text-muted-foreground">{description}</span>
+    </span>
+  );
+}
+
+export function RequestRow({ agentId, name, row }: { agentId: string; name: string; row: RequestListRow }) {
+  return (
+    <Link href={`/c/${agentId}/r/${row.id}`} className="flex min-h-16 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[15px] font-medium">{row.summary}</span>
+        <span className="mt-0.5 block text-[13px] text-muted-foreground">{when(row.created_at)}</span>
+      </span>
+      <StatusBadge status={row.status} name={name} />
+    </Link>
+  );
+}
+
+function Recent({ agentId, name, rows, title }: { agentId: string; name: string; rows: RequestListRow[]; title: string }) {
+  return (
+    <section className="mt-10">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="text-[17px] font-semibold tracking-tight">{title}</h2>
+        <Link href={`/c/${agentId}/requests`} className="inline-flex min-h-11 items-center px-1 text-[15px] font-medium text-primary-text underline-offset-4 hover:underline">
+          See all
+        </Link>
+      </div>
+      <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        {rows.map((r) => (
+          <li key={r.id}>
+            <RequestRow agentId={agentId} name={name} row={r} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

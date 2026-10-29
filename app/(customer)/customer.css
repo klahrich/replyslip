@@ -1,0 +1,72 @@
+/* Valetto customer pages only (/i/*, /c/*). Imported by app/(customer)/layout.tsx and nowhere else.
+   Scoping rules:
+   - No global preflight. Tailwind's base layer is not imported; the reset below only matches inside .vt-root.
+   - Utilities are generated only from files under app/(customer) (source(none) + @source "."),
+     so class names used by the marketing site never produce rules here.
+   - Theme tokens (shadcn variables) live on .vt-root, not :root, so the site palette is untouched.
+   - Everything is unlayered on purpose: app/globals.css is unlayered, and unlayered rules always beat
+     layered ones. Unlayered utilities (specificity 0,1,0) beat the site's element rules (h1, p, a). */
+@import "./reset.css";
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css" source(none);
+@import "tw-animate-css";
+@source ".";
+
+@custom-variant dark (&:is(.vt-dark *));
+
+@theme inline {
+  --font-sans: var(--font-vt), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-text: var(--primary-text);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-accent-foreground: var(--brand-accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+}
+
+/* Tokens. The brand values are overwritten inline from the branding object (see _lib/brand.ts). */
+.vt-root {
+  color-scheme: light;
+  --background: #f6f6f4;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #2b2b30;
+  --primary-foreground: #ffffff;
+  --primary-text: #2b2b30;
+  --secondary: #f0f0ed;
+  --secondary-foreground: #18181b;
+  --muted: #f0f0ed;
+  --muted-foreground: #5b5d63;
+  --accent: color-mix(in oklab, var(--primary) 7%, white);
+  --accent-foreground: #18181b;
+  --brand-accent: var(--primary);
+  --brand-accent-foreground: var(--primary-foreground);
+  --destructive: #b42318;
+  --border: #e3e3df;
+  --input: #cfcfca;
+  --ring: var(--primary);
+  --radius: 0.75rem;
+}
