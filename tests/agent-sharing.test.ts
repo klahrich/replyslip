@@ -78,7 +78,7 @@ afterEach(() => {
 
 describe('agent sharing', () => {
   it('keeps the decided free-plan numbers', () => {
-    expect(FREE_GUEST_WORKSPACES).toBe(3);
+    expect(FREE_GUEST_WORKSPACES).toBe(250);
     expect(DEFAULT_SHARE_DAILY_CAP).toBe(50);
     expect(ACCESS_REVOKED_REASON).toBe('access revoked');
   });

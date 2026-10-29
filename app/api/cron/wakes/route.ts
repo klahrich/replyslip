@@ -1,4 +1,5 @@
 import { handle, json } from '@/lib/http';
+import { cleanupExpiredCustomerRequests } from '@/lib/customer-invites';
 import { cleanupUnclaimedInviteWorkspaces } from '@/lib/invites';
 import { assertCronAuthorized, dispatchDueWebhookWakes } from '@/lib/wakes';
 
@@ -11,7 +12,13 @@ function run(req: Request) {
     const result = await dispatchDueWebhookWakes();
     // Hobby allows one daily cron, so invite-workspace cleanup rides along with wake retries.
     const cleanup = await cleanupUnclaimedInviteWorkspaces();
-    return json({ ok: true, ...result, invite_workspaces_deleted: cleanup.deleted });
+    const expired = await cleanupExpiredCustomerRequests();
+    return json({
+      ok: true,
+      ...result,
+      invite_workspaces_deleted: cleanup.deleted,
+      customer_requests_expired: expired.deleted,
+    });
   });
 }
 
