@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { requireHumanOwner, requireUser } from '@/lib/auth';
+import { requireHumanOwner } from '@/lib/auth';
 import { MAX_SHARE_DAILY_CAP, PREAPPROVED_EMAILS_MAX } from '@/lib/constants';
 import { getCustomerAccess, setCustomerAccess } from '@/lib/customer-invites';
 import { handle, json, parseBody, readJson, requireUuid } from '@/lib/http';
@@ -16,7 +16,7 @@ const bodySchema = z.object({
 
 export function GET(req: Request, context: { params: Promise<{ id: string }> }) {
   return handle(async () => {
-    const user = await requireUser(req);
+    const user = await requireHumanOwner(req);
     const { id } = await context.params;
     return json({ customer_access: await getCustomerAccess(user.workspace.id, requireUuid(id, 'agent')) });
   });

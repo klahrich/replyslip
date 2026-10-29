@@ -23,6 +23,7 @@ import { bearerToken, readCookie } from './http';
 import { recordMarketingOptIn } from './marketing';
 import { clientIp } from './origin';
 import { consumeRateLimit } from './rate-limit';
+import { workspaceNameFromEmail } from './workspace-name';
 
 export const REQUEST_CODE_MESSAGE =
   'If that email can receive mail, we sent a sign-in code. It expires in 10 minutes.';
@@ -46,11 +47,6 @@ function normalizeEmail(email: string): string {
   return normalized;
 }
 
-function workspaceNameFromEmail(email: string): string {
-  const local = email.split('@')[0] ?? '';
-  const cleaned = local.replace(/[^A-Za-z0-9]+/g, ' ').trim().slice(0, 40);
-  return cleaned ? `${cleaned} workspace` : 'Workspace';
-}
 
 const SIGNUP_SOURCE_MAX = 200;
 

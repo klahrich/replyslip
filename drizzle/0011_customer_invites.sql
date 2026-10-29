@@ -31,7 +31,7 @@ CREATE TABLE "customer_invites" (
   "expires_at" timestamptz,
   "revoked_at" timestamptz,
   "rotated_at" timestamptz,
-  "created_by_user_id" uuid NOT NULL,
+  "created_by_user_id" uuid,
   "created_at" timestamptz DEFAULT now() NOT NULL,
   CONSTRAINT "customer_invites_kind_check" CHECK ("kind" in ('personal', 'public')),
   CONSTRAINT "customer_invites_label_check" CHECK ("label" is null or char_length("label") <= 80),
@@ -44,7 +44,7 @@ CREATE TABLE "customer_invites" (
 --> statement-breakpoint
 ALTER TABLE "customer_invites" ADD CONSTRAINT "customer_invites_agent_id_agents_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "customer_invites" ADD CONSTRAINT "customer_invites_created_by_user_id_users_id_fk" FOREIGN KEY ("created_by_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "customer_invites" ADD CONSTRAINT "customer_invites_created_by_user_id_users_id_fk" FOREIGN KEY ("created_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
 --> statement-breakpoint
 CREATE UNIQUE INDEX "customer_invites_token_hash_unique" ON "customer_invites" USING btree ("token_hash");
 --> statement-breakpoint
@@ -88,6 +88,14 @@ ALTER TABLE "agent_shares" ADD CONSTRAINT "agent_shares_requested_by_user_id_use
 --> statement-breakpoint
 ALTER TABLE "agent_shares" ADD COLUMN "redeem_source_hash" text;
 --> statement-breakpoint
+ALTER TABLE "agent_shares" ADD COLUMN "last_revoked_at" timestamptz;
+--> statement-breakpoint
+UPDATE "agent_shares" SET "last_revoked_at" = "updated_at" WHERE "status" = 'revoked';
+--> statement-breakpoint
 CREATE INDEX "agent_shares_agent_status_idx" ON "agent_shares" USING btree ("agent_id","status");
 --> statement-breakpoint
 CREATE INDEX "agent_shares_redeem_source_idx" ON "agent_shares" USING btree ("invite_id","redeem_source_hash") WHERE "redeem_source_hash" is not null;
+--> statement-breakpoint
+CREATE INDEX "agent_shares_customer_invite_idx" ON "agent_shares" USING btree ("customer_invite_id") WHERE "customer_invite_id" is not null;
+--> statement-breakpoint
+CREATE UNIQUE INDEX "agents_one_customer_sender" ON "agents" USING btree ("workspace_id") WHERE "role" = 'customer_sender' and "revoked_at" is null;

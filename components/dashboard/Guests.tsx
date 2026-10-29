@@ -164,6 +164,7 @@ export function Guests({
 
   const pending = data.shares.filter((s) => s.status === 'pending');
   const active = data.shares.filter((s) => s.status === 'approved');
+  const removedCustomers = data.shares.filter((s) => s.status === 'revoked' && s.source === 'customer');
   // A customer asking for access does not hold a slot until approved (the API counts the same way).
   const used = pending.filter((s) => s.source !== 'customer').length + active.length;
   const full = guestLimit !== null && used >= guestLimit;
@@ -495,6 +496,43 @@ export function Guests({
                 </div>
                 <div className="dash-actions">
                   {revokeButtons(s, 'Revoke', `Revoke ${who(s)}? Open tasks from this guest will fail with “access revoked”.`)}
+                </div>
+                {rowError(s.id)}
+                {rowSaved(s.id)}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      {shared && removedCustomers.length ? (
+        <>
+          <h5 className="dash-guests-sub">Removed customers</h5>
+          <p className="dash-muted">A removed customer can’t get back in through any link. Restore lets them in again.</p>
+          <ul className="dash-guest-list">
+            {removedCustomers.map((s) => (
+              <li key={s.id} className="dash-guest">
+                <div className="dash-guest-main">
+                  <p className="dash-guest-name" translate="no">
+                    {who(s)}
+                  </p>
+                  {via(s)}
+                </div>
+                <div className="dash-actions">
+                  <button
+                    type="button"
+                    className="dash-btn dash-btn-sm"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      run(`rs${s.id}`, async () => {
+                        const r = await api<{ share: Share }>(`${base}/shares/${s.id}/restore`, { method: 'POST' });
+                        put(r.share);
+                        setSaved({ id: s.id, text: `Restored. ${who(s)} can send tasks again.` });
+                      })
+                    }
+                  >
+                    {busy === `rs${s.id}` ? 'Restoring…' : 'Restore'}
+                  </button>
                 </div>
                 {rowError(s.id)}
                 {rowSaved(s.id)}

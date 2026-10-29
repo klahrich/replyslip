@@ -1,6 +1,7 @@
 /**
  * Branding object for customer pages (spec 15.1 and 17.3). Owner branding (section 13) is a later PR,
- * so every bot gets this placeholder: the agent's name and the Valetto default colors.
+ * so every bot gets this placeholder: a display name and the Valetto default colors. The display name is
+ * never the internal agent name (15.1): it is the owner's chosen workspace name, else NEUTRAL_DISPLAY_NAME.
  */
 export const VALETTO_PRIMARY = '#1F2937';
 export const VALETTO_ACCENT = '#2563EB';
@@ -40,10 +41,12 @@ export type Branding = {
   show_footer: true;
 };
 
-export function defaultBranding(agentName: string): Branding {
+export const NEUTRAL_DISPLAY_NAME = 'This business';
+
+export function defaultBranding(displayName: string | null): Branding {
   const primaryForeground = foregroundFor(VALETTO_PRIMARY);
   return {
-    display_name: agentName,
+    display_name: displayName ?? NEUTRAL_DISPLAY_NAME,
     logo_url: null,
     logo_width: null,
     logo_height: null,

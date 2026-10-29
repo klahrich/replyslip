@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { requireHumanOwner, requireUser } from '@/lib/auth';
+import { requireHumanOwner } from '@/lib/auth';
 import {
   agentGuestsEnabled,
   CUSTOMER_LINK_MAX_USES,
@@ -43,7 +43,7 @@ const bodySchema = z.discriminatedUnion('kind', [customerSchema, agentSchema]);
 
 export function GET(req: Request, context: { params: Promise<{ id: string }> }) {
   return handle(async () => {
-    const user = await requireUser(req);
+    const user = await requireHumanOwner(req);
     const { id } = await context.params;
     const agentId = requireUuid(id, 'agent');
     const enabled = agentGuestsEnabled();

@@ -30,6 +30,7 @@ import {
 } from './constants';
 import { randomToken, sha256, tokenPrefix } from './crypto';
 import { getEmailSender } from './email';
+import { chosenWorkspaceName } from './workspace-name';
 import { HttpError } from './errors';
 import { runAfterResponse } from './first-agent-alert';
 import { consumeRateLimit } from './rate-limit';
@@ -76,9 +77,12 @@ function statusError(status: Exclude<CustomerInviteStatus, 'active'>): HttpError
   return new HttpError(410, 'invite_used_up', LINK_USED_UP);
 }
 
-/** The hosted customer page reads the token from the path (spec 11.3). */
+/**
+ * The token rides in the fragment, which browsers never send to a server, so it stays out of access logs
+ * and referrers. /i tells an rsl_ customer link from an rsi_ agent invite by the prefix.
+ */
 export function customerLinkUrl(origin: string, token: string): string {
-  return `${origin}/i/${token}`;
+  return `${origin}/i#${token}`;
 }
 
 export function normalizeEmail(value: string): string {
@@ -496,28 +500,49 @@ export async function pendingCustomerCount(db: Db, agentId: string): Promise<num
 // Customer side: R1 resolve and R2 accept (spec 15.3, 15.4).
 // ---------------------------------------------------------------------------
 
-type LinkContext = { invite: CustomerInviteRow; agent: AgentRow };
+type LinkContext = { invite: CustomerInviteRow; agent: AgentRow; displayName: string | null };
 
-/** Live invite plus its shared agent. Unknown, rotated, revoked, and unshared all give the same 404. */
+/**
+ * Live invite plus its shared agent. Unknown, rotated, revoked, and unshared all give the same 404.
+ *
+ * With lock, rows are locked in the same order as every owner write (rotate, revoke, update):
+ * agent first, then invite. The first lookup takes no lock; the hash is compared again once the invite
+ * row is locked, so a rotate or revoke that committed first makes this token unknown.
+ */
 async function loadLink(db: Db, token: string, lock: boolean): Promise<LinkContext> {
   if (!token.startsWith('rsl_') || token.length > 200) throw notFound();
   const hash = sha256(token);
-  const [found] = await db.select({ id: customerInvites.id }).from(customerInvites).where(eq(customerInvites.tokenHash, hash)).limit(1);
+  const [found] = await db
+    .select({ id: customerInvites.id, agentId: customerInvites.agentId })
+    .from(customerInvites)
+    .where(eq(customerInvites.tokenHash, hash))
+    .limit(1);
   if (!found) throw notFound();
-  if (lock) await db.execute(sql`select id from customer_invites where id = ${found.id} for update`);
-  // Compare the hash again after the lock: a rotate that committed first makes this token unknown.
+  if (lock) {
+    await db.execute(sql`select id from agents where id = ${found.agentId} for update`);
+    await db.execute(sql`select id from customer_invites where id = ${found.id} for update`);
+  }
   const [invite] = await db
     .select()
     .from(customerInvites)
     .where(and(eq(customerInvites.id, found.id), eq(customerInvites.tokenHash, hash)))
     .limit(1);
   if (!invite || invite.revokedAt) throw notFound();
-  if (lock) await db.execute(sql`select id from agents where id = ${invite.agentId} for update`);
   const [agent] = await db.select().from(agents).where(eq(agents.id, invite.agentId)).limit(1);
   if (!agent || agent.revokedAt || !agent.shared || agent.role !== 'agent') throw notFound();
-  const [owner] = await db.select({ handle: workspaces.handle }).from(workspaces).where(eq(workspaces.id, agent.workspaceId)).limit(1);
+  const [owner] = await db
+    .select({ handle: workspaces.handle, name: workspaces.name })
+    .from(workspaces)
+    .where(eq(workspaces.id, agent.workspaceId))
+    .limit(1);
   if (!owner?.handle) throw notFound();
-  return { invite, agent };
+  return { invite, agent, displayName: lock ? null : await ownerDisplayName(db, agent.workspaceId, owner.name) };
+}
+
+/** The owner's chosen workspace name, or null while it is still the default made from an email. */
+async function ownerDisplayName(db: Db, workspaceId: string, name: string): Promise<string | null> {
+  const members = await db.select({ email: users.email }).from(users).where(eq(users.workspaceId, workspaceId));
+  return chosenWorkspaceName(name, members.map((m) => m.email));
 }
 
 async function shareFor(db: Db, agentId: string, workspaceId: string): Promise<AgentShareRow | null> {
@@ -557,7 +582,7 @@ async function consumeOrThrow(input: Parameters<typeof consumeRateLimit>[0]): Pr
 export async function resolveCustomerLink(token: string, viewer: CustomerViewer, ip: string) {
   await consumeOrThrow({ kind: 'customerLink', ip });
   const db = getDb();
-  const { invite, agent } = await loadLink(db, token, false);
+  const { invite, agent, displayName } = await loadLink(db, token, false);
   const share = viewer?.workspaceId ? await shareFor(db, agent.id, viewer.workspaceId) : null;
   // Someone who already holds a share can always see where they stand, even on a used-up personal invite.
   if (!share) {
@@ -571,7 +596,7 @@ export async function resolveCustomerLink(token: string, viewer: CustomerViewer,
       email_bound: invite.email !== null,
       expires_at: invite.expiresAt?.toISOString() ?? null,
     },
-    bot: { agent_id: agent.id, branding: defaultBranding(agent.name) },
+    bot: { agent_id: agent.id, branding: defaultBranding(displayName) },
     access_mode: (invite.kind === 'personal' ? 'open_link' : agent.customerAccessMode) as CustomerAccessMode,
     viewer: viewer ? { signed_in: true, share_status: shareStatus } : { signed_in: false },
     next: viewer ? nextFor(shareStatus) : ('sign_in' as CustomerNext),
@@ -676,7 +701,7 @@ export type AcceptResult = {
 };
 
 /**
- * R2 (spec 11.3). One transaction: lock the invite, check it, upsert the one share per customer per bot,
+ * R2 (spec 11.3). One transaction: lock the agent then the invite, check it, upsert the one share per customer per bot,
  * grant offers, make sure the sender agent exists, and use one invite use. Idempotent for a live share.
  */
 export async function acceptCustomerInvite(
@@ -753,12 +778,23 @@ export async function acceptCustomerInvite(
   };
 }
 
-/** Daily cron: a pending customer request older than 14 days is deleted. It has no tasks, so nothing else changes. */
+/**
+ * Daily cron: a pending customer request older than 14 days is deleted. It has no tasks, so nothing else
+ * changes, and the customer can ask again. A share that was ever revoked is never deleted: the row is
+ * what keeps a revoked customer out.
+ */
 export async function cleanupExpiredCustomerRequests(now = new Date()): Promise<{ deleted: number }> {
   const cutoff = new Date(now.getTime() - PENDING_REQUEST_TTL_DAYS * DAY_MS);
   const deleted = await getDb()
     .delete(agentShares)
-    .where(and(eq(agentShares.status, 'pending'), eq(agentShares.source, 'customer'), lt(agentShares.createdAt, cutoff)))
+    .where(
+      and(
+        eq(agentShares.status, 'pending'),
+        eq(agentShares.source, 'customer'),
+        isNull(agentShares.lastRevokedAt),
+        lt(agentShares.createdAt, cutoff),
+      ),
+    )
     .returning({ id: agentShares.id });
   return { deleted: deleted.length };
 }

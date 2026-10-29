@@ -677,6 +677,9 @@ export async function inviteGuest(
     // Invite never approves. A new grant and a re-opened revoked grant are pending.
     // A grant that is already pending or approved keeps that status.
     const nextStatus = existing?.status === 'pending' || existing?.status === 'approved' ? existing.status : 'pending';
+    // Re-opening a revoked share, or turning a pending customer request into a grant, makes it the owner's
+    // invite_guest grant. It leaves the customer queue: no 14-day expiry, no all-offers top-ups.
+    const becomesHandle = existing !== undefined && existing.source === 'customer' && existing.status !== 'approved';
     let saved: ShareRow | undefined;
     if (!existing) {
       const [created] = await tx
@@ -697,6 +700,7 @@ export async function inviteGuest(
           status: nextStatus,
           dailyCap,
           updatedAt: now,
+          ...(becomesHandle ? { source: 'handle', customerInviteId: null } : {}),
         })
         .where(eq(agentShares.id, existing.id))
         .returning();
@@ -742,6 +746,41 @@ export async function approveShare(workspaceId: string, agentId: string, shareId
       .where(eq(agentShares.id, current.share.id))
       .returning();
     if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    return { ...current, share: updated };
+  });
+  return serializeShare(db, saved.share, saved.guestHandle);
+}
+
+/**
+ * Re-admit a revoked customer (owner session only). The share goes straight to approved, takes a guest
+ * slot, and keeps its offers; an all-offers customer also gets offers added while they were out.
+ * Only customer shares: invite_guest grants are re-opened with invite_guest, agent guests with a new invite.
+ */
+export async function restoreCustomerShare(workspaceId: string, agentId: string, shareId: string) {
+  const db = getDb();
+  const saved = await db.transaction(async (tx) => {
+    const current = await shareInWorkspace(tx, workspaceId, agentId, shareId);
+    if (current.share.source !== 'customer') {
+      throw new HttpError(409, 'not_customer_share', 'Only a customer can be restored. Invite this guest again instead.');
+    }
+    if (current.share.status !== 'revoked') {
+      throw new HttpError(409, 'share_not_revoked', 'This customer still has access or is waiting for approval.');
+    }
+    await assertGuestSlot(tx, current.agent);
+    const [updated] = await tx
+      .update(agentShares)
+      .set({ status: 'approved', updatedAt: new Date() })
+      .where(eq(agentShares.id, current.share.id))
+      .returning();
+    if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    await tx.execute(sql`
+      insert into agent_share_offers (share_id, offer_id)
+      select ${updated.id}::uuid, o.id
+      from agent_offers o
+      join customer_invites ci on ci.id = ${updated.customerInviteId}::uuid and ci.all_offers
+      where o.agent_id = ${current.agent.id}
+      on conflict do nothing
+    `);
     return { ...current, share: updated };
   });
   return serializeShare(db, saved.share, saved.guestHandle);
@@ -795,7 +834,7 @@ export async function revokeShareRow(
   if (share.status === 'revoked') return { share, wakeIds: [], failed: 0 };
   const [updated] = await tx
     .update(agentShares)
-    .set({ status: 'revoked', updatedAt: new Date() })
+    .set({ status: 'revoked', lastRevokedAt: new Date(), updatedAt: new Date() })
     .where(eq(agentShares.id, share.id))
     .returning();
   if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');

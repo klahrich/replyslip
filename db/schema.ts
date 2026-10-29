@@ -141,6 +141,9 @@ export const agents = pgTable(
   },
   (table) => [
     uniqueIndex('agents_workspace_name_unique').on(table.workspaceId, table.name),
+    uniqueIndex('agents_one_customer_sender')
+      .on(table.workspaceId)
+      .where(sql`${table.role} = 'customer_sender' and ${table.revokedAt} is null`),
     check('agents_delivery_mode_check', sql`${table.deliveryMode} in ('none', 'webhook', 'herdr', 'local')`),
     check('agents_role_check', sql`${table.role} in ('agent', 'customer_sender')`),
     check('agents_customer_daily_cap_check', sql`${table.customerDailyCap} >= 1 and ${table.customerDailyCap} <= 10000`),
@@ -294,6 +297,8 @@ export const agentShares = pgTable(
     requestedByUserId: uuid('requested_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     /** sha256(invite id + client IP) for an anonymous agent-guest redeem. A revoked source cannot redeem that invite again. */
     redeemSourceHash: text('redeem_source_hash'),
+    /** Set on every revoke and never cleared. The pending-request cron never deletes a share that was ever revoked. */
+    lastRevokedAt: ts('last_revoked_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
@@ -303,6 +308,9 @@ export const agentShares = pgTable(
     index('agent_shares_redeem_source_idx')
       .on(table.inviteId, table.redeemSourceHash)
       .where(sql`${table.redeemSourceHash} is not null`),
+    index('agent_shares_customer_invite_idx')
+      .on(table.customerInviteId)
+      .where(sql`${table.customerInviteId} is not null`),
     check('agent_shares_source_check', sql`${table.source} in ('handle', 'agent_invite', 'customer')`),
     check('agent_shares_status_check', sql`${table.status} in ('pending', 'approved', 'revoked')`),
     check('agent_shares_daily_cap_check', sql`${table.dailyCap} >= 1 and ${table.dailyCap} <= 10000`),
@@ -394,9 +402,8 @@ export const customerInvites = pgTable(
     expiresAt: ts('expires_at'),
     revokedAt: ts('revoked_at'),
     rotatedAt: ts('rotated_at'),
-    createdByUserId: uuid('created_by_user_id')
-      .notNull()
-      .references(() => users.id),
+    /** Owner who made the link. Set null if that user is ever deleted, so the link and its customers survive. */
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (table) => [
