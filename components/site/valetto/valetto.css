@@ -27,7 +27,7 @@
    bubble) and accent (small highlights: picklist caret, focus ring, "working" dots) come in as --brand-main and
    --brand-accent, which PhoneChat sets inline. Tints derive from those two. */
 .vt-phone{margin:0}
-.vt-device{width:300px;height:620px;padding:10px;border-radius:48px;background:linear-gradient(150deg,#3b4146,#15181b 60%);box-shadow:0 40px 80px -30px rgb(0 0 0 / .7),0 0 0 1px rgb(255 255 255 / .08) inset,0 0 0 1px #0b0c0d}
+.vt-device{position:relative;width:300px;height:620px;padding:10px;border-radius:48px;background:linear-gradient(150deg,#3b4146,#15181b 60%);box-shadow:0 40px 80px -30px rgb(0 0 0 / .7),0 0 0 1px rgb(255 255 255 / .08) inset,0 0 0 1px #0b0c0d}
 .vt-screen{--brand-main:#6e1f3f;--brand-accent:#c9962e;--brand-soft:color-mix(in srgb,var(--brand-main) 7%,#fff);--accent-ring:color-mix(in srgb,var(--brand-accent) 35%,transparent);
   --n-50:#fafafa;--n-100:#f4f4f5;--n-200:#e4e4e7;--n-400:#a1a1aa;--n-500:#71717a;--n-900:#18181b;
   position:relative;height:100%;border-radius:38px;overflow:hidden;background:#fff;color:var(--n-900);display:flex;flex-direction:column;
@@ -58,7 +58,7 @@
 .vt-dots{display:inline-flex;gap:3px}
 .vt-dots i{width:6px;height:6px;border-radius:50%;background:var(--brand-accent);animation:vt-dot 1s ease-in-out infinite}
 .vt-dots i:nth-child(2){animation-delay:.15s}.vt-dots i:nth-child(3){animation-delay:.3s}
-.vt-ans{padding:5px 5px 8px;max-width:92%;background:#fff;border:1px solid var(--n-200);box-shadow:0 1px 3px rgb(0 0 0 / .06)}
+.vt-ans{max-width:92%;background:#fff;border:1px solid var(--n-200);box-shadow:0 1px 3px rgb(0 0 0 / .06)}
 .vt-render{width:100%;height:auto;border-radius:8px}
 .vt-ans p{padding:6px 7px 0}
 .vt-foot-note{margin:0 0 16px;display:flex;justify-content:center;align-items:center;gap:5px;font-size:.625rem;color:var(--n-400);letter-spacing:.02em}
@@ -74,38 +74,70 @@
 .vt-pick::after{content:"⌄";font-size:.875rem;line-height:0;margin-top:-6px;color:var(--brand-accent)}
 .vt-num-in::after{content:"–  +";white-space:pre;font-size:.75rem;color:var(--n-400)}
 .vt-send{display:flex;align-items:center;justify-content:center;height:38px;margin-top:4px;border-radius:8px;background:var(--brand-main);color:#fff;font-weight:600;font-size:.8125rem;box-shadow:0 1px 2px rgb(0 0 0 / .15)}
-.vt-mail{position:absolute;z-index:2;left:10px;right:10px;top:44px;display:flex;gap:10px;align-items:center;padding:12px;border-radius:16px;background:rgb(250 250 250 / .97);backdrop-filter:blur(10px);box-shadow:0 10px 30px -10px rgb(0 0 0 / .35);font-size:.75rem;opacity:0}
-.vt-mail b{display:block;font-size:.75rem}
-.vt-mail-ic{width:28px;height:28px;flex:0 0 28px;border-radius:8px;display:grid;place-items:center;background:#3b6fd8;color:#fff;font-size:.875rem}
 @keyframes vt-dot{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-3px);opacity:1}}
 
-/* Phone loop, 16s: tap the job (6%), its form slides up (9%) and fills (13% to 22%), send (27%), the sheet drops and the
-   request bubble lands (31%), working (33% to 58%), the answer (58%), the email (66%). Reduced motion rests on the answer. */
+/* Scene deck. Each scene is a card in .vt-deck; the active card plays its exchange once, in seconds from the swap:
+   tap the job (.7), the form sheet rises (.95), fields fill (1.4 on, .3 apart), send (3.0), the sheet drops and the
+   request lands (3.3), working (3.8 to 5.4), the answer (5.4), then it rests until the dot timer (9s) swipes the next
+   card in from the right. Base styles are the finished exchange, so no script or reduced motion shows the answer. */
+.vt-deck{position:relative;height:100%;border-radius:38px;overflow:hidden;background:#0b0c0d;isolation:isolate}
+.vt-deck>.vt-screen{position:absolute;inset:0}
+.vt-screen.is-off{visibility:hidden}
+.vt-screen.is-on{z-index:2}
+.vt-screen.is-out{z-index:1}
+.vt-work{opacity:0}
+.vt-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.vt-scenes{margin-top:18px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.vt-dots-nav{display:flex;gap:6px}
+.vt-dots-nav button{position:relative;width:22px;height:6px;padding:0;border:0;border-radius:999px;background:color-mix(in srgb,var(--muted) 40%,transparent);cursor:pointer;overflow:hidden;transition:width .3s var(--ease-out)}
+.vt-dots-nav button.on{width:44px}
+.vt-dots-nav button i{position:absolute;inset:0;border-radius:inherit;background:var(--accent);transform-origin:left;transform:scaleX(0)}
+.vt-dots-nav button.on i{transform:none}
+.vt-dots-nav button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.vt-scene-name{font-size:var(--s-small);color:var(--muted)}
+.vt-ans-img{padding:5px 5px 8px}
+.vt-card{display:flex;flex-direction:column;gap:4px;padding:11px 12px 12px;max-width:94%}
+.vt-tag{align-self:flex-start;padding:2px 8px;border-radius:999px;font-size:.625rem;font-weight:600;letter-spacing:.02em;text-transform:uppercase;background:color-mix(in srgb,var(--brand-accent) 18%,#fff);color:color-mix(in srgb,var(--brand-accent) 55%,#000)}
+.vt-tag-go{background:color-mix(in srgb,var(--brand-accent) 15%,#fff)}
+.vt-card-h{margin-top:3px;font-size:.875rem;font-weight:600;letter-spacing:-.01em}
+.vt-card-s{font-size:.6875rem;color:var(--n-500);line-height:1.4}
+.vt-price{margin:4px 0 2px;font-size:1.25rem;font-weight:650;letter-spacing:-.02em;color:var(--brand-main)}
+.vt-track{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;font-size:.5625rem;color:var(--n-400)}
+.vt-track li{padding-top:7px;border-top:3px solid var(--n-200);border-radius:2px}
+.vt-track li.done{border-color:var(--brand-main);color:var(--n-500)}
+.vt-track li.now{border-color:var(--brand-accent);color:var(--n-900);font-weight:600}
+.vt-idle,.vt-idle *{animation-play-state:paused!important}
+
 @media (prefers-reduced-motion:no-preference){
-  .vt-job-tap{animation:vt-tap 16s var(--ease-out) infinite}
-  .vt-form{animation:vt-form 16s var(--ease-out) infinite}
-  .vt-v1,.vt-v2,.vt-v3,.vt-v4{animation:16s var(--ease-out) infinite}
-  .vt-v1{animation-name:vt-f1}.vt-v2{animation-name:vt-f2}.vt-v3{animation-name:vt-f3}.vt-v4{animation-name:vt-f4}
-  .vt-send{animation:vt-send 16s var(--ease-out) infinite}
-  .vt-after{animation:vt-after 16s linear infinite}
-  .vt-ask{animation:vt-ask 16s var(--ease-out) infinite;transform-origin:right top}
-  .vt-work{animation:vt-work 16s ease infinite}
-  .vt-ans{animation:vt-ans 16s cubic-bezier(.2,.9,.2,1.2) infinite;transform-origin:left top}
-  .vt-mail{animation:vt-mail 16s var(--ease-out) infinite}
+  .vt-device[data-swap]{animation:vt-bump .6s var(--ease-out)}
+  .vt-device[data-swap] .is-on{animation:vt-swap-in .6s cubic-bezier(.2,.85,.25,1.12) both}
+  .vt-device[data-swap] .is-out{animation:vt-swap-out .55s cubic-bezier(.55,0,.8,.3) both}
+  .vt-dots-nav button.on i{animation:vt-timer 9s linear both}
+  .is-on .vt-job-tap{animation:vt-tap .5s var(--ease-out) .7s both}
+  .is-on .vt-form{animation:vt-sheet-in .4s var(--ease-out) .95s both,vt-sheet-out .35s cubic-bezier(.5,0,.75,0) 3.25s forwards}
+  .is-on .vt-v{animation:vt-fill .5s var(--ease-out) both}
+  .is-on .vt-v1{animation-delay:1.4s}.is-on .vt-v2{animation-delay:1.7s}.is-on .vt-v3{animation-delay:2s}.is-on .vt-v4{animation-delay:2.3s}.is-on .vt-v5{animation-delay:2.6s}
+  .is-on .vt-send{animation:vt-send .3s var(--ease-out) 3s both}
+  .is-on .vt-after{animation:vt-after 3.4s step-end both}
+  .is-on .vt-ask{animation:vt-ask .4s var(--ease-out) 3.4s both;transform-origin:right top}
+  .is-on .vt-work{animation:vt-work 1.6s ease 3.8s both}
+  .is-on .vt-ans{animation:vt-ans .55s cubic-bezier(.2,.9,.2,1.25) 5.4s both;transform-origin:left top}
 }
-@media (prefers-reduced-motion:reduce){.vt-form,.vt-work{visibility:hidden}.vt-job-tap{background:var(--brand-soft);border-color:var(--brand-main)}}
-@keyframes vt-tap{0%,5%{transform:none;background:#fff;border-color:var(--n-200)}7%{transform:scale(.96);background:var(--brand-soft);border-color:var(--brand-main)}10%,90%{transform:none;background:var(--brand-soft);border-color:var(--brand-main)}95%,100%{background:#fff;border-color:var(--n-200)}}
-@keyframes vt-form{0%,8%{opacity:0;transform:translateY(100%)}11%,28%{opacity:1;transform:none}31%,100%{opacity:1;transform:translateY(105%)}}
-@keyframes vt-f1{0%,12%{color:transparent;border-color:var(--n-200);box-shadow:none}13%{color:var(--n-900);border-color:var(--brand-accent);box-shadow:0 0 0 3px var(--accent-ring)}16%,100%{color:var(--n-900);border-color:var(--n-200);box-shadow:0 1px 2px rgb(0 0 0 / .04)}}
-@keyframes vt-f2{0%,15%{color:transparent;border-color:var(--n-200);box-shadow:none}16%{color:var(--n-900);border-color:var(--brand-accent);box-shadow:0 0 0 3px var(--accent-ring)}19%,100%{color:var(--n-900);border-color:var(--n-200);box-shadow:0 1px 2px rgb(0 0 0 / .04)}}
-@keyframes vt-f3{0%,18%{color:transparent;border-color:var(--n-200);box-shadow:none}19%{color:var(--n-900);border-color:var(--brand-accent);box-shadow:0 0 0 3px var(--accent-ring)}22%,100%{color:var(--n-900);border-color:var(--n-200);box-shadow:0 1px 2px rgb(0 0 0 / .04)}}
-@keyframes vt-f4{0%,21%{color:transparent;border-color:var(--n-200);box-shadow:none}22%{color:var(--n-900);border-color:var(--brand-accent);box-shadow:0 0 0 3px var(--accent-ring)}25%,100%{color:var(--n-900);border-color:var(--n-200);box-shadow:0 1px 2px rgb(0 0 0 / .04)}}
-@keyframes vt-send{0%,25%{transform:none}27%{transform:scale(.96);filter:brightness(.85)}29%,100%{transform:none}}
-@keyframes vt-after{0%,29%{visibility:hidden}30%,100%{visibility:visible}}
-@keyframes vt-ask{0%,30%{opacity:0;transform:translateY(20px) scale(.9)}33%,92%{opacity:1;transform:none}96%,100%{opacity:0;transform:none}}
-@keyframes vt-work{0%,34%{opacity:0;transform:translateY(8px)}37%,56%{opacity:1;transform:none}58%,100%{opacity:0;transform:none}}
-@keyframes vt-ans{0%,58%{opacity:0;transform:scale(.85)}62%{opacity:1;transform:scale(1.03)}64%,92%{opacity:1;transform:none}96%,100%{opacity:0;transform:none}}
-@keyframes vt-mail{0%,66%{opacity:0;transform:translateY(-130%)}70%,86%{opacity:1;transform:none}90%,100%{opacity:0;transform:translateY(-130%)}}
+@media (prefers-reduced-motion:reduce){.vt-form{visibility:hidden}.vt-job-tap{background:var(--brand-soft);border-color:var(--brand-main)}}
+.vt-job-tap{background:var(--brand-soft);border-color:var(--brand-main)}
+@keyframes vt-bump{0%{transform:none}35%{transform:scale(.97) rotate(-.6deg)}70%{transform:scale(1.01)}100%{transform:none}}
+@keyframes vt-swap-in{from{transform:translateX(104%) rotate(4deg);box-shadow:-30px 0 40px -10px rgb(0 0 0 / .5)}to{transform:none;box-shadow:none}}
+@keyframes vt-swap-out{to{transform:translateX(-38%) scale(.9) rotate(-3deg);filter:brightness(.45)}}
+@keyframes vt-timer{from{transform:scaleX(0)}to{transform:none}}
+@keyframes vt-tap{0%{transform:none;background:#fff;border-color:var(--n-200)}40%{transform:scale(.95);background:var(--brand-soft);border-color:var(--brand-main)}100%{transform:none;background:var(--brand-soft);border-color:var(--brand-main)}}
+@keyframes vt-sheet-in{from{opacity:1;transform:translateY(100%)}to{opacity:1;transform:none}}
+@keyframes vt-sheet-out{from{opacity:1;transform:none}to{opacity:1;transform:translateY(105%)}}
+@keyframes vt-fill{0%{color:transparent;border-color:var(--n-200);box-shadow:none}1%{color:var(--n-900);border-color:var(--brand-accent);box-shadow:0 0 0 3px var(--accent-ring)}100%{color:var(--n-900);border-color:var(--n-200);box-shadow:0 1px 2px rgb(0 0 0 / .04)}}
+@keyframes vt-send{0%{transform:none}50%{transform:scale(.96);filter:brightness(.85)}100%{transform:none}}
+@keyframes vt-after{0%{visibility:hidden}100%{visibility:visible}}
+@keyframes vt-ask{from{opacity:0;transform:translateY(20px) scale(.9)}to{opacity:1;transform:none}}
+@keyframes vt-work{0%{opacity:0;transform:translateY(8px)}15%,85%{opacity:1;transform:none}100%{opacity:0;transform:none}}
+@keyframes vt-ans{0%{opacity:0;transform:scale(.85)}70%{opacity:1;transform:scale(1.03)}100%{opacity:1;transform:none}}
 
 /* hero words snap in on load */
 @media (prefers-reduced-motion:no-preference){
