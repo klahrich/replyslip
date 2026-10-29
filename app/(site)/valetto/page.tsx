@@ -211,8 +211,8 @@ export default function ValettoPage() {
               </span>
             </h1>
             <p className="vt-sub">
-              Your bot knows your files, inbox, prices and calendar. Valetto lets your customers use it for the jobs you
-              pick, through a private link.
+              Your bot understands your business as well as you do. Valetto lets your customers send it the requests you
+              allow, through a private link.
             </p>
             <p className="vt-eg">Customers open the link on their phone. Nothing to install.</p>
             <div className="vt-cta">
