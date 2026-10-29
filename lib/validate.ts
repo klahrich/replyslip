@@ -3,6 +3,9 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import { RESULT_SCHEMA_MAX_CHARS } from './constants';
 import { HttpError } from './errors';
 
+/** Most compiled result validators kept in memory. Least recently used is dropped first. */
+export const RESULT_VALIDATOR_CACHE_MAX = 500;
+
 const ajv07 = new Ajv({ allErrors: true, strict: false, validateSchema: true });
 const ajv2020 = new Ajv2020({ allErrors: true, strict: false, validateSchema: true });
 
@@ -13,34 +16,83 @@ export type SchemaError = {
   message: string;
 };
 
-function compilerFor(schema: Record<string, unknown>) {
-  const declared = typeof schema.$schema === 'string' ? schema.$schema : '';
-  if (declared.includes('2020-12') || declared.includes('2019-09')) return ajv2020;
-  return ajv07;
+type Compiler = Ajv | Ajv2020;
+
+function declaredDialect(schema: Record<string, unknown>): string {
+  return typeof schema.$schema === 'string' ? schema.$schema : '';
+}
+
+/** draft-07 unless $schema names 2020-12. 2019-09 is refused in assertResultSchema, so it never reaches here. */
+function compilerFor(schema: Record<string, unknown>): Compiler {
+  return declaredDialect(schema).includes('2020-12') ? ajv2020 : ajv07;
+}
+
+/** Compile without leaving the schema (or its $id) in Ajv's registry, so repeat compiles neither grow nor clash. */
+function compileOnce(ajv: Compiler, schema: Record<string, unknown>): ValidateFunction {
+  try {
+    return ajv.compile(schema);
+  } finally {
+    ajv.removeSchema(schema);
+  }
+}
+
+function invalid(message: string, details?: unknown): HttpError {
+  return new HttpError(400, 'invalid_result_schema', message, details);
 }
 
 export function assertResultSchema(schema: unknown): Record<string, unknown> {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
-    throw new HttpError(400, 'invalid_result_schema', 'result_schema must be a JSON Schema object.');
+    throw invalid('result_schema must be a JSON Schema object.');
   }
   const record = schema as Record<string, unknown>;
   const encoded = JSON.stringify(record);
   if (encoded.length > RESULT_SCHEMA_MAX_CHARS) {
-    throw new HttpError(400, 'invalid_result_schema', 'result_schema is too large.');
+    throw invalid('result_schema is too large.');
+  }
+  if (declaredDialect(record).includes('2019-09')) {
+    throw invalid('result_schema uses draft 2019-09, which is not supported. Use draft-07 (the default) or 2020-12 in $schema.');
   }
   const ajv = compilerFor(record);
   try {
     const valid = ajv.validateSchema(record);
     if (!valid) {
-      throw new HttpError(400, 'invalid_result_schema', 'result_schema is not a valid JSON Schema.', {
-        validation_errors: mapErrors(ajv.errors),
-      });
+      throw invalid('result_schema is not a valid JSON Schema.', { validation_errors: mapErrors(ajv.errors) });
     }
   } catch (err) {
     if (err instanceof HttpError) throw err;
-    throw new HttpError(400, 'invalid_result_schema', 'result_schema is not a valid JSON Schema.');
+    throw invalid('result_schema is not a valid JSON Schema.');
+  }
+  // A schema can pass the meta-schema and still fail to compile (an unresolvable $ref, for one).
+  // Catch that now, so no task or offer is saved with a schema complete_task can never satisfy.
+  try {
+    cachedValidator(record);
+  } catch (err) {
+    throw invalid(
+      `result_schema could not be compiled: ${err instanceof Error ? err.message : 'unknown error'}. Schemas must be self-contained: no remote $ref.`,
+    );
   }
   return record;
+}
+
+/** Least-recently-used compiled validators keyed by the schema's JSON text (which includes $schema). */
+const validators = new Map<string, ValidateFunction>();
+
+function cachedValidator(schema: Record<string, unknown>): ValidateFunction {
+  const key = JSON.stringify(schema);
+  const hit = validators.get(key);
+  if (hit) {
+    validators.delete(key);
+    validators.set(key, hit);
+    return hit;
+  }
+  const validate = compileOnce(compilerFor(schema), schema);
+  validators.set(key, validate);
+  while (validators.size > RESULT_VALIDATOR_CACHE_MAX) {
+    const oldest = validators.keys().next().value;
+    if (oldest === undefined) break;
+    validators.delete(oldest);
+  }
+  return validate;
 }
 
 export function validateResult(
@@ -49,7 +101,7 @@ export function validateResult(
 ): { ok: true } | { ok: false; errors: SchemaError[] } {
   let validate: ValidateFunction;
   try {
-    validate = compilerFor(schema).compile(schema);
+    validate = cachedValidator(schema);
   } catch (err) {
     return {
       ok: false,
@@ -75,4 +127,17 @@ function mapErrors(errors: ErrorObject[] | null | undefined): SchemaError[] {
     keyword: error.keyword,
     message: error.message ?? 'is invalid',
   }));
+}
+
+/** Test hooks: the LRU size and the size of each Ajv instance's own schema cache. */
+export function resultValidatorCacheSizeForTests(): { lru: number; ajv: number } {
+  const ajvSize = [ajv07, ajv2020].reduce(
+    (sum, ajv) => sum + (ajv as unknown as { _cache: Map<unknown, unknown> })._cache.size,
+    0,
+  );
+  return { lru: validators.size, ajv: ajvSize };
+}
+
+export function clearResultValidatorCacheForTests(): void {
+  validators.clear();
 }
