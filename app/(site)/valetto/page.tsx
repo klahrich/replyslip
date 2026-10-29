@@ -204,10 +204,10 @@ export default function ValettoPage() {
             </p>
             <h1 id="h1">
               <span className="l">
-                <Words text="Open one door for your customers." />
+                <Words text="Share your bot with customers." />
               </span>{' '}
               <span className="l vt-dim">
-                <Words text="Keep the rest of the house locked." from={6} />
+                <Words text="Only the jobs you choose." from={5} />
               </span>
             </h1>
             <p className="vt-sub">
