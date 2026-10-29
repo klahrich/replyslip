@@ -27,9 +27,22 @@ export const JOIN_CODE_MAX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const JOIN_CODE_MIN_TTL_MS = 60 * 60 * 1000;
 export const JOIN_CODE_MAX_PENDING = 25;
 
+export const INVITE_DEFAULT_TTL_DAYS = 30;
+export const INVITE_MIN_TTL_DAYS = 1;
+export const INVITE_MAX_TTL_DAYS = 90;
+export const INVITE_MAX_USES = 1_000;
+export const INVITE_MAX_ACTIVE_PER_AGENT = 50;
+export const INVITE_LABEL_MAX = 80;
+/** Auto handle for an invite workspace: g- plus 10 lowercase base32 characters. Matches HANDLE_PATTERN. */
+export const INVITE_HANDLE_PREFIX = 'g-';
+/** Unclaimed invite workspaces whose agent never called the API are deleted after this. */
+export const INVITE_WORKSPACE_IDLE_DAYS = 30;
+
 export const RATE_LIMITS = {
   requestCode: { email: 5, ip: 100, windowMs: 15 * 60 * 1000 },
   register: { ip: 60, windowMs: 15 * 60 * 1000 },
+  redeem: { ip: 30, windowMs: 15 * 60 * 1000 },
+  invitePreview: { ip: 120, windowMs: 15 * 60 * 1000 },
   testWake: { agent: 10, windowMs: 15 * 60 * 1000 },
 } as const;
 

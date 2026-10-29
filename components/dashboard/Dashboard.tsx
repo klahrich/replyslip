@@ -7,9 +7,10 @@ import { api, errorText, formatTime, SIGNED_OUT_EVENT } from './api';
 import { EmailPrefs } from './EmailPrefs';
 import { JoinCodes, type DocPaths } from './JoinCodes';
 import { SetupChecklist } from './SetupChecklist';
+import { Sharing } from './Sharing';
+import { Tabs } from './Tabs';
 import { Tasks } from './Tasks';
 import { WatcherKeys } from './WatcherKeys';
-import { WorkspaceHandle } from './WorkspaceHandle';
 import { WorkspaceName } from './WorkspaceName';
 import type { Agent, AgentKey, JoinCode } from './types';
 
@@ -106,11 +107,16 @@ export function Dashboard({
           Signed in as {email} · created {formatTime(workspace.created_at)}
           {loaded ? ` · ${live} active ${live === 1 ? 'agent' : 'agents'}` : ''}
         </p>
-        <WorkspaceHandle
-          handle={handle}
-          shared={agents.filter((a) => a.shared && !a.revoked_at).length}
-          onSaved={setHandle}
-        />
+        <p className="dash-muted">
+          {handle ? (
+            <>
+              Handle <code translate="no">@{handle}</code> ·{' '}
+            </>
+          ) : null}
+          <a className="link" href="#sharing">
+            {handle ? 'Manage sharing' : 'Set a handle to share agents'}
+          </a>
+        </p>
       </section>
       {error ? (
         <p className="dash-err" role="alert">
@@ -120,12 +126,32 @@ export function Dashboard({
           </button>
         </p>
       ) : null}
-      {loaded && !error ? <SetupChecklist handle={handle} agents={agents} codes={codes} /> : null}
-      <JoinCodes codes={codes} agents={agents} origin={origin} paths={paths} onChange={refresh} />
-      {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} handle={handle} guestLimit={guestLimit} /> : null}
-      <WatcherKeys />
-      <Tasks refreshKey={tick} />
-      <EmailPrefs initialOptIn={marketingOptIn} />
+      <Tabs
+        label="Dashboard sections"
+        tabs={[
+          {
+            id: 'workspace',
+            label: 'Workspace',
+            content: (
+              <>
+                {loaded && !error ? <SetupChecklist handle={handle} agents={agents} codes={codes} /> : null}
+                <JoinCodes codes={codes} agents={agents} origin={origin} paths={paths} onChange={refresh} />
+                {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} handle={handle} /> : null}
+                <WatcherKeys />
+                <Tasks refreshKey={tick} />
+                <EmailPrefs initialOptIn={marketingOptIn} />
+              </>
+            ),
+          },
+          {
+            id: 'sharing',
+            label: 'Sharing',
+            content: loaded ? (
+              <Sharing agents={agents} handle={handle} onHandleSaved={setHandle} guestLimit={guestLimit} onChange={refresh} />
+            ) : null,
+          },
+        ]}
+      />
     </>
   );
 }

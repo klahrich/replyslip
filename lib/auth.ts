@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '@/db';
-import { loginCodes, sessions, users, workspaces } from '@/db/schema';
+import { agents, loginCodes, sessions, users, workspaces } from '@/db/schema';
 import {
   EMAIL_PATTERN,
   LOGIN_CODE_MAX_ATTEMPTS,
@@ -124,10 +124,31 @@ export async function renameWorkspace(workspaceId: string, name: string): Promis
   return updated;
 }
 
+const CLAIM_NOT_FOUND = 'This claim link is not valid.';
+const ALREADY_IN_WORKSPACE =
+  "This email already has a workspace. Ask your agent to call redeem_invite to add the share to it.";
+
+/** Public summary for the claim page. One 404 for an unknown or already claimed token. */
+export async function previewClaim(claimToken: string) {
+  const db = getDb();
+  const [workspace] = await db
+    .select()
+    .from(workspaces)
+    .where(and(eq(workspaces.claimTokenHash, sha256(claimToken)), isNull(workspaces.claimedAt)))
+    .limit(1);
+  if (!workspace) throw new HttpError(404, 'claim_not_found', CLAIM_NOT_FOUND);
+  const agentRows = await db
+    .select({ name: agents.name })
+    .from(agents)
+    .where(and(eq(agents.workspaceId, workspace.id), isNull(agents.revokedAt)));
+  return { workspace: { name: workspace.name, handle: workspace.handle }, agents: agentRows };
+}
+
 export async function verifyLoginCode(
   emailInput: string,
   codeInput: string,
   marketing?: MarketingOptIn,
+  claimToken?: string,
 ): Promise<{ token: string; user: SessionUser }> {
   const email = normalizeEmail(emailInput);
   if (!/^\d{6}$/.test(codeInput)) {
@@ -176,6 +197,19 @@ export async function verifyLoginCode(
     throw new HttpError(401, 'invalid_code', 'That code is not valid.');
   }
 
+  // A claim that cannot succeed is refused before the code is consumed, so the person can retry without a new code.
+  const claimHash = claimToken ? sha256(claimToken) : null;
+  if (claimHash) {
+    const [owner] = await db.select({ workspaceId: users.workspaceId }).from(users).where(eq(users.email, email)).limit(1);
+    if (owner?.workspaceId) throw new HttpError(409, 'already_in_workspace', ALREADY_IN_WORKSPACE);
+    const [claimable] = await db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(and(eq(workspaces.claimTokenHash, claimHash), isNull(workspaces.claimedAt)))
+      .limit(1);
+    if (!claimable) throw new HttpError(404, 'claim_not_found', CLAIM_NOT_FOUND);
+  }
+
   const token = randomSessionToken();
   const tokenHash = sha256(token);
   const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000);
@@ -203,11 +237,23 @@ export async function verifyLoginCode(
 
     let workspaceId = row.workspaceId;
     let workspace: { id: string; name: string; handle: string | null; createdAt: Date } | null = null;
+    if (claimHash && workspaceId) throw new HttpError(409, 'already_in_workspace', ALREADY_IN_WORKSPACE);
     if (!workspaceId) {
-      const [created] = await tx
-        .insert(workspaces)
-        .values({ name: workspaceNameFromEmail(email) })
-        .returning();
+      let created: typeof workspaces.$inferSelect | undefined;
+      if (claimHash) {
+        await tx.execute(sql`select id from workspaces where claim_token_hash = ${claimHash} for update`);
+        [created] = await tx
+          .update(workspaces)
+          .set({ claimTokenHash: null, claimedAt: new Date() })
+          .where(and(eq(workspaces.claimTokenHash, claimHash), isNull(workspaces.claimedAt)))
+          .returning();
+        if (!created) throw new HttpError(404, 'claim_not_found', CLAIM_NOT_FOUND);
+      } else {
+        [created] = await tx
+          .insert(workspaces)
+          .values({ name: workspaceNameFromEmail(email) })
+          .returning();
+      }
       if (!created) throw new HttpError(500, 'internal_error', 'Something went wrong.');
       workspaceId = created.id;
       workspace = { id: created.id, name: created.name, handle: created.handle, createdAt: created.createdAt };

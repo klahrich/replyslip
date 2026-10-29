@@ -297,9 +297,9 @@ export type AgentInviteRow = typeof agentInvites.$inferSelect;
 ### 6.3 Constants (`lib/constants.ts`)
 
 ```ts
-export const INVITE_DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-export const INVITE_MIN_TTL_MS = 24 * 60 * 60 * 1000;
-export const INVITE_MAX_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+export const INVITE_DEFAULT_TTL_DAYS = 30;
+export const INVITE_MIN_TTL_DAYS = 1;
+export const INVITE_MAX_TTL_DAYS = 90;
 export const INVITE_MAX_USES = 1_000;
 export const INVITE_MAX_ACTIVE_PER_AGENT = 50;
 export const INVITE_LABEL_MAX = 80;

@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   boolean,
   check,
   index,
@@ -24,12 +25,19 @@ export const workspaces = pgTable(
     plan: text('plan').notNull().default('free'),
     /** Public address for shared agents: @handle/agentname. Null until the workspace sets one. */
     handle: text('handle'),
+    /** signup: created at email sign-in. invite: created by redeeming an invite, no user until claimed. */
+    origin: text('origin').notNull().default('signup'),
+    /** sha256 of the rsc_ claim token. Null once claimed, and always null for signup workspaces. */
+    claimTokenHash: text('claim_token_hash'),
+    claimedAt: ts('claimed_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (table) => [
     check('workspaces_plan_check', sql`${table.plan} in ('free', 'unlimited')`),
     uniqueIndex('workspaces_handle_unique').on(table.handle).where(sql`${table.handle} is not null`),
     check('workspaces_handle_check', sql`${table.handle} is null or ${table.handle} ~ '^[a-z][a-z0-9-]{1,31}$'`),
+    check('workspaces_origin_check', sql`${table.origin} in ('signup', 'invite')`),
+    uniqueIndex('workspaces_claim_token_hash_unique').on(table.claimTokenHash).where(sql`${table.claimTokenHash} is not null`),
   ],
 );
 
@@ -250,6 +258,10 @@ export const agentShares = pgTable(
       .references(() => workspaces.id),
     status: text('status').notNull().default('pending'),
     dailyCap: integer('daily_cap').notNull().default(50),
+    /** Invite this share was redeemed from. Null for invite_guest shares. */
+    inviteId: uuid('invite_id').references((): AnyPgColumn => agentInvites.id, { onDelete: 'set null' }),
+    /** Owner-facing name for the guest: redeem label, else the invite label. */
+    label: text('label'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
@@ -271,6 +283,55 @@ export const agentShareOffers = pgTable(
       .references(() => agentOffers.id, { onDelete: 'cascade' }),
   },
   (table) => [primaryKey({ columns: [table.shareId, table.offerId] })],
+);
+
+export const agentInvites = pgTable(
+  'agent_invites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    /** Owner workspace. Denormalized from the agent so list and revoke can scope by workspace. */
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    tokenHash: text('token_hash').notNull(),
+    tokenPrefix: text('token_prefix').notNull(),
+    label: text('label'),
+    dailyCap: integer('daily_cap').notNull().default(50),
+    /** True only when a signed-in human created the invite. Redeemed shares are then approved. */
+    approveOnRedeem: boolean('approve_on_redeem').notNull().default(false),
+    maxUses: integer('max_uses').notNull().default(1),
+    uses: integer('uses').notNull().default(0),
+    expiresAt: ts('expires_at').notNull(),
+    revokedAt: ts('revoked_at'),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('agent_invites_token_hash_unique').on(table.tokenHash),
+    index('agent_invites_agent_idx').on(table.agentId, table.createdAt),
+    check('agent_invites_daily_cap_check', sql`${table.dailyCap} >= 1 and ${table.dailyCap} <= 10000`),
+    check('agent_invites_max_uses_check', sql`${table.maxUses} >= 1 and ${table.maxUses} <= 1000`),
+    check('agent_invites_uses_check', sql`${table.uses} >= 0 and ${table.uses} <= ${table.maxUses}`),
+    check('agent_invites_creator_check', sql`${table.createdByUserId} is not null or ${table.createdByAgentId} is not null`),
+    check('agent_invites_approve_check', sql`not ${table.approveOnRedeem} or ${table.createdByUserId} is not null`),
+  ],
+);
+
+export const agentInviteOffers = pgTable(
+  'agent_invite_offers',
+  {
+    inviteId: uuid('invite_id')
+      .notNull()
+      .references(() => agentInvites.id, { onDelete: 'cascade' }),
+    offerId: uuid('offer_id')
+      .notNull()
+      .references(() => agentOffers.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.inviteId, table.offerId] })],
 );
 
 export const messages = pgTable(
@@ -332,3 +393,5 @@ export type MessageRow = typeof messages.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type JoinCodeRow = typeof joinCodes.$inferSelect;
+export type AgentInviteRow = typeof agentInvites.$inferSelect;
+export type AgentShareRow = typeof agentShares.$inferSelect;

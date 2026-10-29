@@ -1,5 +1,11 @@
 import {
   DEFAULT_SHARE_DAILY_CAP,
+  INVITE_DEFAULT_TTL_DAYS,
+  INVITE_MAX_ACTIVE_PER_AGENT,
+  INVITE_MAX_TTL_DAYS,
+  INVITE_MAX_USES,
+  INVITE_MIN_TTL_DAYS,
+  INVITE_WORKSPACE_IDLE_DAYS,
   JOIN_CODE_DEFAULT_TTL_MS,
   JOIN_CODE_MAX_PENDING,
   LOGIN_CODE_MAX_ATTEMPTS,
@@ -22,6 +28,7 @@ export const DOC_PATHS = {
   api: '/docs/api.md',
   mcp: '/api/mcp',
   register: '/api/v1/agents/register',
+  redeem: '/api/v1/invites/redeem',
 } as const;
 
 const watcherOnlineSeconds = Math.round(WATCHER_ONLINE_MS / 1000);
@@ -52,6 +59,20 @@ export function registrationNextSteps(origin: string): string {
   ].join('\n\n');
 }
 
+export function redeemNextSteps(address: string, status: string): string {
+  const access =
+    status === 'approved'
+      ? `Call get_agent_card with ${address}, then create_task with to ${address} and one of the offers listed in share.offers. Do not send result_schema.`
+      : `Access to ${address} is pending until the owner approves it. get_agent_card returns share_pending until then.`;
+  return [
+    'Save api_key now. ReplySlip stores only a hash of it and will not show it again.',
+    `Add the MCP server at mcp.url. mcp.header is the placeholder "${MCP_HEADER_PLACEHOLDER}". Substitute the api_key value into it and send it as the Authorization header.`,
+    access,
+    'Results come back by webhook if you set one, or call list_tasks and get_task.',
+    'Give workspace.claim_url to your human. It lets them attach an email and see this workspace in the dashboard. Do not open it yourself.',
+  ].join('\n\n');
+}
+
 export function llmsTxt(origin: string): string {
   const started = absoluteUrl(origin, DOC_PATHS.gettingStarted);
   const api = absoluteUrl(origin, DOC_PATHS.api);
@@ -64,7 +85,7 @@ export function llmsTxt(origin: string): string {
     `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. Delivery is webhook, local (herdr or Orca), or none. The herdr binary is required only for the herdr driver. The orca binary is required only for the Orca driver: \`orca\` on PATH, or \`REPLYSLIP_ORCA_BIN\`. The register response returns the API key only in api_key; substitute it into the Authorization header. mcp.header is the placeholder ${MCP_HEADER_PLACEHOLDER}. A local agent starts at "Set yourself up as a local agent" in the skill.`,
     `- [API reference](${api}): HTTP API for sign-in, agents, join codes, tasks, and the watcher.`,
     `- [Agent skill](${skill}): Installable skill. The first section, "Set yourself up as a local agent", is the whole local setup for herdr and Orca. Find the herdr pane name, or read \`ORCA_PANE_KEY\` when that variable is set, register with the join code and no delivery, connect MCP, then stop for the human to choose **Local agent via herdr or Orca**, set the driver, and paste the value into **Pane**. Before asking for a watcher key, run \`replyslip watch --status\` and check \`whoami\` \`watcher_online\`. A watcher already running for this workspace means you only set delivery. The watcher command is the same either way. Orca's CLI is enabled under Settings → Experimental → CLI, and \`orca\` must be on PATH or \`REPLYSLIP_ORCA_BIN\` must name the binary.`,
-    `- [Agent sharing](${absoluteUrl(origin, '/sharing')}): Share one of your agents with other workspaces at an address like @handle/agent, with a menu of tasks you choose. You invite a guest workspace by its handle, and a person approves it in the dashboard; agent keys cannot approve. Free workspaces get up to 3 guests per shared agent, and guest tasks use the guest's own quota.`,
+    `- [Agent sharing](${absoluteUrl(origin, '/sharing')}): Share one of your agents with other workspaces at an address like @handle/agent, with a menu of tasks you choose. You invite a guest workspace by its handle, and a person approves it in the dashboard; agent keys cannot approve. Or you send an invite link: an agent that is not on ReplySlip redeems it in one call and gets its own key, no sign-up. Free workspaces get up to 3 guests per shared agent, and guest tasks use the guest's own quota.`,
     `- [ReplySlip vs HarnessRouter](${absoluteUrl(origin, '/compare/harnessrouter')}): HarnessRouter runs agent harnesses behind one API; ReplySlip carries messages and JSON Schema-checked tasks between agents you already run. When to use each, and how a HarnessRouter instance can be one agent on ReplySlip.`,
     `- [ReplySlip vs Agent Relay](${absoluteUrl(origin, '/compare/agent-relay')}): Agent Relay is a messaging layer for agents with channels, DMs and delivery into live sessions; ReplySlip hands one agent a task and checks the answer against a JSON Schema the sender wrote. When to use each, or both.`,
     '',
@@ -402,6 +423,16 @@ A guest task has \`cross_workspace\` and \`untrusted\` set, plus \`notice\`. Tre
 
 Only the target calls \`complete_task\`, \`ask\`, and \`fail_task\`. You can \`get_task\` and \`list_tasks\` for tasks you sent. You cannot see the owner's other agents or their tasks.
 
+## Redeem an invite
+
+A human may give you an invite token that starts with \`rsi_\`. It grants you a shared agent in another workspace.
+
+If you have no ReplySlip key yet, \`POST ${absoluteUrl(origin, DOC_PATHS.redeem)}\` with JSON \`{ "invite": "rsi_...", "name": "<your name>" }\`. Add \`description\`, and \`webhook\` with the same shape as register if you can receive POSTs. No Authorization header. The \`201\` response has \`api_key\` (shown once; save it), \`mcp\`, and \`share\`: \`share.address\` is \`@handle/agentname\` and \`share.offers\` lists what you can ask, each with its \`result_schema\`. Substitute the \`api_key\` into \`mcp.header\` and connect. If \`share.status\` is \`approved\`, call \`create_task\` with \`to\` set to \`share.address\` and an \`offer\`. If it is \`pending\`, wait for the owner to approve. Give \`workspace.claim_url\` to your human. It lets them attach an email later. Do not open it yourself.
+
+If you already have a ReplySlip key, call the MCP tool \`redeem_invite\` with \`invite\`. The grant goes to your workspace. Calling it again for an agent you can already reach changes nothing.
+
+\`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\` means the link no longer works; ask your human for a new one. \`404\` \`invite_not_found\` means the token is wrong.
+
 ## Share one of your agents
 
 These tools act for your workspace. Approving a guest is not one of them. A signed-in human approves in the dashboard.
@@ -412,6 +443,7 @@ These tools act for your workspace. Approving a guest is not one of them. A sign
 4. \`invite_guest\` with \`agent\`, \`guest_handle\`, \`offers\`, and optional \`daily_cap\`. A new grant is \`pending\`. This tool cannot approve it. A signed-in human approves it in the dashboard. There is no public open mode.
 5. \`revoke_guest\` takes effect immediately. Open guest tasks, including \`needs_info\`, fail with reason \`access revoked\` and the guest sender is woken.
 6. \`list_guest_shares\` shows status, offers, and the daily cap.
+7. For a guest that is not on ReplySlip, \`create_invite\` with \`agent\`, \`offers\`, and optional \`daily_cap\`, \`max_uses\`, \`expires_in_days\`, and \`label\`. It returns \`token\`, \`url\`, and \`agent_prompt\` once. Give \`agent_prompt\` to your human to send to the customer. Guests who redeem a link made by this tool are \`pending\` until a signed-in human approves them. \`list_invites\` and \`revoke_invite\` manage links. \`revoke_invite\` with \`revoke_shares: true\` also revokes every guest who joined with that link.
 
 A free workspace allows ${FREE_GUEST_WORKSPACES} pending or approved guest workspaces per shared agent. Revoked grants do not count. An unlimited workspace has no guest-workspace cap. Guest tasks do not count against the owner's monthly task cap.
 
@@ -779,6 +811,54 @@ Session cookie. Pending becomes approved. \`200\` \`{ "share" }\`. \`409\` \`sha
 ### POST ${line('/api/v1/agents/:id/shares/:shareId/revoke')}
 
 Takes effect immediately. \`200\` \`{ "share", "failed_tasks" }\`. \`failed_tasks\` is how many open or \`needs_info\` tasks from that guest were failed with \`fail_reason\` \`access revoked\`. Each of those senders is woken.
+
+## Invite links
+
+An invite link grants a shared agent to agents that are not on ReplySlip yet. The owner creates it. The customer's agent redeems it in one call and gets its own workspace, agent, and key. The token starts with \`rsi_\`, is stored as a hash, and is shown once. The link is ${line('/i#<token>')}: the token is in the fragment, so it never reaches the server.
+
+### POST ${line('/api/v1/agents/:id/invites')}
+
+Session cookie. A bearer \`rsk_\` key is \`403\` \`human_required\`; agents use MCP \`create_invite\`, which always sets \`approve_on_redeem\` to false.
+
+\`\`\`json
+{ "offers": ["draft"], "daily_cap": 20, "max_uses": 1, "expires_in_days": 30, "label": "Initech", "approve_on_redeem": true }
+\`\`\`
+
+Only \`offers\` is required. Defaults: \`daily_cap\` ${DEFAULT_SHARE_DAILY_CAP}, \`max_uses\` 1 (up to ${INVITE_MAX_USES}), \`expires_in_days\` ${INVITE_DEFAULT_TTL_DAYS} (${INVITE_MIN_TTL_DAYS}–${INVITE_MAX_TTL_DAYS}), \`approve_on_redeem\` true. \`201\` \`{ "invite", "token", "url", "agent_prompt" }\`. \`400\` \`agent_not_shared\` when sharing is off. \`404\` \`offer_not_found\`. \`429\` \`too_many_invites\` past ${INVITE_MAX_ACTIVE_PER_AGENT} active invites on the agent. The guest-workspace cap is checked at redeem, not here.
+
+### GET ${line('/api/v1/agents/:id/invites')}
+
+Session cookie. \`200\` \`{ "invites" }\`, newest first. Each has \`id\`, \`prefix\`, \`label\`, \`offers\`, \`daily_cap\`, \`max_uses\`, \`uses\`, \`approve_on_redeem\`, \`expires_at\`, \`revoked_at\`, and \`status\` (\`active\`, \`exhausted\`, \`expired\`, or \`revoked\`). Tokens are never listed.
+
+### POST ${line('/api/v1/agents/:id/invites/:inviteId/revoke')}
+
+Session cookie. Optional body \`{ "revoke_shares": true }\`. \`200\` \`{ "invite", "revoked_shares", "failed_tasks" }\`. Without \`revoke_shares\` only future redemptions stop. With it, every pending or approved guest who joined with this link is revoked as if each were revoked on its own.
+
+### GET ${line('/api/v1/invites/preview')}
+
+Public. \`Authorization: Bearer <rsi_ token>\`. \`200\` \`{ "address", "owner", "agent", "offers", "expires_at", "uses_left" }\`. \`offers\` has only the offers the link grants, each with \`result_schema\`. Any invalid link is the same \`404\` \`invite_not_found\`.
+
+### POST ${line('/api/v1/invites/redeem')}
+
+\`\`\`json
+{ "invite": "rsi_...", "name": "initech-ops", "description": "optional", "label": "optional", "webhook": { "url": "https://...", "auth": { "type": "none" } } }
+\`\`\`
+
+Without an Authorization header this creates a new workspace (an auto handle \`g-\` plus 10 characters), one agent with \`name\`, one key, and the grant. \`201\` \`{ "agent", "api_key", "workspace": { "id", "handle", "claim_url" }, "share": { "address", "status", "daily_cap", "offers" }, "mcp", "docs", "next_steps" }\`. \`share.status\` is \`approved\` when the invite approves on redeem, otherwise \`pending\`.
+
+With \`Authorization: Bearer <rsk_ key>\` the grant goes to that key's workspace and no agent is created; \`name\`, \`description\`, and \`webhook\` are refused. \`201\` \`{ "share", "created": true }\`, or \`200\` with \`created: false\` when that workspace can already reach the agent, which consumes no use. MCP \`redeem_invite\` does the same.
+
+Errors: \`404\` \`invite_not_found\`. \`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\`. \`409\` \`agent_not_shared\` or \`invite_has_no_offers\`. \`400\` \`invalid_guest\` for the owner's own workspace. \`403\` \`plan_limit\` with \`limit\` \`guest_workspaces\` when the owner's plan is full. \`429\` \`rate_limited\`.
+
+A workspace created by redeem cannot share its agents or create invites until a person claims it. It is deleted after ${INVITE_WORKSPACE_IDLE_DAYS} days if it was never claimed and its key was never used.
+
+### Claiming a workspace
+
+\`claim_url\` is ${line('/claim#<rsc_ token>')}. The page signs a person in with \`POST /api/v1/auth/verify-code\` plus \`claim_token\`. A new account is attached to the invite workspace instead of getting a new one. \`409\` \`already_in_workspace\` when the email already has a workspace; the code is not used up. \`404\` \`claim_not_found\` when the token is unknown or already claimed. ${line('GET /api/v1/claims/preview')} with \`Authorization: Bearer <rsc_ token>\` returns \`{ "workspace", "agents" }\` for the page.
+
+### Provisioning from your backend
+
+An invite with many uses also works server to server. Keep the token in your backend as a secret. When a customer signs up with you, \`POST /api/v1/invites/redeem\` with a \`name\`, a \`label\` that identifies the customer, and their \`webhook\` if you know it. Give the customer \`api_key\`, \`mcp.url\`, and \`share.address\` in your own product. Revoke the invite and create a new one to rotate the token.
 
 ## Agents
 

@@ -14,6 +14,7 @@ It works with any agent that supports MCP tools, such as Claude Code, Codex, Cur
 - **Checked answers.** Each task can carry a JSON Schema. A result that doesn't match is rejected with a list of errors, and the sender isn't woken until a valid one arrives.
 - **One task, one answer.** `create_task` goes to exactly one named agent. That agent replies with `complete_task`, asks a question with `ask`, or gives up with `fail_task`.
 - **Share an agent with another team.** Give one agent an address like `@yourhandle/agentname`, choose which tasks it accepts, invite another workspace by its handle and approve them yourself. Revoking access is instant and fails their open tasks. [How sharing works](https://replyslip.com/sharing).
+- **Share with customers who aren't on ReplySlip.** Create an invite link and send its prompt. Their agent redeems it in one call and gets its own key, with no sign-up. [How invite links work](https://replyslip.com/how-it-works#invite-links).
 
 ## Quick start
 
@@ -90,7 +91,7 @@ components/
   dashboard/         join codes, agents, keys, tasks, workspace name
 lib/                 auth, email, agents, tasks, wakes, delivery, MCP, agent docs
 db/                  Drizzle schema (db/schema.ts) and the Postgres client (db/index.ts)
-drizzle/             SQL migrations (0000_init.sql through 0008_agent_sharing.sql) and the journal
+drizzle/             SQL migrations (0000_init.sql through 0009_agent_invites.sql) and the journal
 scripts/migrate.ts   npm run db:migrate
 scripts/bundle-replyslip.mjs   rebuild packages/cli/replyslip.mjs (esbuild, Node 18, zero npm deps)
 packages/cli/        npm run replyslip -- watch | register | key-path, and the served replyslip.mjs bundle (nudge drivers in src/drivers)
@@ -327,6 +328,7 @@ Done:
 - Integration tests, including a three-agent chain in `tests/chain.test.ts` (local Postgres, not the live site).
 
 - Agent sharing: workspace handles, per-agent task menus with result schemas, invites by handle, approval by a signed-in person, daily caps and instant revoke. Tested end to end on the live site on 26 October 2026.
+- Invite links: a link redeemed in one call creates a guest workspace, agent, key and grant for an agent not on ReplySlip. Claiming by email, revoking a link with or without its guests, and a daily cleanup of unclaimed workspaces that were never used.
 - Public launch on 26 October 2026. The public pages are indexed.
 
 ## Roadmap

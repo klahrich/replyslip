@@ -232,8 +232,55 @@ export const TOOL_DOCS: ToolDoc[] = [
   {
     name: 'list_guest_shares',
     title: 'List guest shares',
-    description: 'List grants on an agent in your workspace: guest handle, status, daily cap, and offer names. No emails.',
+    description:
+      'List grants on an agent in your workspace: guest handle, label, status, daily cap, offer names, and invite_prefix when the guest joined with an invite link. No emails.',
     args: [{ name: 'agent', required: true, type: 'string', description: 'Agent name in this workspace.' }],
+  },
+  {
+    name: 'create_invite',
+    title: 'Create invite link',
+    description:
+      'Create an invite link for a shared agent in your workspace. An agent that redeems it gets the offers you list, without signing up to ReplySlip. Returns token, url, and agent_prompt once; send agent_prompt to the customer. An invite made with this tool never approves: each guest who redeems it is pending until a signed-in human approves it in the dashboard. A human can create a self-approving link in the dashboard.',
+    args: [
+      { name: 'agent', required: true, type: 'string', description: 'Agent name in this workspace. Sharing must be on.' },
+      { name: 'offers', required: true, type: 'string[]', description: 'Offer names a guest who redeems the link may use.' },
+      {
+        name: 'daily_cap',
+        required: false,
+        type: 'integer',
+        description: 'Tasks each guest may create per rolling 24 hours. Default 50. Maximum 10000.',
+      },
+      { name: 'max_uses', required: false, type: 'integer', description: 'How many agents may redeem the link. Default 1. Maximum 1000.' },
+      { name: 'expires_in_days', required: false, type: 'integer', description: 'Days until the link expires. Default 30, from 1 to 90.' },
+      { name: 'label', required: false, type: 'string', description: 'Your name for who the link is for, shown on each guest. Up to 80 characters.' },
+    ],
+  },
+  {
+    name: 'list_invites',
+    title: 'List invite links',
+    description: 'List invite links on an agent in your workspace: prefix, label, offers, uses, expiry, and status. Tokens are never returned.',
+    args: [{ name: 'agent', required: true, type: 'string', description: 'Agent name in this workspace.' }],
+  },
+  {
+    name: 'revoke_invite',
+    title: 'Revoke invite link',
+    description:
+      'Stop an invite link from being redeemed again. With revoke_shares true, also revoke every guest who joined with it: their open and needs_info tasks fail with reason "access revoked" and each sender is woken.',
+    args: [
+      { name: 'agent', required: true, type: 'string', description: 'Agent name in this workspace.' },
+      { name: 'invite_id', required: true, type: 'string (uuid)', description: 'Invite id from list_invites.' },
+      { name: 'revoke_shares', required: false, type: 'boolean', description: 'Also revoke guests who joined with this link. Default false.' },
+    ],
+  },
+  {
+    name: 'redeem_invite',
+    title: 'Redeem invite link',
+    description:
+      'Redeem an invite link (rsi_...) into your own workspace. You get access to the shared agent in share.address with the offers in share.offers. Redeeming a link for an agent you can already reach changes nothing. An agent without a ReplySlip key redeems with POST /api/v1/invites/redeem instead.',
+    args: [
+      { name: 'invite', required: true, type: 'string', description: 'The invite token, starting with rsi_.' },
+      { name: 'label', required: false, type: 'string', description: 'Optional name the owner sees for your workspace. Up to 80 characters.' },
+    ],
   },
 ];
 
@@ -305,5 +352,25 @@ export const toolInputs = {
   }),
   list_guest_shares: z.object({
     agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),
+  }),
+  create_invite: z.object({
+    agent: z.string().min(1).max(64).describe('Agent name in this workspace. Sharing must be on.'),
+    offers: z.array(z.string().min(1).max(64)).min(1).max(50).describe('Offer names a guest who redeems the link may use.'),
+    daily_cap: z.number().int().min(1).max(10_000).optional().describe('Tasks per guest per rolling 24 hours. Default 50.'),
+    max_uses: z.number().int().min(1).max(1_000).optional().describe('How many agents may redeem the link. Default 1.'),
+    expires_in_days: z.number().int().min(1).max(90).optional().describe('Days until the link expires. Default 30.'),
+    label: z.string().max(80).optional().describe('Your name for who the link is for.'),
+  }),
+  list_invites: z.object({
+    agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),
+  }),
+  revoke_invite: z.object({
+    agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),
+    invite_id: z.uuid().describe('Invite id from list_invites.'),
+    revoke_shares: z.boolean().optional().describe('Also revoke guests who joined with this link. Default false.'),
+  }),
+  redeem_invite: z.object({
+    invite: z.string().min(1).max(200).describe('The invite token, starting with rsi_.'),
+    label: z.string().max(80).optional().describe('Optional name the owner sees for your workspace.'),
   }),
 };

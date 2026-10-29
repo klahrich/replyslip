@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import { getDb, type Db } from '@/db';
 import {
+  agentInvites,
   agentOffers,
   agentShareOffers,
   agentShares,
@@ -8,6 +9,7 @@ import {
   tasks,
   workspaces,
   type AgentRow,
+  type AgentShareRow,
 } from '@/db/schema';
 import type { AgentPrincipal } from './agents';
 import {
@@ -145,7 +147,7 @@ export async function setWorkspaceHandle(workspaceId: string, handle: string | n
   }
 }
 
-async function lockOwnerAgent(tx: Db, workspaceId: string, agentId: string): Promise<AgentRow> {
+export async function lockOwnerAgent(tx: Db, workspaceId: string, agentId: string): Promise<AgentRow> {
   await tx.execute(sql`select id from agents where id = ${agentId} and workspace_id = ${workspaceId} for update`);
   const [agent] = await tx
     .select()
@@ -173,13 +175,13 @@ export async function agentInWorkspaceByName(workspaceId: string, name: string):
   return agent;
 }
 
-async function deliverWakeIds(wakeIds: string[]): Promise<void> {
+export async function deliverWakeIds(wakeIds: string[]): Promise<void> {
   for (const wakeId of wakeIds) {
     await deliverWebhookWake(wakeId);
   }
 }
 
-async function failGuestTasks(
+export async function failGuestTasks(
   tx: Db,
   agent: AgentRow,
   guestWorkspaceId: string | null,
@@ -214,10 +216,23 @@ async function failGuestTasks(
   return { wakeIds, failed: closed.length };
 }
 
+/** Invite workspaces cannot share agents or create invites until a human claims them. */
+export async function assertClaimed(db: Db, workspaceId: string): Promise<void> {
+  const [workspace] = await db
+    .select({ origin: workspaces.origin, claimedAt: workspaces.claimedAt })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  if (workspace?.origin === 'invite' && !workspace.claimedAt) {
+    throw new HttpError(403, 'claim_required', 'Claim this workspace before sharing its agents.');
+  }
+}
+
 export async function setAgentShared(workspaceId: string, agentId: string, shared: boolean): Promise<AgentRow> {
   const written = await getDb().transaction(async (tx) => {
     const agent = await lockOwnerAgent(tx, workspaceId, agentId);
     if (shared) {
+      await assertClaimed(tx, workspaceId);
       const [workspace] = await tx
         .select({ handle: workspaces.handle })
         .from(workspaces)
@@ -385,7 +400,7 @@ export async function deleteOfferByName(workspaceId: string, agentId: string, na
   await deleteOffer(workspaceId, agentId, offer.id);
 }
 
-type ShareRow = typeof agentShares.$inferSelect;
+type ShareRow = AgentShareRow;
 
 async function offersForShares(db: Db, shareIds: string[]) {
   const map = new Map<string, { id: string; name: string }[]>();
@@ -404,22 +419,43 @@ async function offersForShares(db: Db, shareIds: string[]) {
   return map;
 }
 
-async function serializeShare(db: Db, share: ShareRow, guestHandle: string | null) {
-  const offers = await offersForShares(db, [share.id]);
+function shareBody(
+  share: ShareRow,
+  guestHandle: string | null,
+  invitePrefix: string | null,
+  offers: { id: string; name: string }[],
+) {
   return {
     id: share.id,
     agent_id: share.agentId,
     guest_workspace_id: share.guestWorkspaceId,
     guest_handle: guestHandle,
+    label: share.label,
+    invite_id: share.inviteId,
+    invite_prefix: invitePrefix,
     status: share.status,
     daily_cap: share.dailyCap,
-    offers: offers.get(share.id) ?? [],
+    offers,
     created_at: share.createdAt.toISOString(),
     updated_at: share.updatedAt.toISOString(),
   };
 }
 
-async function loadOffersByName(tx: Db, agentId: string, names: string[]) {
+export async function serializeShare(db: Db, share: ShareRow, guestHandle: string | null) {
+  const offers = await offersForShares(db, [share.id]);
+  let invitePrefix: string | null = null;
+  if (share.inviteId) {
+    const [invite] = await db
+      .select({ prefix: agentInvites.tokenPrefix })
+      .from(agentInvites)
+      .where(eq(agentInvites.id, share.inviteId))
+      .limit(1);
+    invitePrefix = invite?.prefix ?? null;
+  }
+  return shareBody(share, guestHandle, invitePrefix, offers.get(share.id) ?? []);
+}
+
+export async function loadOffersByName(tx: Db, agentId: string, names: string[]) {
   const rows = await tx
     .select()
     .from(agentOffers)
@@ -432,13 +468,13 @@ async function loadOffersByName(tx: Db, agentId: string, names: string[]) {
   return rows;
 }
 
-async function replaceShareOffers(tx: Db, shareId: string, offerIds: string[]) {
+export async function replaceShareOffers(tx: Db, shareId: string, offerIds: string[]) {
   await tx.delete(agentShareOffers).where(eq(agentShareOffers.shareId, shareId));
   if (offerIds.length === 0) return;
   await tx.insert(agentShareOffers).values(offerIds.map((offerId) => ({ shareId, offerId })));
 }
 
-function dedupeOfferNames(names: string[]): string[] {
+export function dedupeOfferNames(names: string[]): string[] {
   if (names.length < 1 || names.length > 50) {
     throw new HttpError(400, 'validation_error', 'Send between 1 and 50 offer names.');
   }
@@ -449,26 +485,17 @@ export async function listShares(workspaceId: string, agentId: string) {
   const db = getDb();
   await lockOwnerAgent(db, workspaceId, agentId);
   const rows = await db
-    .select({ share: agentShares, guestHandle: workspaces.handle })
+    .select({ share: agentShares, guestHandle: workspaces.handle, invitePrefix: agentInvites.tokenPrefix })
     .from(agentShares)
     .innerJoin(workspaces, eq(workspaces.id, agentShares.guestWorkspaceId))
+    .leftJoin(agentInvites, eq(agentInvites.id, agentShares.inviteId))
     .where(eq(agentShares.agentId, agentId))
     .orderBy(agentShares.createdAt);
   const offers = await offersForShares(
     db,
     rows.map((row) => row.share.id),
   );
-  return rows.map((row) => ({
-    id: row.share.id,
-    agent_id: row.share.agentId,
-    guest_workspace_id: row.share.guestWorkspaceId,
-    guest_handle: row.guestHandle,
-    status: row.share.status,
-    daily_cap: row.share.dailyCap,
-    offers: offers.get(row.share.id) ?? [],
-    created_at: row.share.createdAt.toISOString(),
-    updated_at: row.share.updatedAt.toISOString(),
-  }));
+  return rows.map((row) => shareBody(row.share, row.guestHandle, row.invitePrefix, offers.get(row.share.id) ?? []));
 }
 
 async function guestWorkspaceByHandle(tx: Db, handle: string, ownerWorkspaceId: string) {
@@ -618,21 +645,29 @@ export async function updateShare(
   return serializeShare(db, saved.share, saved.guestHandle);
 }
 
+/** Revoke one locked share row and fail that guest's open tasks. Deliver the returned wake ids after commit. */
+export async function revokeShareRow(
+  tx: Db,
+  agent: AgentRow,
+  share: ShareRow,
+): Promise<{ share: ShareRow; wakeIds: string[]; failed: number }> {
+  if (share.status === 'revoked') return { share, wakeIds: [], failed: 0 };
+  const [updated] = await tx
+    .update(agentShares)
+    .set({ status: 'revoked', updatedAt: new Date() })
+    .where(eq(agentShares.id, share.id))
+    .returning();
+  if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+  const closed = await failGuestTasks(tx, agent, updated.guestWorkspaceId);
+  return { share: updated, wakeIds: closed.wakeIds, failed: closed.failed };
+}
+
 export async function revokeShare(workspaceId: string, agentId: string, shareId: string) {
   const db = getDb();
   const saved = await db.transaction(async (tx) => {
     const current = await shareInWorkspace(tx, workspaceId, agentId, shareId);
-    if (current.share.status === 'revoked') {
-      return { share: current.share, guestHandle: current.guestHandle, wakeIds: [] as string[], failed: 0 };
-    }
-    const [updated] = await tx
-      .update(agentShares)
-      .set({ status: 'revoked', updatedAt: new Date() })
-      .where(eq(agentShares.id, current.share.id))
-      .returning();
-    if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
-    const closed = await failGuestTasks(tx, current.agent, updated.guestWorkspaceId);
-    return { share: updated, guestHandle: current.guestHandle, wakeIds: closed.wakeIds, failed: closed.failed };
+    const revoked = await revokeShareRow(tx, current.agent, current.share);
+    return { ...revoked, guestHandle: current.guestHandle };
   });
   await deliverWakeIds(saved.wakeIds);
   const share = await serializeShare(db, saved.share, saved.guestHandle);

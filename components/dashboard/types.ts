@@ -129,12 +129,37 @@ export type Share = {
   guest_workspace_id: string;
   /** Null when the guest workspace has cleared its handle. */
   guest_handle: string | null;
+  /** Owner-facing name, from the invite link or the redeemer. Null for handle invites. */
+  label: string | null;
+  invite_id: string | null;
+  /** Prefix of the invite link this guest joined with. */
+  invite_prefix: string | null;
   status: ShareStatus;
   daily_cap: number;
   offers: { id: string; name: string }[];
   created_at: string;
   updated_at: string;
 };
+
+/** GET /api/v1/agents/:id/invites. An invite link on a shared agent. The token is never listed. */
+export type Invite = {
+  id: string;
+  agent_id: string;
+  prefix: string;
+  label: string | null;
+  offers: { id: string; name: string }[];
+  daily_cap: number;
+  max_uses: number;
+  uses: number;
+  approve_on_redeem: boolean;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
+  status: 'active' | 'exhausted' | 'expired' | 'revoked';
+};
+
+/** POST /api/v1/agents/:id/invites. token, url, and agent_prompt are shown once. */
+export type NewInvite = { invite: Invite; token: string; url: string; agent_prompt: string };
 
 /** GET /api/v1/agents/:id/offers. A task on a shared agent's menu. */
 export type Offer = { id: string; name: string; description: string; result_schema: unknown; created_at: string };

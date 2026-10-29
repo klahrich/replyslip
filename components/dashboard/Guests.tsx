@@ -10,7 +10,18 @@ const MAX_CAP = 10_000;
 type Loaded = { shares: Share[]; offers: Offer[] };
 
 function who(s: Share): string {
-  return s.guest_handle ? `@${s.guest_handle}` : 'A workspace with no handle';
+  const at = s.guest_handle ? `@${s.guest_handle}` : null;
+  if (s.label) return at ? `${s.label} (${at})` : s.label;
+  return at ?? 'A workspace with no handle';
+}
+
+/** "Joined with invite link rsi_8hQx…" under a guest that redeemed a link. */
+function via(s: Share) {
+  return s.invite_prefix ? (
+    <p className="dash-muted">
+      Joined with invite link <code translate="no">{s.invite_prefix}…</code>
+    </p>
+  ) : null;
 }
 
 function taskList(s: Share): string {
@@ -408,7 +419,9 @@ export function Guests({
         </p>
       ) : null}
 
-      {used === 0 ? <p className="dash-empty">No guests yet. Invite a workspace by its handle, then approve it here.</p> : null}
+      {used === 0 ? (
+        <p className="dash-empty">No guests yet. Invite a workspace by its handle, or send an invite link.</p>
+      ) : null}
 
       {pending.length ? (
         <>
@@ -420,6 +433,7 @@ export function Guests({
                   <p className="dash-guest-name" translate="no">
                     {who(s)}
                   </p>
+                  {via(s)}
                   <p className="dash-muted">
                     Tasks: <span translate="no">{taskList(s)}</span>
                   </p>
@@ -464,6 +478,7 @@ export function Guests({
                   <p className="dash-guest-name" translate="no">
                     {who(s)}
                   </p>
+                  {via(s)}
                   {tasksEditor(s)}
                   {capEditor(s, 'Up to ')}
                 </div>
