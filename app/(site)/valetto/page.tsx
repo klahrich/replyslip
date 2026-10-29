@@ -12,7 +12,7 @@ import '../landing-stripes.css';
 import '@/components/site/valetto/valetto.css';
 import { GlowBg } from '../GlowBg';
 
-// Preview of the Valetto pivot. Kept out of search until the brand moves to valetto.ai.
+// Preview of the Valetto pivot. Kept out of search until the brand moves to valetto.tech.
 export const metadata: Metadata = {
   title: { absolute: 'Valetto: share your bot with customers, one job at a time' },
   description:
@@ -92,7 +92,7 @@ const CONTROL: { h: string; p: string; frag: ReactNode; wide?: boolean }[] = [
     p: 'Click revoke and the link stops working. Maya’s next request gets a polite no.',
     frag: (
       <div className="vt-revoke">
-        <span>valetto.ai/c/k7Qm…</span>
+        <span>valetto.tech/c/k7Qm…</span>
         <span className="vt-revoke-btn">Revoke</span>
       </div>
     ),
@@ -178,7 +178,7 @@ const STEPS: { h: string; p: ReactNode }[] = [
       <>
         Each link has a long random code in it, and customers open it on any phone with nothing to install. The page
         carries your logo and your colors, so customers see your business.{' '}
-        <code className="vt-link">valetto.ai/c/k7Qm2xR9vTb4…</code>
+        <code className="vt-link">valetto.tech/c/k7Qm2xR9vTb4…</code>
       </>
     ),
   },

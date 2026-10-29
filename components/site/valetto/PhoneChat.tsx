@@ -213,7 +213,7 @@ function SceneScreen({ s, n, state }: { s: Scene; n: number; state: 'on' | 'out'
         <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">
           <path d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7h1Zm2 0h4V5a2 2 0 0 0-4 0v2Z" fill="currentColor" />
         </svg>
-        valetto.ai/c/{s.link}…
+        valetto.tech/c/{s.link}…
       </div>
       <header className="vt-biz">
         <span className="vt-logo" aria-hidden="true">

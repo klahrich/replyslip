@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 const ENDPOINT = '/api/valetto/early-access';
-const CONTACT = 'karim@valetto.ai';
+const CONTACT = 'karim@valetto.tech';
 
 const INDUSTRIES = [
   ['retail', 'Retail / e-commerce'],
