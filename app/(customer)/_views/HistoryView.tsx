@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Inbox } from 'lucide-react';
 import { getBot, listRequests } from '../_lib/api';
-import { ApiError, type Branding, type RequestListRow } from '../_lib/types';
+import { ApiError, type Branding, type RequestListFilter, type RequestListRow } from '../_lib/types';
 import { Button } from '../_ui/button';
 import { BrandFrame } from '../_components/Frame';
 import { usePoll } from '../_components/usePoll';
@@ -12,11 +12,14 @@ import { cn } from '../_lib/utils';
 import { Account, Loading, NotFound } from './common';
 import { RequestRow } from './BotView';
 
-type Filter = 'all' | 'open' | 'needs_info' | 'done' | 'failed';
+type Filter = 'all' | RequestListFilter;
+/** Section 17.4: R6 also filters on the review-first statuses. Labels match the status badges. */
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
-  { id: 'needs_info', label: 'Needs you' },
-  { id: 'open', label: 'Working' },
+  { id: 'needs_info', label: 'Needs your answer' },
+  { id: 'in_review', label: 'In review' },
+  { id: 'open', label: 'Working on it' },
+  { id: 'awaiting_release', label: 'Answer in review' },
   { id: 'done', label: 'Done' },
   { id: 'failed', label: 'Not completed' },
 ];

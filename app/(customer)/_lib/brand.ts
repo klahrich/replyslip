@@ -1,7 +1,7 @@
 /**
- * Owner branding → CSS variables on the page root (spec 7 "Theme" and 13.4).
- * The server already sends foregrounds; we recompute them when missing and check whether the main
- * color is readable as text on white (13.4 `primary_on_white_ok`, not in the 15.1 branding object).
+ * Owner branding → CSS variables on the page root (spec 7 "Theme", 13.4 and 17.3).
+ * The server's `on_primary` and `primary_on_white_ok` win. The local WCAG check below runs only when
+ * a field is missing (older responses).
  */
 import type { CSSProperties } from 'react';
 import type { Branding } from './types';
@@ -28,25 +28,31 @@ export function contrast(a: string, b: string): number {
 export function readableOn(bg: string): '#000000' | '#FFFFFF' {
   return contrast(bg, '#000000') >= contrast(bg, '#FFFFFF') ? '#000000' : '#FFFFFF';
 }
-function mix(hex: string, toward: [number, number, number], t: number): string {
-  const c = channels(hex).map((v, i) => Math.round(v + (toward[i] - v) * t));
-  return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+/** WCAG 4.5:1 against white, used only when the server didn't send `primary_on_white_ok`. */
+function okOnWhite(hex: string): boolean {
+  return contrast(hex, '#FFFFFF') >= 4.5;
 }
-/** The main color, darkened only as much as needed to pass 4.5:1 as text on white. */
-export function textSafe(hex: string, bg = '#FFFFFF'): string {
-  let out = hex;
-  for (let t = 0.1; contrast(out, bg) < 4.5 && t <= 1; t += 0.1) out = mix(hex, [0, 0, 0], t);
-  return out;
+/** "black" / "white" / "#000000" / "#FFFFFF" → hex, or null if missing or unknown. */
+function onPrimaryHex(v: Branding['on_primary']): '#000000' | '#FFFFFF' | null {
+  if (v === 'black' || v === '#000000') return '#000000';
+  if (v === 'white' || v === '#FFFFFF') return '#FFFFFF';
+  return null;
 }
+/** Text color for "brand-colored" words when the main color fails on white (13.4: fills and borders only). */
+const NEUTRAL_TEXT = '#18181B';
 
 export function brandStyle(b: Branding): CSSProperties {
   const primary = HEX.test(b.primary_color) ? b.primary_color : VALETTO_DEFAULT_PRIMARY;
-  const primaryFg = b.primary_foreground && HEX.test(b.primary_foreground) && contrast(primary, b.primary_foreground) >= 4.5 ? b.primary_foreground : readableOn(primary);
+  const usable = primary === b.primary_color; // the server's verdicts describe the owner's color, not our default
+  const primaryFg =
+    (usable && onPrimaryHex(b.on_primary)) ||
+    (b.primary_foreground && HEX.test(b.primary_foreground) && contrast(primary, b.primary_foreground) >= 4.5 ? b.primary_foreground : readableOn(primary));
+  const textOk = usable && typeof b.primary_on_white_ok === 'boolean' ? b.primary_on_white_ok : okOnWhite(primary);
   const accent = b.accent_color && HEX.test(b.accent_color) ? b.accent_color : null;
   const vars: Record<string, string> = {
     '--primary': primary,
     '--primary-foreground': primaryFg,
-    '--primary-text': textSafe(primary),
+    '--primary-text': textOk ? primary : NEUTRAL_TEXT,
     '--ring': primary,
     // shadcn's --accent is the hover/selected tint; the owner's accent is --brand-accent (used sparingly).
     '--accent': `color-mix(in srgb, ${primary} 8%, #ffffff)`,

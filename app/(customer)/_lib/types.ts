@@ -1,6 +1,6 @@
 /**
  * Customer page API types. They mirror spec section 15 (valetto-input-schema-spec.md) field for field,
- * plus the two review-first statuses from section 16. Nothing here is mock-specific.
+ * plus the review-first statuses from section 16 and the section 17 clarifications. Nothing here is mock-specific.
  */
 
 export type Branding = {
@@ -13,8 +13,15 @@ export type Branding = {
   /** Null when the owner set no accent. The page then uses the main color for highlights. */
   accent_color: string | null;
   accent_foreground: string | null;
+  /** Section 17.3: the server's contrast verdicts. The page computes them itself only if they're missing. */
+  primary_on_white_ok?: boolean;
+  /** Section 17.3 lists "#000000" | "#FFFFFF"; the "black" | "white" spelling is accepted too. */
+  on_primary?: OnPrimary;
   show_footer: true;
 };
+
+export type OnPrimary = '#000000' | '#FFFFFF' | 'black' | 'white';
+export type ReviewMode = 'auto' | 'review_first';
 
 export type AccessMode = 'open_link' | 'approve_each';
 export type ShareStatus = 'pending' | 'approved' | 'revoked';
@@ -45,8 +52,9 @@ export type NumberField = FieldBase & { type: 'number' | 'integer'; minimum?: nu
 export type BooleanField = FieldBase & { type: 'boolean'; default?: boolean };
 export type MultiChoiceField = FieldBase & {
   type: 'array';
+  /** Section 17.9: `items['x-enum-titles']` is the canonical place. */
   items: { type: 'string'; enum: string[]; 'x-enum-titles'?: string[] };
-  /** Section 15.5's example puts the titles here; 5.2 implies `items`. The page reads both. */
+  /** Legacy array-level titles (the 15.5 example). The server normalizes these onto items; still read as a fallback. */
   'x-enum-titles'?: string[];
   minItems?: number;
   maxItems?: number;
@@ -73,6 +81,8 @@ export type ResultField = { key: string; label: string; type: 'string' | 'number
 
 export type Job = {
   name: string;
+  /** Section 17.10: the offer's display name, present on every job (also when input_schema is null). */
+  title: string;
   description: string;
   input_schema: InputSchema | null;
   notes_enabled: boolean;
@@ -87,7 +97,12 @@ export type RevokedShare = { status: 'revoked' };
 /** R4 `GET /api/v1/c/bots/:agent_id` */
 export type BotResponse = {
   bot: { agent_id: string; branding: Branding };
+  /** Section 17.1: mirrors share.status. When "pending", `jobs` is the full list and the form shows disabled. */
+  access: ShareStatus;
+  /** Section 17.7. */
+  review_mode: ReviewMode;
   share: ApprovedShare | PendingShare | RevokedShare;
+  /** Full list for approved and pending; empty when revoked. */
   jobs: Job[];
 };
 
@@ -104,6 +119,12 @@ export type RequestStatus = 'in_review' | 'open' | 'needs_info' | 'awaiting_rele
 
 export type DisplayRow = { key: string; label: string; value: string };
 export type ResultDisplayRow = DisplayRow & { kind: 'text' | 'number' | 'boolean' | 'list' | 'json' };
+/** Section 17.5. */
+export type FailCode = 'declined_by_owner' | 'bot_failed' | 'expired';
+
+/** Section 17.4: R6 filter values. */
+export type RequestListFilter = RequestStatus;
+
 export type Answer = { question: string; answer: string; asked_at: string; answered_at: string };
 
 /** R7 `GET /api/v1/c/requests/:task_id` (also the body of R5 and R8) */
@@ -120,7 +141,10 @@ export type CustomerRequest = {
   answers: Answer[];
   result: unknown;
   result_display: ResultDisplayRow[];
-  fail_reason: string | null;
+  /** Section 17.5: set only when failed. */
+  fail_code: FailCode | null;
+  /** The bot's own words. Untrusted: render as plain text only. */
+  fail_message: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;

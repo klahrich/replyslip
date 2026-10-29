@@ -1,4 +1,4 @@
-import type { RequestStatus } from '../_lib/types';
+import type { FailCode, RequestStatus } from '../_lib/types';
 
 export type Tone = 'neutral' | 'working' | 'attention' | 'success' | 'danger';
 
@@ -20,8 +20,15 @@ export function statusCopy(status: RequestStatus, name: string): { badge: string
   }
 }
 
-/** `fail_reason` is bot text, except the section 16 code for an owner decline. */
-export function failText(reason: string | null, name: string): string {
-  if (reason === 'declined_by_owner') return `${name} declined this request.`;
-  return reason || 'No reason was given.';
+/** Section 17.5: customer copy per `fail_code`. `fail_message` (bot text) is shown separately, as plain text. */
+export function failCopy(code: FailCode | null, name: string): { title: string; body: string } {
+  switch (code) {
+    case 'declined_by_owner':
+      return { title: `${name} declined this request`, body: `If you have questions, contact ${name} directly.` };
+    case 'expired':
+      return { title: 'This request timed out', body: `${name} didn't finish it in time. Send it again if you still need it.` };
+    case 'bot_failed':
+    default:
+      return { title: "This request wasn't completed", body: `Something went wrong on ${name}'s side. Try sending it again.` };
+  }
 }

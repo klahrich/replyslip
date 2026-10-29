@@ -46,7 +46,7 @@ export function PlainFrame({ children }: { children: ReactNode }) {
 export function ValettoFooter() {
   return (
     <footer className="px-4 pt-6 pb-8 text-center text-[13px] text-muted-foreground">
-      <a href="https://valetto.ai" className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 hover:text-foreground">
+      <a href="https://valetto.tech" className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 hover:text-foreground">
         <span>via</span>
         <span className="font-semibold tracking-tight text-foreground/80">Valetto</span>
       </a>

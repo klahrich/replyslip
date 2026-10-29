@@ -10,6 +10,7 @@
  *   ?share=pending | revoked   force the share status on /c/<agent_id> pages
  *   ?cap=reached               today's request limit is used up
  *   ?mock=field_errors         the next submit returns invalid_input with details.fields
+ *   ?accept=queue_full | plan_limit   R2 returns 429 pending_queue_full / 403 plan_limit (section 17.6)
  * Link tokens: acme-jewellers, northline-windows, fernwood-furniture, expired, used-up; anything else is 404.
  */
 import { ApiError } from './types';
@@ -30,6 +31,7 @@ import type {
   RequestListResponse,
   RequestListRow,
   RequestResponse,
+  RequestListFilter,
   RequestStatus,
   ResultDisplayRow,
 } from './types';
@@ -109,23 +111,37 @@ function resultDisplay(job: Job | undefined, result: unknown): ResultDisplayRow[
   return keys.map((k) => row(k, known.find((f) => f.key === k)?.label ?? labelFor(k), obj[k]));
 }
 
-/** What a newly sent mock request looks like `t` ms after it was sent. */
+/** Mock bots ask a follow-up question for these jobs (render_ring only when there's an engraving). */
+function questionFor(c: MockRequestFixture): string | null {
+  if (c.offer === 'measuring_visit') return 'Is there parking for a van on your street?';
+  if (c.offer === 'render_ring' && c.input?.engraving) return 'Do you want the engraving in script or block letters?';
+  return null;
+}
+
+/**
+ * What a newly sent mock request looks like now. Steps are 8 s each.
+ * Auto:         open → (needs_info → answer → open) → done
+ * Review first: in_review → open → (awaiting_release [question held] → needs_info → answer → open) → awaiting_release → done
+ * Section 17.8: a bot question waits for the owner's release like an answer does, so it's hidden during awaiting_release.
+ */
 function liveState(bot: MockBot, c: Created, s: MockState, now: number): Partial<MockRequestFixture> & { status: RequestStatus } {
+  const STEP = 8000;
   const t = now - c.createdMs;
   const answered = s.answered[c.id];
   const result = mockResult(c);
   const review = bot.review_mode === 'review_first';
-  if (c.offer === 'measuring_visit') {
-    if (!answered) return t < 6000 ? { status: 'open' } : { status: 'needs_info', question: 'Is there parking for a van on your street?' };
-    return now - answered.atMs < 8000 ? { status: 'open' } : { status: 'done', result };
+  const question = questionFor(c);
+  const start = review ? STEP : 0; // in_review first
+  if (review && t < STEP) return { status: 'in_review' };
+  if (question && !answered) {
+    if (t < start + STEP) return { status: 'open' };
+    if (review && t < start + 2 * STEP) return { status: 'awaiting_release', held_question: question };
+    return { status: 'needs_info', question };
   }
-  if (review) {
-    if (t < 8000) return { status: 'in_review' };
-    if (t < 16000) return { status: 'open' };
-    if (t < 24000) return { status: 'awaiting_release' };
-    return { status: 'done', result };
-  }
-  return t < 8000 ? { status: 'open' } : { status: 'done', result };
+  const since = answered ? now - answered.atMs : t - start;
+  if (since < STEP) return { status: 'open' };
+  if (review && since < 2 * STEP) return { status: 'awaiting_release' };
+  return { status: 'done', result };
 }
 
 function mockResult(c: MockRequestFixture): Record<string, unknown> {
@@ -176,16 +192,18 @@ function toRequest(fx: MockRequestFixture, s: MockState, now = Date.now()): Cust
     id: r.id,
     bot: { agent_id: r.agent_id },
     offer: r.offer,
-    title: job?.input_schema?.title ?? r.offer,
+    title: job?.title ?? r.offer,
     status,
     input: r.input,
     input_display: inputDisplay(job, r.input),
     notes: r.notes,
+    // Only a released question is visible (17.8); held_question never leaves the server.
     question: status === 'needs_info' ? (r.question ?? null) : null,
     answers: [...(r.answers ?? []), ...(answered?.answers ?? [])],
     result: showResult ? (r.result ?? null) : null,
     result_display: showResult ? resultDisplay(job, r.result) : [],
-    fail_reason: status === 'failed' ? (r.fail_reason ?? null) : null,
+    fail_code: status === 'failed' ? (r.fail_code ?? 'bot_failed') : null,
+    fail_message: status === 'failed' ? (r.fail_message ?? null) : null,
     created_at: r.created_at,
     updated_at: r.updated_at,
     completed_at: status === 'done' || status === 'failed' ? r.updated_at : null,
@@ -272,6 +290,10 @@ export async function acceptLink(token: string): Promise<AcceptResponse> {
   const bot = MOCK_BOTS.find((b) => b.token === token) ?? fail(404, 'invite_not_found', "This link doesn't work.");
   if (param('share') === 'revoked') fail(403, 'share_revoked', `${bot.branding.display_name} didn't approve this request.`);
   const s = load();
+  // Section 17.6: only R2 returns these, and only for a customer without a share yet. The text hides the reason.
+  if (!s.accepted[bot.agent_id] && param('accept') === 'queue_full')
+    fail(429, 'pending_queue_full', "This business isn't accepting new customers right now. Try again later.");
+  if (!s.accepted[bot.agent_id] && param('accept') === 'plan_limit') fail(403, 'plan_limit', "This business can't add new customers right now.");
   const status = s.accepted[bot.agent_id] ?? (bot.access_mode === 'approve_each' && bot.link_kind === 'public' ? 'pending' : 'approved');
   s.accepted[bot.agent_id] = status;
   save(s);
@@ -302,8 +324,9 @@ export async function getBot(agentId: string): Promise<BotResponse> {
   requireSession(s);
   const bot = botById(agentId);
   const status = shareStatus(bot, s);
-  const base = { bot: { agent_id: bot.agent_id, branding: bot.branding } };
-  if (status === 'pending') return { ...base, share: { status, requested_at: '2026-10-29T11:08:00.000Z' }, jobs: [] };
+  const base = { bot: { agent_id: bot.agent_id, branding: bot.branding }, access: status, review_mode: bot.review_mode };
+  // Section 17.1: pending gets the full job list so the page can show it disabled.
+  if (status === 'pending') return { ...base, share: { status, requested_at: '2026-10-29T11:08:00.000Z' }, jobs: bot.jobs };
   if (status === 'revoked') return { ...base, share: { status }, jobs: [] };
   const sentToday = s.created.filter((c) => c.agent_id === agentId).length;
   const used = param('cap') === 'reached' ? bot.daily_cap : Math.min(bot.daily_cap, bot.used_today + sentToday);
@@ -316,7 +339,7 @@ export async function createRequest(agentId: string, body: CreateRequestBody): P
   const s = load();
   const bot = botById(agentId);
   const status = shareStatus(bot, s);
-  if (status === 'pending') fail(403, 'share_pending', `${bot.branding.display_name} hasn't approved you yet.`);
+  if (status === 'pending') fail(403, 'pending_approval', `${bot.branding.display_name} hasn't approved you yet.`);
   if (status === 'revoked') fail(403, 'share_revoked', `You no longer have access to ${bot.branding.display_name}.`);
   const job = jobFor(bot, body.offer) ?? fail(404, 'offer_not_found', "This job isn't available.");
 
@@ -371,7 +394,7 @@ export async function createRequest(agentId: string, body: CreateRequestBody): P
 /** R6 `GET /api/v1/c/bots/:agent_id/requests` */
 export async function listRequests(
   agentId: string,
-  opts: { status?: 'open' | 'done' | 'needs_info' | 'failed'; limit?: number; cursor?: string | null } = {},
+  opts: { status?: RequestListFilter; limit?: number; cursor?: string | null } = {},
 ): Promise<RequestListResponse> {
   await wait();
   const s = load();

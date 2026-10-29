@@ -11,7 +11,7 @@ import { Textarea } from '../_ui/textarea';
 import { BrandFrame } from '../_components/Frame';
 import { PlainValues } from '../_components/PlainValues';
 import { StatusBadge } from '../_components/StatusBadge';
-import { failText, statusCopy } from '../_components/status';
+import { failCopy, statusCopy } from '../_components/status';
 import { usePoll } from '../_components/usePoll';
 import { cn } from '../_lib/utils';
 import { Account, Loading, NotFound, when } from './common';
@@ -51,7 +51,7 @@ export function RequestView({ agentId, taskId }: { agentId: string; taskId: stri
         <ArrowLeft className="size-4" /> Your requests
       </Link>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <h1 className="text-[26px] leading-tight font-semibold tracking-tight">{req.title === req.offer ? 'Your request' : req.title}</h1>
+        <h1 className="text-[26px] leading-tight font-semibold tracking-tight">{req.title}</h1>
         <StatusBadge status={req.status} name={name} />
       </div>
       <p className="mt-1 text-sm text-muted-foreground">Sent {when(req.created_at).replace(/^Today/, 'today')}</p>
@@ -82,14 +82,7 @@ export function RequestView({ agentId, taskId }: { agentId: string; taskId: stri
           </section>
         )}
 
-        {req.status === 'failed' && (
-          <section className="rounded-2xl border border-border bg-muted/60 p-5 sm:p-6" role="status">
-            <h2 className="flex items-center gap-2 text-[17px] font-semibold">
-              <CircleAlert className="size-5 text-muted-foreground" /> {copy.title}
-            </h2>
-            <p className="mt-2 text-[15px] whitespace-pre-wrap text-muted-foreground">{failText(req.fail_reason, name)}</p>
-          </section>
-        )}
+        {req.status === 'failed' && <FailedCard req={req} name={name} />}
 
         {req.answers.length > 0 && (
           <section className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
@@ -119,6 +112,30 @@ export function RequestView({ agentId, taskId }: { agentId: string; taskId: stri
         )}
       </div>
     </BrandFrame>
+  );
+}
+
+function FailedCard({ req, name }: { req: CustomerRequest; name: string }) {
+  const copy = failCopy(req.fail_code, name);
+  return (
+    <section className="rounded-2xl border border-border bg-muted/60 p-5 sm:p-6" role="status">
+      <h2 className="flex items-center gap-2 text-[17px] leading-snug font-semibold">
+        <CircleAlert className="size-5 shrink-0 text-muted-foreground" /> {copy.title}
+      </h2>
+      {req.fail_message && (
+        <figure className="mt-3 rounded-xl border border-border bg-card px-4 py-3">
+          <figcaption className="text-sm text-muted-foreground">Message from {name}</figcaption>
+          {/* Bot text, untrusted: rendered as a plain string, never as HTML or a link. */}
+          <blockquote className="mt-1 text-[15px] whitespace-pre-wrap">{req.fail_message}</blockquote>
+        </figure>
+      )}
+      <p className="mt-3 text-[15px] text-muted-foreground">{copy.body}</p>
+      {req.fail_code !== 'declined_by_owner' && (
+        <Button asChild variant="outline" className="mt-4 h-12 w-full rounded-xl bg-card text-base sm:w-auto sm:px-6">
+          <Link href={`/c/${req.bot.agent_id}/new/${req.offer}`}>Send it again</Link>
+        </Button>
+      )}
+    </section>
   );
 }
 

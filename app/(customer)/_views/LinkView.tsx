@@ -23,11 +23,13 @@ const linkErrors: Record<string, { title: string; body: string }> = {
   rate_limited: { title: 'Too many tries', body: 'Wait a few minutes, then open the link again.' },
 };
 
+const mistake = (name: string) => `If you think this is a mistake, contact ${name} directly.`;
+
 export function LinkView({ token }: { token: string }) {
   const router = useRouter();
   const [link, setLink] = useState<LinkResponse | null>(null);
   const [dead, setDead] = useState<string | null>(null);
-  const [blocked, setBlocked] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState<{ title: string; body?: string } | null>(null);
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -38,7 +40,7 @@ export function LinkView({ token }: { token: string }) {
     getLink(token).then(
       (l) => {
         if (l.next === 'open_bot' || l.next === 'wait') router.replace(`/c/${l.bot.agent_id}`);
-        else if (l.next === 'blocked') setBlocked(`${l.bot.branding.display_name} didn't approve this request.`);
+        else if (l.next === 'blocked') setBlocked({ title: `${l.bot.branding.display_name} didn't approve this request.`, body: mistake(l.bot.branding.display_name) });
         setLink(l);
       },
       (e) => setDead(e instanceof ApiError ? e.code : 'invite_not_found'),
@@ -66,9 +68,11 @@ export function LinkView({ token }: { token: string }) {
       router.push(`/c/${r.bot.agent_id}`);
     } catch (e) {
       const code = e instanceof ApiError ? e.code : '';
-      if (code === 'share_revoked') setBlocked(`${name} didn't approve this request.`);
-      else if (code === 'pending_queue_full' || code === 'plan_limit') setBlocked(`${name} isn't taking new requests right now.`);
-      else if (code === 'invite_email_mismatch') setBlocked('This invite was sent to a different email. Sign in with that email, or ask for a new invite.');
+      if (code === 'share_revoked') setBlocked({ title: `${name} didn't approve this request.`, body: mistake(name) });
+      // Section 17.6: show the server's wording; it deliberately doesn't say why.
+      else if (code === 'pending_queue_full') setBlocked({ title: (e instanceof Error && e.message) || "This business isn't accepting new customers right now. Try again later." });
+      else if (code === 'plan_limit') setBlocked({ title: (e instanceof Error && e.message) || "This business can't add new customers right now." });
+      else if (code === 'invite_email_mismatch') setBlocked({ title: 'This invite was sent to a different email. Sign in with that email, or ask for a new invite.' });
       else setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
       setBusy(false);
     }
@@ -114,8 +118,8 @@ export function LinkView({ token }: { token: string }) {
         <section className="mt-6 rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8">
           {blocked ? (
             <>
-              <h1 className="text-[22px] leading-snug font-semibold tracking-tight">{blocked}</h1>
-              <p className="mt-2 text-[15px] text-muted-foreground">If you think this is a mistake, contact {name} directly.</p>
+              <h1 className="text-[22px] leading-snug font-semibold tracking-tight">{blocked.title}</h1>
+              {blocked.body && <p className="mt-2 text-[15px] text-muted-foreground">{blocked.body}</p>}
             </>
           ) : step === 'email' ? (
             <form onSubmit={sendCode} noValidate>

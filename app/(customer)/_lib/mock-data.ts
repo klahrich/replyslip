@@ -2,16 +2,14 @@
  * Fixtures for the mock customer API (api.ts). Three sample brands, their jobs, and past requests.
  * Delete this file when api.ts switches to real fetch calls.
  */
-import type { AccessMode, Branding, InputObject, Job, RequestStatus } from './types';
-
-export type ReviewMode = 'auto' | 'review_first';
+import type { AccessMode, Branding, FailCode, InputObject, Job, RequestStatus, ReviewMode } from './types';
 
 export type MockBot = {
   agent_id: string;
   token: string;
   link_kind: 'public' | 'personal';
   access_mode: AccessMode;
-  /** Section 16. Not returned to customers by any route in the spec; the mock uses it to pick statuses. */
+  /** Section 16; returned by R4 since section 17.7. */
   review_mode: ReviewMode;
   branding: Branding;
   daily_cap: number;
@@ -29,7 +27,10 @@ export type MockRequestFixture = {
   question?: string | null;
   answers?: { question: string; answer: string; asked_at: string; answered_at: string }[];
   result?: Record<string, unknown> | null;
-  fail_reason?: string | null;
+  fail_code?: FailCode | null;
+  fail_message?: string | null;
+  /** Mock only: a question the bot asked that the owner hasn't released yet (section 17.8). */
+  held_question?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -58,11 +59,14 @@ export const MOCK_BOTS: MockBot[] = [
       primary_foreground: '#FFFFFF',
       accent_color: '#C9962E',
       accent_foreground: '#000000',
+      primary_on_white_ok: true,
+      on_primary: 'white',
       show_footer: true,
     },
     jobs: [
       {
         name: 'render_ring',
+        title: 'Render my ring',
         description: 'See your ring design before we make it. We send a preview and a price.',
         input_schema: {
           type: 'object',
@@ -88,8 +92,7 @@ export const MOCK_BOTS: MockBot[] = [
               title: 'Extras',
               maxItems: 2,
               uniqueItems: true,
-              items: { type: 'string', enum: ['matching_band', 'gift_box', 'care_kit'] },
-              'x-enum-titles': ['Matching band', 'Gift box', 'Care kit'],
+              items: { type: 'string', enum: ['matching_band', 'gift_box', 'care_kit'], 'x-enum-titles': ['Matching band', 'Gift box', 'Care kit'] },
             },
             rush: { type: 'boolean', title: 'Rush order', description: 'Ready in 2 weeks instead of 5.' },
           },
@@ -108,6 +111,7 @@ export const MOCK_BOTS: MockBot[] = [
       },
       {
         name: 'order_status',
+        title: 'Check order status',
         description: 'Check where your order is. Have your order number ready.',
         input_schema: {
           type: 'object',
@@ -152,11 +156,14 @@ export const MOCK_BOTS: MockBot[] = [
       primary_foreground: '#FFFFFF',
       accent_color: '#E8A33D',
       accent_foreground: '#000000',
+      primary_on_white_ok: true,
+      on_primary: '#FFFFFF',
       show_footer: true,
     },
     jobs: [
       {
         name: 'window_quote',
+        title: 'Get a window quote',
         description: 'Get a price for new windows, with install. We reply within one business day.',
         input_schema: {
           type: 'object',
@@ -195,6 +202,7 @@ export const MOCK_BOTS: MockBot[] = [
       },
       {
         name: 'measuring_visit',
+        title: 'Book a measuring visit',
         description: 'Book a free visit to measure your windows. It takes about 30 minutes.',
         input_schema: {
           type: 'object',
@@ -252,6 +260,7 @@ export const MOCK_BOTS: MockBot[] = [
     jobs: [
       {
         name: 'delivery_status',
+        title: "Where's my delivery?",
         description: 'See where your delivery is and when it should arrive.',
         input_schema: {
           type: 'object',
@@ -274,6 +283,7 @@ export const MOCK_BOTS: MockBot[] = [
       },
       {
         name: 'change_delivery_date',
+        title: 'Change my delivery date',
         description: 'Move your delivery to another day. We confirm by email.',
         input_schema: {
           type: 'object',
@@ -304,6 +314,7 @@ export const MOCK_BOTS: MockBot[] = [
       },
       {
         name: 'something_else',
+        title: 'Something else',
         description: 'Anything else about your order. Tell us in a few words.',
         input_schema: null,
         notes_enabled: true,
@@ -358,9 +369,21 @@ export const MOCK_REQUESTS: MockRequestFixture[] = [
     status: 'failed',
     input: { metal: 'platinum', stone: 'ruby', carat: 4.5, ring_size: 9, rush: true },
     notes: '',
-    fail_reason: 'declined_by_owner',
+    fail_code: 'declined_by_owner',
     created_at: '2026-10-24T13:10:00.000Z',
     updated_at: '2026-10-24T17:45:00.000Z',
+  },
+  {
+    // The bot asked a question, but the owner hasn't released it yet: the customer sees only "being reviewed".
+    id: 'a0f1c2d3-5555-4a2b-9c3d-4e5f6a7b8c05',
+    agent_id: ACME_ID,
+    offer: 'render_ring',
+    status: 'awaiting_release',
+    input: { metal: 'yellow_gold', stone: 'emerald', carat: 0.75, ring_size: 5, engraving: 'J + R', rush: false },
+    notes: '',
+    held_question: 'Do you want the engraving in script or block letters?',
+    created_at: '2026-10-29T10:30:00.000Z',
+    updated_at: '2026-10-29T11:05:00.000Z',
   },
   // Northline Windows (auto)
   {
@@ -405,7 +428,8 @@ export const MOCK_REQUESTS: MockRequestFixture[] = [
     status: 'failed',
     input: { window_type: 'picture', width_cm: 280, height_cm: 240, count: 1, removal: false, postal_code: 'K1A 0B1' },
     notes: '',
-    fail_reason: "We don't install outside the Greater Toronto Area yet.",
+    fail_code: 'bot_failed',
+    fail_message: "We don't install outside the Greater Toronto Area yet.",
     created_at: '2026-10-20T09:05:00.000Z',
     updated_at: '2026-10-20T10:12:00.000Z',
   },
@@ -446,5 +470,28 @@ export const MOCK_REQUESTS: MockRequestFixture[] = [
     result: { message: 'Yes. Old furniture pickup is $60, paid at the door.' },
     created_at: '2026-10-22T16:00:00.000Z',
     updated_at: '2026-10-22T17:10:00.000Z',
+  },
+  {
+    id: 'c2f3e4d5-4444-4c2d-9e3f-6a7b8c9d0e04',
+    agent_id: FERNWOOD_ID,
+    offer: 'change_delivery_date',
+    status: 'failed',
+    input: { order_number: 'FW198230', new_date: '2026-10-20', time_window: 'any', flexible: false },
+    notes: '',
+    fail_code: 'expired',
+    created_at: '2026-10-15T14:00:00.000Z',
+    updated_at: '2026-10-17T14:00:00.000Z',
+  },
+  {
+    id: 'c2f3e4d5-5555-4c2d-9e3f-6a7b8c9d0e05',
+    agent_id: FERNWOOD_ID,
+    offer: 'delivery_status',
+    status: 'failed',
+    input: { order_number: 'FW190077', postal_code: 'M4L 2A1' },
+    notes: '',
+    fail_code: 'bot_failed',
+    fail_message: null,
+    created_at: '2026-10-12T18:30:00.000Z',
+    updated_at: '2026-10-12T18:31:00.000Z',
   },
 ];

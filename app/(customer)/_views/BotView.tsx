@@ -2,19 +2,15 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronRight, Clock, Hourglass, ShieldOff } from 'lucide-react';
+import { ChevronRight, Clock, Hourglass, Lock, ShieldOff } from 'lucide-react';
 import { getBot, listRequests } from '../_lib/api';
-import { ApiError, type BotResponse, type RequestListRow } from '../_lib/types';
-import { labelFor } from '../_lib/schema';
+import { ApiError, type BotResponse, type Job, type RequestListRow } from '../_lib/types';
+import { cn } from '../_lib/utils';
 import { BrandFrame } from '../_components/Frame';
 import { Notice } from '../_components/Notice';
 import { StatusBadge } from '../_components/StatusBadge';
 import { usePoll } from '../_components/usePoll';
 import { Account, Loading, NotFound, useEmail, when } from './common';
-
-export function jobTitle(job: { name: string; input_schema: { title?: string } | null }): string {
-  return job.input_schema?.title ?? labelFor(job.name);
-}
 
 export function BotView({ agentId }: { agentId: string }) {
   const [data, setData] = useState<BotResponse | null>(null);
@@ -48,7 +44,7 @@ export function BotView({ agentId }: { agentId: string }) {
     return (
       <BrandFrame branding={branding} agentId={agentId} account={<Account />}>
         <Notice icon={<Hourglass />} title={`Waiting for approval from ${name}`}>
-          <p>We&apos;ll show your jobs here as soon as they approve you. You can close this page.</p>
+          <p>You can send requests as soon as they approve you. You can close this page.</p>
           {email && (
             <p>
               Signed in as <span className="font-medium break-all text-foreground">{email}</span>
@@ -58,6 +54,12 @@ export function BotView({ agentId }: { agentId: string }) {
         <p className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden /> This page updates on its own.
         </p>
+        {data.jobs.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-[17px] font-semibold tracking-tight">What you can ask once you&apos;re approved</h2>
+            <JobList agentId={agentId} jobs={data.jobs} muted />
+          </section>
+        )}
       </BrandFrame>
     );
   }
@@ -89,27 +91,19 @@ export function BotView({ agentId }: { agentId: string }) {
         </Notice>
       )}
 
-      <ul className="mt-6 grid gap-3">
-        {data.jobs.map((job) => (
-          <li key={job.name}>
-            {capped ? (
+      {capped ? (
+        <ul className="mt-6 grid gap-3">
+          {data.jobs.map((job) => (
+            <li key={job.name}>
               <div className="rounded-2xl border border-border bg-card p-5 opacity-60" aria-disabled>
-                <JobCardBody title={jobTitle(job)} description={job.description} />
+                <JobCardBody title={job.title} description={job.description} />
               </div>
-            ) : (
-              <Link
-                href={`/c/${agentId}/new/${job.name}`}
-                className="group flex items-center gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm transition-[border-color,box-shadow] hover:border-primary/40 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none"
-              >
-                <JobCardBody title={jobTitle(job)} description={job.description} />
-                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-primary-text transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                  <ChevronRight className="size-5" />
-                </span>
-              </Link>
-            )}
-          </li>
-        ))}
-      </ul>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <JobList agentId={agentId} jobs={data.jobs} />
+      )}
 
       {recent && recent.length > 0 && <Recent agentId={agentId} name={name} rows={recent} title="Recent requests" />}
     </BrandFrame>
@@ -122,6 +116,34 @@ function resetText(iso: string): string {
   tomorrow.setDate(tomorrow.getDate() + 1);
   if (d.toDateString() === new Date().toDateString() || d.toDateString() === tomorrow.toDateString()) return 'You can send more tomorrow.';
   return `You can send more on ${d.toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' })}.`;
+}
+
+function JobList({ agentId, jobs, muted = false }: { agentId: string; jobs: Job[]; muted?: boolean }) {
+  return (
+    <ul className={muted ? 'mt-4 grid gap-3' : 'mt-6 grid gap-3'}>
+      {jobs.map((job) => (
+        <li key={job.name}>
+          <Link
+            href={`/c/${agentId}/new/${job.name}`}
+            className={cn(
+              'group flex items-center gap-4 rounded-2xl border border-border bg-card p-5 transition-[border-color,box-shadow] focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none',
+              muted ? 'text-muted-foreground' : 'shadow-sm hover:border-primary/40 hover:shadow-md',
+            )}
+          >
+            <JobCardBody title={job.title} description={job.description} />
+            <span
+              className={cn(
+                'grid size-10 shrink-0 place-items-center rounded-full',
+                muted ? 'bg-muted text-muted-foreground' : 'bg-accent text-primary-text transition-colors group-hover:bg-primary group-hover:text-primary-foreground',
+              )}
+            >
+              {muted ? <Lock className="size-4" aria-label="Available once approved" /> : <ChevronRight className="size-5" />}
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function JobCardBody({ title, description }: { title: string; description: string }) {

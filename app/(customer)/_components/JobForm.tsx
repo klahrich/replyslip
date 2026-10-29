@@ -50,7 +50,23 @@ const field = 'h-12 rounded-xl bg-card px-3.5 text-base shadow-none md:text-base
 const choiceRow =
   'flex min-h-12 w-full items-center gap-3 rounded-xl border border-input bg-card px-3.5 py-3 text-[15px] transition-colors has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-accent has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/30';
 
-export function JobForm({ agentId, job, onSent }: { agentId: string; job: Job; onSent: (r: CustomerRequest) => void }) {
+export function JobForm({
+  agentId,
+  job,
+  businessName,
+  disabled = false,
+  onSent,
+  onPending,
+}: {
+  agentId: string;
+  job: Job;
+  businessName: string;
+  /** Section 17.1: pending customers see the form but can't use it. */
+  disabled?: boolean;
+  onSent: (r: CustomerRequest) => void;
+  /** Called on R5 403 pending_approval so the page can re-read the share. */
+  onPending?: () => void;
+}) {
   const schema = job.input_schema;
   const fields = useMemo(() => (schema ? orderedFields(schema) : []), [schema]);
   const required = useMemo(() => new Set(schema?.required ?? []), [schema]);
@@ -63,6 +79,7 @@ export function JobForm({ agentId, job, onSent }: { agentId: string; job: Job; o
   const [formError, setFormError] = useState<{ title: string; body: string } | null>(null);
   const notesShown = !schema || job.notes_enabled;
   const notesRequired = !schema;
+  const { isSubmitting } = form.formState;
 
   async function submit(values: Values) {
     setFormError(null);
@@ -95,7 +112,11 @@ export function JobForm({ agentId, job, onSent }: { agentId: string; job: Job; o
       }
       // Move focus to the first field the server flagged (FormControl marks it aria-invalid).
       requestAnimationFrame(() => document.querySelector<HTMLElement>('.vt-root form [aria-invalid="true"]')?.focus());
-      if (e.code === 'rate_limited') setFormError({ title: "You've reached today's limit", body: 'You can send more requests tomorrow. Your past requests are still here.' });
+      if (e.code === 'pending_approval') {
+        setFormError({ title: `Waiting for approval from ${businessName}`, body: 'You can send this once they approve you.' });
+        onPending?.();
+      } else if (e.code === 'share_revoked') setFormError({ title: `You can't send new requests to ${businessName}`, body: e.message });
+      else if (e.code === 'rate_limited') setFormError({ title: "You've reached today's limit", body: 'You can send more requests tomorrow. Your past requests are still here.' });
       else if (e.code === 'invalid_input' || e.code === 'validation_error')
         // `_form` / unknown-key errors are about the schema, not something the customer can fix by hand.
         setFormError({
@@ -106,11 +127,10 @@ export function JobForm({ agentId, job, onSent }: { agentId: string; job: Job; o
     }
   }
 
-  const { isSubmitting } = form.formState;
-
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(submit)} noValidate className="grid gap-6">
+      <form onSubmit={form.handleSubmit(submit)} noValidate>
+        <fieldset disabled={disabled} className="m-0 grid min-w-0 gap-6 border-0 p-0 disabled:opacity-60">
         {formError && (
           <Alert variant="destructive" className="rounded-xl border-destructive/30 bg-red-50/60" role="alert">
             <AlertCircle />
@@ -161,16 +181,19 @@ export function JobForm({ agentId, job, onSent }: { agentId: string; job: Job; o
         )}
 
         <div className="pt-1">
-          <Button type="submit" disabled={isSubmitting} className="h-12 w-full rounded-xl text-base font-semibold">
+          <Button type="submit" disabled={disabled || isSubmitting} className="h-12 w-full rounded-xl text-base font-semibold">
             {isSubmitting ? (
               <>
                 <Loader2 className="animate-spin" /> Sending
               </>
+            ) : disabled ? (
+              'Available once approved'
             ) : (
               'Send request'
             )}
           </Button>
         </div>
+        </fieldset>
       </form>
     </Form>
   );
