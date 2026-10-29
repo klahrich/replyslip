@@ -69,6 +69,8 @@ export type Task = {
   title: string;
   description: string;
   result_schema: unknown;
+  input_schema: Record<string, unknown> | null;
+  input: Record<string, unknown> | null;
   status: TaskStatus;
   result: unknown;
   question: string | null;
@@ -162,4 +164,12 @@ export type Invite = {
 export type NewInvite = { invite: Invite; token: string; url: string; agent_prompt: string };
 
 /** GET /api/v1/agents/:id/offers. A task on a shared agent's menu. */
-export type Offer = { id: string; name: string; description: string; result_schema: unknown; created_at: string };
+export type Offer = {
+  id: string;
+  name: string;
+  description: string;
+  result_schema: unknown;
+  input_schema: Record<string, unknown> | null;
+  notes_enabled: boolean;
+  created_at: string;
+};

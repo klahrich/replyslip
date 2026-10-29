@@ -69,7 +69,14 @@
       "idx": 9,
       "version": "7",
       "when": 1762800000000,
-      "tag": "0009_agent_invites",
+      "tag": "0009_offer_input_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1762900000000,
+      "tag": "0010_agent_invites",
       "breakpoints": true
     }
   ]

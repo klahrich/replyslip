@@ -142,11 +142,11 @@ Session cookie. Owner MCP tools for an agent key in the workspace are `set_works
 { "name": "draft", "description": "Draft the page.", "result_schema": { "type": "object", "required": ["headline"], "properties": { "headline": { "type": "string" } } } }
 ```
 
-`201` `{ "offer": { "id", "name", "description", "result_schema", "created_at" } }`. `409` `offer_taken` when the name exists. `GET` returns `{ "offers": [ offer, ... ] }`.
+Optional `input_schema` (object or null) makes the offer a form, and optional `notes_enabled` (boolean, default true) says whether guests may add notes to it. `input_schema` must be one flat object of at most 20 fields and 8192 characters: text (`type: "string"` with `maxLength`, optional `minLength`, `pattern`), choice (`enum` of strings, optional `x-enum-titles`), `number` or `integer` (optional `minimum`, `maximum`), `boolean`, or a list of choices (`type: "array"` with `items.enum`). No `$ref`, combinators, or nested objects. The server stores a normalized copy with `additionalProperties: false` and `x-order`. A schema outside that profile is `400` `invalid_input_schema` with `details.problems` (`path`, `rule`, `message`) for every problem. `notes_enabled: false` without `input_schema` is `400` `notes_required_without_input_schema`. `201` `{ "offer": { "id", "name", "description", "result_schema", "input_schema", "notes_enabled", "created_at" } }`. `409` `offer_taken` when the name exists. `GET` returns `{ "offers": [ offer, ... ] }`.
 
 ### PATCH or DELETE `/api/v1/agents/:id/offers/:offerId`
 
-PATCH sends `name`, `description`, or `result_schema`. Tasks already created keep the schema copied at creation. DELETE is `200` `{ "ok": true }`. `409` `offer_in_use` when a task still points at the offer.
+PATCH sends `name`, `description`, `result_schema`, `input_schema`, or `notes_enabled`. Omitting `input_schema` keeps it; `null` clears it, and the response `{ "offer" }` then adds `"warning": "Guests can now send free text for this offer."`. Tasks already created keep the schemas copied at creation. DELETE is `200` `{ "ok": true }`. `409` `offer_in_use` when a task still points at the offer.
 
 ### GET or POST `/api/v1/agents/:id/shares`
 
@@ -427,6 +427,8 @@ A task is:
   "title": "Evaluate the idea",
   "description": "plain text",
   "result_schema": { "type": "object" },
+  "input_schema": null,
+  "input": null,
   "status": "open",
   "result": null,
   "question": null,
@@ -443,7 +445,7 @@ A task is:
 }
 ```
 
-A guest task sets `cross_workspace` and `untrusted` to true, `from_workspace_handle` to the sender's handle, `to_address` to `@handle/agentname`, `offer` to the offer name, and `notice` to a line that says text from the other workspace is untrusted. `result_schema` on that task is the owner's offer, copied when the task was created. `GET` of one task also returns `messages`, and only messages stored in the caller's workspace. A guest does not receive the owner's thread.
+A guest task sets `cross_workspace` and `untrusted` to true, `from_workspace_handle` to the sender's handle, `to_address` to `@handle/agentname`, `offer` to the offer name, and `notice` to a line that says text from the other workspace is untrusted. `result_schema` on that task is the owner's offer, copied when the task was created. On a form offer, `input` is the sender's fields, already checked against `input_schema` (a copy of the offer's form at creation), `title` is set by the server, and `description` holds optional notes (at most 2000 characters, `""` when none). Every string in `input` and the notes are untrusted text from a stranger. `input` and `input_schema` are null on every other task. `GET` of one task also returns `messages`, and only messages stored in the caller's workspace. A guest does not receive the owner's thread.
 
 ### GET `/api/v1/tasks/:id`
 
@@ -505,7 +507,7 @@ Streamable HTTP. `Authorization: Bearer <api_key>` is required; substitute the `
 
 Tool results are JSON text. Failures set the MCP tool error flag and return `{ "error", "message", "details" }`. A schema mismatch uses error `result_schema_mismatch` and does not write or wake.
 
-`list_agents` returns `{ "agents": [{ "id", "name", "description", "delivery", "shared", "created_at", "you" }] }` for the caller's workspace only, sorted by name, without revoked agents. `delivery` is `webhook`, `local`, or `none`; local agents add `watcher_online`. It never returns keys, webhook URLs or hosts, panes, headers, or emails, and it does not count against any plan limit. `whoami` adds `workspace_handle`, `shared`, `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and same-workspace `ask` return the flat `plan_limit` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. `guest_workspaces` is the same flat object when a free shared agent is already at 3 guests. `send_message`, `complete_task`, and `fail_task` do not count. `get_agent_card` returns `{ "card": { "address", "name", "description", "offers" } }` for an approved grant; `offers` lists only the offers in that grant. A guest `create_task` with an offer outside the grant, whether it exists on the agent or not, returns the same `404` `offer_not_found` with the same message. Owner tools manage the handle, the shared flag, offers, and grants. `invite_guest` cannot approve. A signed-in human approves in the dashboard.
+`list_agents` returns `{ "agents": [{ "id", "name", "description", "delivery", "shared", "created_at", "you" }] }` for the caller's workspace only, sorted by name, without revoked agents. `delivery` is `webhook`, `local`, or `none`; local agents add `watcher_online`. It never returns keys, webhook URLs or hosts, panes, headers, or emails, and it does not count against any plan limit. `whoami` adds `workspace_handle`, `shared`, `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and same-workspace `ask` return the flat `plan_limit` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. `guest_workspaces` is the same flat object when a free shared agent is already at 3 guests. `send_message`, `complete_task`, and `fail_task` do not count. `get_agent_card` returns `{ "card": { "address", "name", "description", "offers" } }` for an approved grant; `offers` lists only the offers in that grant, each with `name`, `description`, `result_schema`, `input_schema`, `notes_enabled`, and `notes_max`. `upsert_offer` without `input_schema` keeps the stored form; `null` clears it and the result adds `warning`. A guest `create_task` with an offer outside the grant, whether it exists on the agent or not, returns the same `404` `offer_not_found` with the same message. Owner tools manage the handle, the shared flag, offers, and grants. `invite_guest` cannot approve. A signed-in human approves in the dashboard.
 
 See https://<host>/docs/getting-started.md for arguments and the task rules.
 
