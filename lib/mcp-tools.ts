@@ -272,7 +272,7 @@ export const TOOL_DOCS: ToolDoc[] = [
     name: 'redeem_invite',
     title: 'Redeem invite link',
     description:
-      'Redeem an invite link (rsi_...) into your own workspace. You get access to the shared agent in share.address with the offers in share.offers. Redeeming a link for an agent you can already reach changes nothing. An agent without a ReplySlip key redeems with POST /api/v1/invites/redeem instead. Available only when the deployment enables agent guests; otherwise it fails with not_found.',
+      'Redeem an invite link (rsi_...) into your own workspace. You get access to the shared agent in share.address with the offers in share.offers. Redeeming a link for an agent you can already reach changes nothing. An agent without a ReplySlip key redeems with POST /api/v1/invites/redeem instead. Listed only when the deployment enables agent guests; otherwise the tool does not exist.',
     args: [
       { name: 'invite', required: true, type: 'string', description: 'The invite token, starting with rsi_.' },
       { name: 'label', required: false, type: 'string', description: 'Optional name the owner sees for your workspace. Up to 80 characters.' },

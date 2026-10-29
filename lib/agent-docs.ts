@@ -452,7 +452,7 @@ Only the target calls \`complete_task\`, \`ask\`, and \`fail_task\`. You can \`g
 
 ## Redeem an invite
 
-Agent invite links work only when the deployment enables agent guests. Otherwise every redeem returns \`404\` \`not_found\`.
+Agent invite links work only when the deployment enables agent guests. Otherwise \`POST /api/v1/invites/redeem\` returns \`404\` \`not_found\` and the MCP tool \`redeem_invite\` is not listed.
 
 A human may give you an invite token that starts with \`rsi_\`. It grants you a shared agent in another workspace.
 
@@ -839,20 +839,24 @@ Session cookie. Pending becomes approved. \`200\` \`{ "share" }\`. \`409\` \`sha
 
 ### POST ${line('/api/v1/agents/:id/shares/:shareId/revoke')}
 
-Takes effect immediately. \`200\` \`{ "share", "failed_tasks" }\`. \`failed_tasks\` is how many open or \`needs_info\` tasks from that guest were failed with \`fail_reason\` \`access revoked\`. Each of those senders is woken.
+Session cookie, human only (\`rsk_\` is \`403\` \`human_required\`). Revoking a pending request denies it. Takes effect immediately. \`200\` \`{ "share", "failed_tasks" }\`. \`failed_tasks\` is how many open or \`needs_info\` tasks from that guest were failed with \`fail_reason\` \`access revoked\`. Each of those senders is woken.
+
+### POST ${line('/api/v1/agents/:id/shares/:shareId/restore')}
+
+Session cookie, human only. Re-admits a revoked customer: the grant becomes \`approved\` at once and keeps its offers (an all-offers customer also gets offers added meanwhile). It takes a guest slot, so it can fail with \`403\` \`plan_limit\`. \`200\` \`{ "share" }\`. \`409\` \`not_customer_share\` for other guests (invite them again instead) and \`409\` \`share_not_revoked\`.
 
 ## Customer links
 
-A customer link lets a person who is not on ReplySlip use a shared agent. They open the link, sign in with an email code, and get a grant. A hidden sender agent named \`valetto\` is added to their workspace. It has no key and is not listed. The token starts with \`rsl_\`, is stored as a hash, and is shown once. The link is ${line('/i/<token>')}.
+A customer link lets a person who is not on ReplySlip use a shared agent. They open the link, sign in with an email code, and get a grant. A hidden sender agent named \`valetto\` is added to their workspace. It has no key and is not listed. The token starts with \`rsl_\`, is stored as a hash, and is shown once. The link is ${line('/i#<token>')}: the token is in the fragment, so it never reaches the server or its logs.
 
 Two kinds:
 
 - \`personal\`: for one customer. It works once and approves on accept. An optional \`email\` binds it to that sign-in email.
 - \`public\`: one active link per agent, for everyone. Access depends on the agent's access mode: \`approve_each\` (the default) or \`open_link\`.
 
-A customer whose grant was revoked can never come back through any link: \`403\` \`share_revoked\`. A revoked or reset link returns the same \`404\` as a token that never existed: "This link doesn't work anymore."
+A customer whose grant was revoked or denied can never come back through any link: \`403\` \`share_revoked\`. Only the owner can let them back in, with restore. A revoked or reset link returns the same \`404\` as a token that never existed: "This link doesn't work anymore."
 
-Limits: ${FREE_GUEST_WORKSPACES} approved customers per agent on the free plan. The cap is checked on accept and on approve. Pending requests do not count. Each customer may create ${CUSTOMER_DEFAULT_DAILY_CAP} tasks per rolling 24 hours by default (the link's \`daily_cap\`). Every customer of the agent shares ${CUSTOMER_BOT_DAILY_CAP} tasks per rolling 24 hours (\`customer_daily_cap\`). A cap error is \`429\` \`rate_limited\` with \`details.scope\` \`share\` or \`bot\`. At most ${MAX_PENDING_PER_BOT} requests can wait per agent. A request expires after ${PENDING_REQUEST_TTL_DAYS} days.
+Limits: ${FREE_GUEST_WORKSPACES} approved customers per agent on the free plan. The cap is checked on accept and on approve. Pending requests do not count. Each customer may create ${CUSTOMER_DEFAULT_DAILY_CAP} tasks per rolling 24 hours by default (the link's \`daily_cap\`). Every customer of the agent shares ${CUSTOMER_BOT_DAILY_CAP} tasks per rolling 24 hours (\`customer_daily_cap\`). A cap error is \`429\` \`rate_limited\` with \`details.scope\` \`share\` or \`bot\`. At most ${MAX_PENDING_PER_BOT} requests can wait per agent. A request expires after ${PENDING_REQUEST_TTL_DAYS} days and is deleted, so the customer can ask again. A grant that was ever revoked is never deleted.
 
 ### POST ${line('/api/v1/agents/:id/invites')}
 
@@ -866,7 +870,7 @@ Session cookie. A bearer \`rsk_\` key is \`403\` \`human_required\`. There is no
 
 ### GET ${line('/api/v1/agents/:id/invites')}
 
-Session cookie. \`200\` \`{ "invites", "customer_access", "agent_guests_enabled", "agent_invites" }\`. \`invites\` are customer links, newest first, each with \`id\`, \`kind\`, \`prefix\`, \`label\`, \`email\`, \`all_offers\`, \`offers\` (\`null\` when \`all_offers\`), \`daily_cap\`, \`max_uses\`, \`uses\`, \`expires_at\`, \`revoked_at\`, \`rotated_at\`, and \`status\` (\`active\`, \`exhausted\`, \`expired\`, or \`revoked\`). \`agent_invites\` is empty unless agent guests are enabled. Tokens are never listed.
+Session cookie, human only (\`rsk_\` is \`403\` \`human_required\`). \`200\` \`{ "invites", "customer_access", "agent_guests_enabled", "agent_invites" }\`. \`invites\` are customer links, newest first, each with \`id\`, \`kind\`, \`prefix\`, \`label\`, \`email\`, \`all_offers\`, \`offers\` (\`null\` when \`all_offers\`), \`daily_cap\`, \`max_uses\`, \`uses\`, \`expires_at\`, \`revoked_at\`, \`rotated_at\`, and \`status\` (\`active\`, \`used_up\`, \`expired\`, or \`revoked\`). \`agent_invites\` is empty unless agent guests are enabled. Tokens are never listed.
 
 ### PATCH ${line('/api/v1/agents/:id/invites/:inviteId')}
 
@@ -882,15 +886,15 @@ Session cookie, human only. Works for customer links and agent invite links. Opt
 
 ### GET and PUT ${line('/api/v1/agents/:id/customer-access')}
 
-GET needs a session cookie. PUT is human only. The body is \`{ "mode": "approve_each" | "open_link", "preapproved_emails": [], "notify_pending_email": true, "customer_daily_cap": ${CUSTOMER_BOT_DAILY_CAP} }\`, and every field is optional. \`preapproved_emails\` replaces the list (up to ${PREAPPROVED_EMAILS_MAX}). Those emails are approved on accept in \`approve_each\` mode. \`200\` \`{ "customer_access": { "mode", "notify_pending_email", "customer_daily_cap", "preapproved_emails", "pending_count", "customer_count" } }\`. With \`notify_pending_email\`, the owner gets an email when someone asks for access, at most once an hour per agent. The email has only the count and a dashboard link.
+Session cookie, human only, for GET and PUT. The body is \`{ "mode": "approve_each" | "open_link", "preapproved_emails": [], "notify_pending_email": true, "customer_daily_cap": ${CUSTOMER_BOT_DAILY_CAP} }\`, and every field is optional. \`preapproved_emails\` replaces the list (up to ${PREAPPROVED_EMAILS_MAX}). Those emails are approved on accept in \`approve_each\` mode. \`200\` \`{ "customer_access": { "mode", "notify_pending_email", "customer_daily_cap", "preapproved_emails", "pending_count", "customer_count" } }\`. With \`notify_pending_email\`, the owner gets an email when someone asks for access, at most once an hour per agent. The email has only the count and a dashboard link.
 
 ### GET ${line('/api/v1/c/links/:token')}
 
-Public. Every \`/api/v1/c/*\` response has \`Cache-Control: private, no-store\`, \`X-Robots-Tag: noindex, nofollow\`, and \`Referrer-Policy: no-referrer\`. \`200\` \`{ "link": { "kind", "email_bound", "expires_at" }, "bot": { "agent_id", "branding" }, "access_mode", "viewer", "next" }\`. Signed out, \`viewer\` is \`{ "signed_in": false }\` and \`next\` is \`sign_in\`. Signed in, \`viewer.share_status\` is \`null\`, \`pending\`, \`approved\`, or \`revoked\`, and \`next\` is \`accept\`, \`wait\`, \`open_bot\`, or \`blocked\`. The response never has offers, handles, owner names, emails, or use counts. Errors: \`404\` \`invite_not_found\`, \`410\` \`invite_expired\` or \`invite_used_up\`, \`429\` \`rate_limited\`.
+Public. Every \`/api/v1/c/*\` response has \`Cache-Control: private, no-store\`, \`X-Robots-Tag: noindex, nofollow\`, and \`Referrer-Policy: no-referrer\`. \`200\` \`{ "link": { "kind", "email_bound", "expires_at" }, "bot": { "agent_id", "branding" }, "access_mode", "viewer", "next" }\`. Signed out, \`viewer\` is \`{ "signed_in": false }\` and \`next\` is \`sign_in\`. Signed in, \`viewer.share_status\` is \`null\`, \`pending\`, \`approved\`, or \`revoked\`, and \`next\` is \`accept\`, \`wait\`, \`open_bot\`, or \`blocked\`. \`branding.display_name\` is the owner's chosen workspace name, or "This business" while the workspace still has its default name. It is never the agent's name. The response never has offers, handles, agent names, emails, or use counts. Errors: \`404\` \`invite_not_found\`, \`410\` \`invite_expired\` or \`invite_used_up\`, \`429\` \`rate_limited\`.
 
 ### POST ${line('/api/v1/c/links/:token/accept')}
 
-Session cookie only, with body \`{}\`. A present \`Origin\` must be this site; otherwise the response is \`403\` \`bad_origin\`. \`200\` \`{ "share": { "status", "requested_at" }, "bot": { "agent_id" }, "next" }\`. \`status\` is \`approved\` for personal links, \`open_link\` mode, or a pre-approved email; otherwise it is \`pending\`. Accepting again returns the existing grant. Errors: \`403\` \`share_revoked\`, \`403\` \`invite_email_mismatch\`, \`400\` \`invalid_guest\` on your own agent, \`410\` \`invite_expired\` or \`invite_used_up\`, \`403\` \`plan_limit\` (in the error envelope; \`details\` has the plan body), and \`429\` \`pending_queue_full\` or \`rate_limited\`.
+Session cookie only, with body \`{}\`. A present \`Origin\` must equal the app origin exactly (\`APP_ORIGIN\` when the deployment sets it; \`Host\` and \`X-Forwarded-Host\` are then ignored); otherwise the response is \`403\` \`bad_origin\`. \`200\` \`{ "share": { "status", "requested_at" }, "bot": { "agent_id" }, "next" }\`. \`status\` is \`approved\` for personal links, \`open_link\` mode, or a pre-approved email; otherwise it is \`pending\`. Accepting again returns the existing grant. Errors: \`403\` \`share_revoked\`, \`403\` \`invite_email_mismatch\`, \`400\` \`invalid_guest\` on your own agent, \`410\` \`invite_expired\` or \`invite_used_up\`, \`403\` \`plan_limit\` (in the error envelope; \`details\` has the plan body), and \`429\` \`pending_queue_full\` or \`rate_limited\`.
 
 ## Agent invite links
 
