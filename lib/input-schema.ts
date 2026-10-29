@@ -388,9 +388,11 @@ export function checkInputSchema(raw: unknown): CheckedInputSchema {
 
 /** Compile without leaving the schema in Ajv's own identity-keyed cache. */
 function compileOnce(schema: InputSchema): ValidateFunction {
-  const validate = ajv.compile(schema);
-  ajv.removeSchema(schema);
-  return validate;
+  try {
+    return ajv.compile(schema);
+  } finally {
+    ajv.removeSchema(schema);
+  }
 }
 
 /** Least-recently-used map of compiled validators, keyed by the schema's JSON text. */
