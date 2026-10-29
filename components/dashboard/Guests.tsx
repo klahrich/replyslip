@@ -10,6 +10,8 @@ const MAX_CAP = 10_000;
 type Loaded = { shares: Share[]; offers: Offer[] };
 
 function who(s: Share): string {
+  // A customer who signed in from a link is known by email; the owner's label still wins.
+  if (s.source === 'customer') return s.label ?? s.customer_email ?? 'A customer';
   const at = s.guest_handle ? `@${s.guest_handle}` : null;
   if (s.label) return at ? `${s.label} (${at})` : s.label;
   return at ?? 'A workspace with no handle';
@@ -17,6 +19,14 @@ function who(s: Share): string {
 
 /** "Joined with invite link rsi_8hQx…" under a guest that redeemed a link. */
 function via(s: Share) {
+  if (s.customer_invite_prefix) {
+    return (
+      <p className="dash-muted">
+        Customer from link <code translate="no">{s.customer_invite_prefix}…</code>
+        {s.status === 'pending' ? ' · asked for access' : ''}
+      </p>
+    );
+  }
   return s.invite_prefix ? (
     <p className="dash-muted">
       Joined with invite link <code translate="no">{s.invite_prefix}…</code>
@@ -154,7 +164,8 @@ export function Guests({
 
   const pending = data.shares.filter((s) => s.status === 'pending');
   const active = data.shares.filter((s) => s.status === 'approved');
-  const used = pending.length + active.length;
+  // A customer asking for access does not hold a slot until approved (the API counts the same way).
+  const used = pending.filter((s) => s.source !== 'customer').length + active.length;
   const full = guestLimit !== null && used >= guestLimit;
   const chosen = picked ?? data.offers.map((o) => o.name);
 

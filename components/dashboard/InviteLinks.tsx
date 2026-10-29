@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, errorText, formatTime } from './api';
 import { CopyButton } from './CopyButton';
-import type { Invite, NewInvite, Offer } from './types';
+import { CustomerLinks } from './CustomerLinks';
+import type { Invite, InvitesResponse, NewInvite, Offer } from './types';
 
 /** Mirrors the INVITE_* and MAX_SHARE_DAILY_CAP limits in lib/constants. The API checks them too. */
 const MAX_USES = 1_000;
@@ -43,7 +44,26 @@ function customerMessage(made: NewInvite, agentName: string): string {
  * Invite links for one shared agent: create, the one-time "send this to your customer" panel, and the list.
  * Only a signed-in human creates a link that approves on redeem; the API refuses agent keys here.
  */
-export function InviteLinks({
+/**
+ * The invite-links area of one shared agent: customer links always, anonymous agent invite links only
+ * when the deployment sets VALETTO_AGENT_GUESTS=1 (the API reports it as agent_guests_enabled).
+ */
+export function InviteLinks(props: {
+  agentId: string;
+  agentName: string;
+  offers: Offer[];
+  onRedeemedChange: () => void;
+}) {
+  const [agentGuests, setAgentGuests] = useState(false);
+  return (
+    <>
+      <CustomerLinks agentId={props.agentId} offers={props.offers} onLoaded={setAgentGuests} onChange={props.onRedeemedChange} />
+      {agentGuests ? <AgentInviteLinks {...props} /> : null}
+    </>
+  );
+}
+
+function AgentInviteLinks({
   agentId,
   agentName,
   offers,
@@ -70,13 +90,13 @@ export function InviteLinks({
   const [uses, setUses] = useState('10');
   const [days, setDays] = useState('30');
   const [cap, setCap] = useState('50');
-  const [approve, setApprove] = useState(true);
+  const [approve, setApprove] = useState(false);
   const chosen = picked ?? (offers.length === 1 ? [offers[0]!.name] : []);
 
   const load = useCallback(async () => {
     try {
-      const r = await api<{ invites: Invite[] }>(base);
-      setInvites(r.invites);
+      const r = await api<InvitesResponse>(base);
+      setInvites(r.agent_invites);
       setLoadError('');
     } catch (err) {
       setLoadError(errorText(err));
@@ -85,9 +105,9 @@ export function InviteLinks({
 
   useEffect(() => {
     let cancelled = false;
-    api<{ invites: Invite[] }>(base).then(
+    api<InvitesResponse>(base).then(
       (r) => {
-        if (!cancelled) setInvites(r.invites);
+        if (!cancelled) setInvites(r.agent_invites);
       },
       (err: unknown) => {
         if (!cancelled) setLoadError(errorText(err));
@@ -134,6 +154,7 @@ export function InviteLinks({
       const r = await api<NewInvite>(base, {
         method: 'POST',
         body: {
+          kind: 'agent',
           offers: chosen,
           max_uses: maxUses,
           expires_in_days: expires,
@@ -168,7 +189,7 @@ export function InviteLinks({
 
   return (
     <section className="dash-invites" aria-labelledby={headingId}>
-      <h4 id={headingId}>Invite links</h4>
+      <h4 id={headingId}>Agent invite links</h4>
       <p className="dash-muted">
         For customers who aren’t on ReplySlip. Their agent redeems the link and gets its own key. It shows up under
         Guests.
