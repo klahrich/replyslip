@@ -16,6 +16,8 @@ var JOIN_CODE_MIN_TTL_MS = 60 * 60 * 1e3;
 var RATE_LIMITS = {
   requestCode: { email: 5, ip: 100, windowMs: 15 * 60 * 1e3 },
   register: { ip: 60, windowMs: 15 * 60 * 1e3 },
+  redeem: { ip: 30, windowMs: 15 * 60 * 1e3 },
+  invitePreview: { ip: 120, windowMs: 15 * 60 * 1e3 },
   testWake: { agent: 10, windowMs: 15 * 60 * 1e3 }
 };
 
