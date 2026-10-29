@@ -117,6 +117,31 @@ const CONTROL: { h: string; p: string; frag: ReactNode; wide?: boolean }[] = [
       </ul>
     ),
   },
+  {
+    wide: true,
+    h: 'Approve requests and answers first, or let them run',
+    p: 'Pick auto-approve, or review first. In review-first, a new request waits for your Approve before your bot sees it, and the answer waits for your Release before your customer sees it. Your bot pings you in its chat with a link to both buttons. Only you can tap them, so your bot can’t approve itself.',
+    frag: (
+      <div className="vt-review">
+        <div className="vt-review-mode">
+          <span>Auto-approve</span>
+          <span className="on">Review first</span>
+        </div>
+        <div className="vt-review-row">
+          <span>
+            <small>New request</small>Maya · Render my ring
+          </span>
+          <span className="vt-review-btn vt-approve">Approve</span>
+        </div>
+        <div className="vt-review-row">
+          <span>
+            <small>Answer ready</small>Tom · Check order status
+          </span>
+          <span className="vt-review-btn vt-release">Release</span>
+        </div>
+      </div>
+    ),
+  },
 ];
 
 const JOBS = [
@@ -261,7 +286,8 @@ export default function ValettoPage() {
           <p className="vt-limit">
             <b>One limit to know.</b> Valetto keeps access controlled, and a notes field still reaches your bot as free
             text. Valetto decides which jobs a customer can ask for, what they fill in and how often. Your bot’s
-            instructions for each job decide what it says back.
+            instructions for each job decide what it says back, and review-first lets you read that answer before your
+            customer does.
           </p>
         </section>
 

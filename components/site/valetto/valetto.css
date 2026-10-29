@@ -308,3 +308,16 @@ fieldset.vt-ea-f[aria-invalid=true] .vt-ea-pills label:not(.on){border-color:var
 .vt-tbd{padding:1px 6px;border-radius:4px;background:#e8b04a;color:#1c1f22;font-weight:600;font-size:.92em;box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .vt-ea-f [aria-invalid=true]:focus-visible{border-color:var(--err-on-bg);box-shadow:0 0 0 3px color-mix(in srgb,var(--err-on-bg) 30%,transparent)}
 .vt-ea-done:focus{outline:none}
+
+/* review-first card: the second wide cell, visual on the left */
+.vt-cell.wide-cell:last-child .frag{order:0}
+.vt-review{display:flex;flex-direction:column;gap:6px;font-size:.8125rem;color:var(--paper-ink)}
+.vt-review-mode{align-self:flex-start;display:inline-flex;padding:3px;border-radius:999px;background:var(--paper-2);font-size:.75rem;margin-bottom:6px}
+.vt-review-mode span{padding:4px 12px;border-radius:999px;color:var(--paper-muted)}
+.vt-review-mode span.on{background:var(--paper);color:var(--paper-ink);font-weight:600;box-shadow:0 1px 2px rgb(0 0 0 / .15)}
+.vt-review-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px}
+.vt-review-row:nth-child(2){background:var(--paper-2)}
+.vt-review-row small{display:block;font-size:.6875rem;color:var(--paper-muted);margin-bottom:1px}
+.vt-review-btn{flex:none;font-weight:600;font-size:.75rem;padding:6px 12px;border-radius:var(--r)}
+.vt-approve{background:var(--dash-accent);color:#fff}
+.vt-release{border:1.5px solid var(--dash-accent);color:var(--dash-accent)}
