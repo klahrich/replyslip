@@ -291,6 +291,7 @@ Names only. Real values stay in `.env` or the host. `.env.example` lists the sam
 | `UNSUBSCRIBE_SECRET` | HMAC key for one-click marketing unsubscribe links. Required for `unsubscribeUrl` and `/api/v1/unsubscribe`. Not a default; set it on the host. |
 | `RESEND_API_KEY` | When set, sign-in codes are sent with Resend. When empty, codes are logged. |
 | `EMAIL_FROM` | From address. Required only when `RESEND_API_KEY` is set. |
+| `APP_ORIGIN` | Public origin, e.g. `https://replyslip.com`. Set it in production: it is then the only Origin allowed on cookie-authenticated customer POSTs, and Host / X-Forwarded-Host are ignored for that check. |
 | `VALETTO_AGENT_GUESTS` | Set to `1` to turn on anonymous agent invite links (redeem, claim, and the dashboard option). Off by default; customer links work without it. |
 | `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhook URLs on loopback and private networks. Leave unset in production. |
 | `REPLYSLIP_URL` | Public origin for `unsubscribeUrl` when set. Also the default origin for the watcher CLI and for `replyslip register` when `--url` is omitted. |

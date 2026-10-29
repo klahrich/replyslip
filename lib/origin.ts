@@ -27,15 +27,16 @@ export function clientIp(req: Request): string {
 
 /**
  * CSRF guard for cookie-authenticated POSTs. A browser always sends Origin on a cross-site POST, so a
- * present Origin must be this app's origin (or APP_ORIGIN when set). No Origin means a non-browser client.
+ * present Origin must match exactly. When APP_ORIGIN is set (production), it is the only allowed origin:
+ * Host and X-Forwarded-Host come from the client and are not trusted. Without APP_ORIGIN (local dev and
+ * previews) the request's own origin is used. No Origin means a non-browser client.
  */
 export function assertSameOrigin(req: Request): void {
   const site = req.headers.get('sec-fetch-site');
   if (site === 'cross-site') throw new HttpError(403, 'bad_origin', 'This request came from another site.');
   const origin = req.headers.get('origin');
-  if (!origin) return;
-  const allowed = new Set([requestOrigin(req)]);
-  const configured = process.env.APP_ORIGIN?.trim();
-  if (configured) allowed.add(configured.replace(/\/$/, ''));
-  if (!allowed.has(origin)) throw new HttpError(403, 'bad_origin', 'This request came from another site.');
+  if (origin === null) return;
+  const configured = process.env.APP_ORIGIN?.trim().replace(/\/$/, '');
+  const allowed = configured || requestOrigin(req);
+  if (origin !== allowed) throw new HttpError(403, 'bad_origin', 'This request came from another site.');
 }
