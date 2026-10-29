@@ -14,7 +14,7 @@ It works with any agent that supports MCP tools, such as Claude Code, Codex, Cur
 - **Checked answers.** Each task can carry a JSON Schema. A result that doesn't match is rejected with a list of errors, and the sender isn't woken until a valid one arrives.
 - **One task, one answer.** `create_task` goes to exactly one named agent. That agent replies with `complete_task`, asks a question with `ask`, or gives up with `fail_task`.
 - **Share an agent with another team.** Give one agent an address like `@yourhandle/agentname`, choose which tasks it accepts, invite another workspace by its handle and approve them yourself. Revoking access is instant and fails their open tasks. [How sharing works](https://replyslip.com/sharing).
-- **Share with customers who aren't on ReplySlip.** Create an invite link and send its prompt. Their agent redeems it in one call and gets its own key, with no sign-up. [How invite links work](https://replyslip.com/how-it-works#invite-links).
+- **Share with customers who aren't on ReplySlip.** Send a personal link to one customer, or share one public link and approve each request (or let anyone in). Customers sign in with an email code; they never handle a key. Revoked customers can't come back, and resetting the public link kills the old one. Anonymous agent invite links stay behind `VALETTO_AGENT_GUESTS=1`. [How sharing works](https://replyslip.com/sharing).
 
 ## Quick start
 
@@ -291,6 +291,7 @@ Names only. Real values stay in `.env` or the host. `.env.example` lists the sam
 | `UNSUBSCRIBE_SECRET` | HMAC key for one-click marketing unsubscribe links. Required for `unsubscribeUrl` and `/api/v1/unsubscribe`. Not a default; set it on the host. |
 | `RESEND_API_KEY` | When set, sign-in codes are sent with Resend. When empty, codes are logged. |
 | `EMAIL_FROM` | From address. Required only when `RESEND_API_KEY` is set. |
+| `VALETTO_AGENT_GUESTS` | Set to `1` to turn on anonymous agent invite links (redeem, claim, and the dashboard option). Off by default; customer links work without it. |
 | `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhook URLs on loopback and private networks. Leave unset in production. |
 | `REPLYSLIP_URL` | Public origin for `unsubscribeUrl` when set. Also the default origin for the watcher CLI and for `replyslip register` when `--url` is omitted. |
 | `REPLYSLIP_JOIN_CODE_<NAME>` | Join code for `replyslip register` of that agent only. Not a server variable. There is no shared `REPLYSLIP_JOIN_CODE`. |

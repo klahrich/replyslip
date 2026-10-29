@@ -1,4 +1,11 @@
 import {
+  CLAIM_TOKEN_TTL_DAYS,
+  CUSTOMER_BOT_DAILY_CAP,
+  CUSTOMER_DEFAULT_DAILY_CAP,
+  CUSTOMER_INVITE_MAX_ACTIVE_PER_AGENT,
+  MAX_PENDING_PER_BOT,
+  PENDING_REQUEST_TTL_DAYS,
+  PREAPPROVED_EMAILS_MAX,
   DEFAULT_SHARE_DAILY_CAP,
   INVITE_DEFAULT_TTL_DAYS,
   INVITE_MAX_ACTIVE_PER_AGENT,
@@ -39,7 +46,7 @@ const minutes = Math.round(LOGIN_CODE_TTL_MS / 60000);
 const joinHours = Math.round(JOIN_CODE_DEFAULT_TTL_MS / 3600000);
 const requestWindowMinutes = Math.round(RATE_LIMITS.requestCode.windowMs / 60000);
 
-function toolSection(origin: string): string {
+function toolSection(): string {
   return TOOL_DOCS.map((tool) => {
     const args = tool.args
       .map((arg) => `- \`${arg.name}\` (${arg.type}${arg.required ? ', required' : ', optional'}): ${arg.description}`)
@@ -88,7 +95,7 @@ export function llmsTxt(origin: string): string {
     `- [Getting started for agents](${started}): Register with a join code, connect over MCP, and run a task through to a validated result. Delivery is webhook, local (herdr or Orca), or none. The herdr binary is required only for the herdr driver. The orca binary is required only for the Orca driver: \`orca\` on PATH, or \`REPLYSLIP_ORCA_BIN\`. The register response returns the API key only in api_key; substitute it into the Authorization header. mcp.header is the placeholder ${MCP_HEADER_PLACEHOLDER}. A local agent starts at "Set yourself up as a local agent" in the skill.`,
     `- [API reference](${api}): HTTP API for sign-in, agents, join codes, tasks, and the watcher.`,
     `- [Agent skill](${skill}): Installable skill. The first section, "Set yourself up as a local agent", is the whole local setup for herdr and Orca. Find the herdr pane name, or read \`ORCA_PANE_KEY\` when that variable is set, register with the join code and no delivery, connect MCP, then stop for the human to choose **Local agent via herdr or Orca**, set the driver, and paste the value into **Pane**. Before asking for a watcher key, run \`replyslip watch --status\` and check \`whoami\` \`watcher_online\`. A watcher already running for this workspace means you only set delivery. The watcher command is the same either way. Orca's CLI is enabled under Settings → Experimental → CLI, and \`orca\` must be on PATH or \`REPLYSLIP_ORCA_BIN\` must name the binary.`,
-    `- [Agent sharing](${absoluteUrl(origin, '/sharing')}): Share one of your agents with other workspaces at an address like @handle/agent, with a menu of tasks you choose. You invite a guest workspace by its handle, and a person approves it in the dashboard; agent keys cannot approve. Or you send an invite link: an agent that is not on ReplySlip redeems it in one call and gets its own key, no sign-up. Free workspaces get up to 3 guests per shared agent, and guest tasks use the guest's own quota.`,
+    `- [Agent sharing](${absoluteUrl(origin, '/sharing')}): Share one of your agents with other workspaces at an address like @handle/agent, with a menu of tasks you choose. You invite a guest workspace by its handle, and a person approves it in the dashboard; agent keys cannot approve. Or the owner sends a customer link: a person opens it, signs in with an email code, and gets access. Free workspaces get up to ${FREE_GUEST_WORKSPACES} guests per shared agent, and guest tasks use the guest's own quota.`,
     `- [ReplySlip vs HarnessRouter](${absoluteUrl(origin, '/compare/harnessrouter')}): HarnessRouter runs agent harnesses behind one API; ReplySlip carries messages and JSON Schema-checked tasks between agents you already run. When to use each, and how a HarnessRouter instance can be one agent on ReplySlip.`,
     `- [ReplySlip vs Agent Relay](${absoluteUrl(origin, '/compare/agent-relay')}): Agent Relay is a messaging layer for agents with channels, DMs and delivery into live sessions; ReplySlip hands one agent a task and checks the answer against a JSON Schema the sender wrote. When to use each, or both.`,
     '',
@@ -373,7 +380,7 @@ Add the MCP server over Streamable HTTP. Substitute the \`api_key\` from the reg
 
 ## Tools
 
-${toolSection(origin)}
+${toolSection()}
 
 ## Find your teammates
 
@@ -445,13 +452,15 @@ Only the target calls \`complete_task\`, \`ask\`, and \`fail_task\`. You can \`g
 
 ## Redeem an invite
 
+Agent invite links work only when the deployment enables agent guests. Otherwise every redeem returns \`404\` \`not_found\`.
+
 A human may give you an invite token that starts with \`rsi_\`. It grants you a shared agent in another workspace.
 
 If you have no ReplySlip key yet, \`POST ${absoluteUrl(origin, DOC_PATHS.redeem)}\` with JSON \`{ "invite": "rsi_...", "name": "<your name>" }\`. Add \`description\`, and \`webhook\` with the same shape as register if you can receive POSTs. No Authorization header. The \`201\` response has \`api_key\` (shown once; save it), \`mcp\`, and \`share\`: \`share.address\` is \`@handle/agentname\` and \`share.offers\` lists what you can ask, each with its \`result_schema\`. Substitute the \`api_key\` into \`mcp.header\` and connect. If \`share.status\` is \`approved\`, call \`create_task\` with \`to\` set to \`share.address\` and an \`offer\`. If it is \`pending\`, wait for the owner to approve. Give \`workspace.claim_url\` to your human. It lets them attach an email later. Do not open it yourself.
 
 If you already have a ReplySlip key, call the MCP tool \`redeem_invite\` with \`invite\`. The grant goes to your workspace. Calling it again for an agent you can already reach changes nothing.
 
-\`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\` means the link no longer works; ask your human for a new one. \`404\` \`invite_not_found\` means the token is wrong.
+\`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\` means the link no longer works; ask your human for a new one. \`404\` \`invite_not_found\` means the token is wrong. \`403\` \`share_revoked\` means the owner revoked your access; no invite restores it.
 
 ## Share one of your agents
 
@@ -463,7 +472,7 @@ These tools act for your workspace. Approving a guest is not one of them. A sign
 4. \`invite_guest\` with \`agent\`, \`guest_handle\`, \`offers\`, and optional \`daily_cap\`. A new grant is \`pending\`. This tool cannot approve it. A signed-in human approves it in the dashboard. There is no public open mode.
 5. \`revoke_guest\` takes effect immediately. Open guest tasks, including \`needs_info\`, fail with reason \`access revoked\` and the guest sender is woken.
 6. \`list_guest_shares\` shows status, offers, and the daily cap.
-7. For a guest that is not on ReplySlip, \`create_invite\` with \`agent\`, \`offers\`, and optional \`daily_cap\`, \`max_uses\`, \`expires_in_days\`, and \`label\`. It returns \`token\`, \`url\`, and \`agent_prompt\` once. Give \`agent_prompt\` to your human to send to the customer. Guests who redeem a link made by this tool are \`pending\` until a signed-in human approves them. \`list_invites\` and \`revoke_invite\` manage links. \`revoke_invite\` with \`revoke_shares: true\` also revokes every guest who joined with that link.
+7. For a customer who is not on ReplySlip, ask your human to create a customer link in the dashboard. Links are not an MCP tool, and an agent key cannot create, change, or revoke them.
 
 A free workspace allows ${FREE_GUEST_WORKSPACES} pending or approved guest workspaces per shared agent. Revoked grants do not count. An unlimited workspace has no guest-workspace cap. Guest tasks do not count against the owner's monthly task cap.
 
@@ -624,7 +633,7 @@ Send \`Accept: application/json, text/event-stream\` and \`Content-Type: applica
 
 ## Tools
 
-${toolSection(origin)}
+${toolSection()}
 
 ## Task lifecycle
 
@@ -832,31 +841,74 @@ Session cookie. Pending becomes approved. \`200\` \`{ "share" }\`. \`409\` \`sha
 
 Takes effect immediately. \`200\` \`{ "share", "failed_tasks" }\`. \`failed_tasks\` is how many open or \`needs_info\` tasks from that guest were failed with \`fail_reason\` \`access revoked\`. Each of those senders is woken.
 
-## Invite links
+## Customer links
 
-An invite link grants a shared agent to agents that are not on ReplySlip yet. The owner creates it. The customer's agent redeems it in one call and gets its own workspace, agent, and key. The token starts with \`rsi_\`, is stored as a hash, and is shown once. The link is ${line('/i#<token>')}: the token is in the fragment, so it never reaches the server.
+A customer link lets a person who is not on ReplySlip use a shared agent. They open the link, sign in with an email code, and get a grant. A hidden sender agent named \`valetto\` is added to their workspace. It has no key and is not listed. The token starts with \`rsl_\`, is stored as a hash, and is shown once. The link is ${line('/i/<token>')}.
+
+Two kinds:
+
+- \`personal\`: for one customer. It works once and approves on accept. An optional \`email\` binds it to that sign-in email.
+- \`public\`: one active link per agent, for everyone. Access depends on the agent's access mode: \`approve_each\` (the default) or \`open_link\`.
+
+A customer whose grant was revoked can never come back through any link: \`403\` \`share_revoked\`. A revoked or reset link returns the same \`404\` as a token that never existed: "This link doesn't work anymore."
+
+Limits: ${FREE_GUEST_WORKSPACES} approved customers per agent on the free plan. The cap is checked on accept and on approve. Pending requests do not count. Each customer may create ${CUSTOMER_DEFAULT_DAILY_CAP} tasks per rolling 24 hours by default (the link's \`daily_cap\`). Every customer of the agent shares ${CUSTOMER_BOT_DAILY_CAP} tasks per rolling 24 hours (\`customer_daily_cap\`). A cap error is \`429\` \`rate_limited\` with \`details.scope\` \`share\` or \`bot\`. At most ${MAX_PENDING_PER_BOT} requests can wait per agent. A request expires after ${PENDING_REQUEST_TTL_DAYS} days.
 
 ### POST ${line('/api/v1/agents/:id/invites')}
 
-Session cookie. A bearer \`rsk_\` key is \`403\` \`human_required\`; agents use MCP \`create_invite\`, which always sets \`approve_on_redeem\` to false.
+Session cookie. A bearer \`rsk_\` key is \`403\` \`human_required\`. There is no MCP tool.
 
 \`\`\`json
-{ "offers": ["draft"], "daily_cap": 20, "max_uses": 1, "expires_in_days": 30, "label": "Initech", "approve_on_redeem": true }
+{ "kind": "personal", "label": "Initech", "email": "optional", "offers": null, "daily_cap": 20, "max_uses": null, "expires_at": null }
 \`\`\`
 
-Only \`offers\` is required. Defaults: \`daily_cap\` ${DEFAULT_SHARE_DAILY_CAP}, \`max_uses\` 1 (up to ${INVITE_MAX_USES}), \`expires_in_days\` ${INVITE_DEFAULT_TTL_DAYS} (${INVITE_MIN_TTL_DAYS}–${INVITE_MAX_TTL_DAYS}), \`approve_on_redeem\` true. \`201\` \`{ "invite", "token", "url", "agent_prompt" }\`. \`400\` \`agent_not_shared\` when sharing is off. \`404\` \`offer_not_found\`. \`429\` \`too_many_invites\` past ${INVITE_MAX_ACTIVE_PER_AGENT} active invites on the agent. The guest-workspace cap is checked at redeem, not here.
+\`kind\` is required: \`personal\`, \`public\`, or \`agent\` (see Agent invite links). \`offers\` omitted or \`null\` means every offer on the agent, including offers added later (\`all_offers\`). \`email\` is for \`personal\` links only. A \`personal\` link always has \`max_uses\` 1. \`expires_at\` is an ISO time within a year, or \`null\` for no expiry. \`201\` \`{ "invite", "token", "url" }\`. \`409\` \`public_link_exists\` when the agent already has an active public link; reset it instead. \`400\` \`agent_not_shared\`. \`404\` \`offer_not_found\`. \`429\` \`too_many_invites\` past ${CUSTOMER_INVITE_MAX_ACTIVE_PER_AGENT} unused links.
 
 ### GET ${line('/api/v1/agents/:id/invites')}
 
-Session cookie. \`200\` \`{ "invites" }\`, newest first. Each has \`id\`, \`prefix\`, \`label\`, \`offers\`, \`daily_cap\`, \`max_uses\`, \`uses\`, \`approve_on_redeem\`, \`expires_at\`, \`revoked_at\`, and \`status\` (\`active\`, \`exhausted\`, \`expired\`, or \`revoked\`). Tokens are never listed.
+Session cookie. \`200\` \`{ "invites", "customer_access", "agent_guests_enabled", "agent_invites" }\`. \`invites\` are customer links, newest first, each with \`id\`, \`kind\`, \`prefix\`, \`label\`, \`email\`, \`all_offers\`, \`offers\` (\`null\` when \`all_offers\`), \`daily_cap\`, \`max_uses\`, \`uses\`, \`expires_at\`, \`revoked_at\`, \`rotated_at\`, and \`status\` (\`active\`, \`exhausted\`, \`expired\`, or \`revoked\`). \`agent_invites\` is empty unless agent guests are enabled. Tokens are never listed.
+
+### PATCH ${line('/api/v1/agents/:id/invites/:inviteId')}
+
+Session cookie, human only. Any of \`label\`, \`offers\`, \`daily_cap\`, \`max_uses\`, \`expires_at\`. Changes apply to future acceptances. Edit an existing customer through their share. \`200\` \`{ "invite" }\`.
+
+### POST ${line('/api/v1/agents/:id/invites/:inviteId/rotate')}
+
+Session cookie, human only. Public links only (\`400\` \`not_public_link\`). The old link stops working at once, and existing customers keep their access. \`200\` \`{ "invite", "token", "url" }\`.
 
 ### POST ${line('/api/v1/agents/:id/invites/:inviteId/revoke')}
 
-Session cookie. Optional body \`{ "revoke_shares": true }\`. \`200\` \`{ "invite", "revoked_shares", "failed_tasks" }\`. Without \`revoke_shares\` only future redemptions stop. With it, every pending or approved guest who joined with this link is revoked as if each were revoked on its own.
+Session cookie, human only. Works for customer links and agent invite links. Optional body \`{ "revoke_customers": true }\` (\`revoke_shares\` is the same). Customer links return \`200\` \`{ "invite", "revoked_customers", "failed_tasks" }\`, and agent invite links return \`{ "invite", "revoked_shares", "failed_tasks" }\`. A revoked customer cannot return.
+
+### GET and PUT ${line('/api/v1/agents/:id/customer-access')}
+
+GET needs a session cookie. PUT is human only. The body is \`{ "mode": "approve_each" | "open_link", "preapproved_emails": [], "notify_pending_email": true, "customer_daily_cap": ${CUSTOMER_BOT_DAILY_CAP} }\`, and every field is optional. \`preapproved_emails\` replaces the list (up to ${PREAPPROVED_EMAILS_MAX}). Those emails are approved on accept in \`approve_each\` mode. \`200\` \`{ "customer_access": { "mode", "notify_pending_email", "customer_daily_cap", "preapproved_emails", "pending_count", "customer_count" } }\`. With \`notify_pending_email\`, the owner gets an email when someone asks for access, at most once an hour per agent. The email has only the count and a dashboard link.
+
+### GET ${line('/api/v1/c/links/:token')}
+
+Public. Every \`/api/v1/c/*\` response has \`Cache-Control: private, no-store\`, \`X-Robots-Tag: noindex, nofollow\`, and \`Referrer-Policy: no-referrer\`. \`200\` \`{ "link": { "kind", "email_bound", "expires_at" }, "bot": { "agent_id", "branding" }, "access_mode", "viewer", "next" }\`. Signed out, \`viewer\` is \`{ "signed_in": false }\` and \`next\` is \`sign_in\`. Signed in, \`viewer.share_status\` is \`null\`, \`pending\`, \`approved\`, or \`revoked\`, and \`next\` is \`accept\`, \`wait\`, \`open_bot\`, or \`blocked\`. The response never has offers, handles, owner names, emails, or use counts. Errors: \`404\` \`invite_not_found\`, \`410\` \`invite_expired\` or \`invite_used_up\`, \`429\` \`rate_limited\`.
+
+### POST ${line('/api/v1/c/links/:token/accept')}
+
+Session cookie only, with body \`{}\`. A present \`Origin\` must be this site; otherwise the response is \`403\` \`bad_origin\`. \`200\` \`{ "share": { "status", "requested_at" }, "bot": { "agent_id" }, "next" }\`. \`status\` is \`approved\` for personal links, \`open_link\` mode, or a pre-approved email; otherwise it is \`pending\`. Accepting again returns the existing grant. Errors: \`403\` \`share_revoked\`, \`403\` \`invite_email_mismatch\`, \`400\` \`invalid_guest\` on your own agent, \`410\` \`invite_expired\` or \`invite_used_up\`, \`403\` \`plan_limit\` (in the error envelope; \`details\` has the plan body), and \`429\` \`pending_queue_full\` or \`rate_limited\`.
+
+## Agent invite links
+
+Agent invite links are off unless the deployment sets \`VALETTO_AGENT_GUESTS=1\`. When they are off, creating one, preview, redeem, claim preview, and claiming all return \`404\`. An agent invite link grants a shared agent to agents that are not on ReplySlip yet. The customer's agent redeems it in one call and gets its own workspace, agent, and key. The token starts with \`rsi_\`, is stored as a hash, and is shown once. The link is ${line('/i#<token>')}: the token is in the fragment, so it never reaches the server.
+
+### POST ${line('/api/v1/agents/:id/invites')} with \`kind: "agent"\`
+
+Session cookie. A bearer \`rsk_\` key is \`403\` \`human_required\`. There is no MCP tool.
+
+\`\`\`json
+{ "kind": "agent", "offers": ["draft"], "daily_cap": 20, "max_uses": 1, "expires_in_days": 30, "label": "Initech", "approve_on_redeem": false }
+\`\`\`
+
+\`offers\` is required. Defaults: \`daily_cap\` ${DEFAULT_SHARE_DAILY_CAP}, \`max_uses\` 1 (up to ${INVITE_MAX_USES}), \`expires_in_days\` ${INVITE_DEFAULT_TTL_DAYS} (${INVITE_MIN_TTL_DAYS}–${INVITE_MAX_TTL_DAYS}), \`approve_on_redeem\` false. \`201\` \`{ "invite", "token", "url", "agent_prompt" }\`. \`400\` \`agent_not_shared\` when sharing is off. \`404\` \`offer_not_found\`. \`429\` \`too_many_invites\` past ${INVITE_MAX_ACTIVE_PER_AGENT} active invites on the agent. The guest-workspace cap is checked at redeem, not here.
 
 ### GET ${line('/api/v1/invites/preview')}
 
-Public. \`Authorization: Bearer <rsi_ token>\`. \`200\` \`{ "address", "owner", "agent", "offers", "expires_at", "uses_left" }\`. \`offers\` has only the offers the link grants, each with \`result_schema\`. Any invalid link is the same \`404\` \`invite_not_found\`.
+Public. \`Authorization: Bearer <rsi_ token>\`. \`200\` \`{ "address", "owner", "agent", "offers", "expires_at", "uses_left" }\`. \`offers\` has only the offers the link grants, each with \`result_schema\`, \`input_schema\`, \`notes_enabled\`, and \`notes_max\`. Any invalid link is the same \`404\` \`invite_not_found\`.
 
 ### POST ${line('/api/v1/invites/redeem')}
 
@@ -868,13 +920,13 @@ Without an Authorization header this creates a new workspace (an auto handle \`g
 
 With \`Authorization: Bearer <rsk_ key>\` the grant goes to that key's workspace and no agent is created; \`name\`, \`description\`, and \`webhook\` are refused. \`201\` \`{ "share", "created": true }\`, or \`200\` with \`created: false\` when that workspace can already reach the agent, which consumes no use. MCP \`redeem_invite\` does the same.
 
-Errors: \`404\` \`invite_not_found\`. \`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\`. \`409\` \`agent_not_shared\` or \`invite_has_no_offers\`. \`400\` \`invalid_guest\` for the owner's own workspace. \`403\` \`plan_limit\` with \`limit\` \`guest_workspaces\` when the owner's plan is full. \`429\` \`rate_limited\`.
+Errors: \`404\` \`invite_not_found\`. \`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\`. \`409\` \`agent_not_shared\` or \`invite_has_no_offers\`. \`400\` \`invalid_guest\` for the owner's own workspace. \`403\` \`share_revoked\` when the workspace was revoked from this agent, or when a new workspace would come from the same source (client IP) as a revoked redeem of this link. \`403\` \`plan_limit\` with \`limit\` \`guest_workspaces\` when the owner's plan is full. \`429\` \`rate_limited\`.
 
 A workspace created by redeem cannot share its agents or create invites until a person claims it. It is deleted after ${INVITE_WORKSPACE_IDLE_DAYS} days if it was never claimed and its key was never used.
 
 ### Claiming a workspace
 
-\`claim_url\` is ${line('/claim#<rsc_ token>')}. The page signs a person in with \`POST /api/v1/auth/verify-code\` plus \`claim_token\`. A new account is attached to the invite workspace instead of getting a new one. \`409\` \`already_in_workspace\` when the email already has a workspace; the code is not used up. \`404\` \`claim_not_found\` when the token is unknown or already claimed. ${line('GET /api/v1/claims/preview')} with \`Authorization: Bearer <rsc_ token>\` returns \`{ "workspace", "agents" }\` for the page.
+\`claim_url\` is ${line('/claim#<rsc_ token>')}. The page signs a person in with \`POST /api/v1/auth/verify-code\` plus \`claim_token\`. A new account is attached to the invite workspace instead of getting a new one. \`409\` \`already_in_workspace\` when the email already has a workspace; the code is not used up. \`404\` \`claim_not_found\` when the token is unknown, already claimed, or older than ${CLAIM_TOKEN_TTL_DAYS} days. ${line('GET /api/v1/claims/preview')} with \`Authorization: Bearer <rsc_ token>\` returns \`{ "workspace", "agents" }\` for the page.
 
 ### Provisioning from your backend
 

@@ -13,11 +13,16 @@ var SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 var JOIN_CODE_DEFAULT_TTL_MS = 24 * 60 * 60 * 1e3;
 var JOIN_CODE_MAX_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
 var JOIN_CODE_MIN_TTL_MS = 60 * 60 * 1e3;
+var PENDING_NOTIFY_INTERVAL_MS = 60 * 60 * 1e3;
 var RATE_LIMITS = {
   requestCode: { email: 5, ip: 100, windowMs: 15 * 60 * 1e3 },
   register: { ip: 60, windowMs: 15 * 60 * 1e3 },
   redeem: { ip: 30, windowMs: 15 * 60 * 1e3 },
   invitePreview: { ip: 120, windowMs: 15 * 60 * 1e3 },
+  claimPreview: { ip: 60, windowMs: 15 * 60 * 1e3 },
+  customerLink: { ip: 60, windowMs: 15 * 60 * 1e3 },
+  /** Keyed by the signed-in user id (stored where agent keys go). */
+  customerAccept: { agent: 20, windowMs: 15 * 60 * 1e3 },
   testWake: { agent: 10, windowMs: 15 * 60 * 1e3 }
 };
 
