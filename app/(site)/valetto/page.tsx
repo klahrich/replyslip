@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { MarkIcon } from '@/components/site/Mark';
 import { PhoneChat } from '@/components/site/valetto/PhoneChat';
 import { ValettoEffects } from '@/components/site/valetto/ValettoEffects';
+import { EARLY_ACCESS, ValettoFoot } from '@/components/site/valetto/ValettoChrome';
 import '@/components/site/landing.css';
 import '../landing-width.css';
 import '../landing-bg.css';
@@ -19,7 +20,6 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-const EARLY = 'mailto:karim@replyslip.com?subject=Valetto%20early%20access';
 
 /** Splits a line into words that snap in one after another (the n-th word gets --i: from + n). */
 function Words({ text, from = 0 }: { text: string; from?: number }) {
@@ -187,9 +187,9 @@ export default function ValettoPage() {
               <a href="#how">How it works</a>
             </li>
             <li>
-              <a className="go" href={EARLY}>
+              <Link className="go" href={EARLY_ACCESS}>
                 Early access
-              </a>
+              </Link>
             </li>
           </ul>
         </nav>
@@ -216,9 +216,9 @@ export default function ValettoPage() {
             </p>
             <p className="vt-eg">Customers open the link on their phone. Nothing to install.</p>
             <div className="vt-cta">
-              <a className="btn vt-btn" href={EARLY}>
+              <Link className="btn vt-btn" href={EARLY_ACCESS}>
                 Ask for early access
-              </a>
+              </Link>
               <a className="link vt-cta-2" href="#how">
                 How it works
               </a>
@@ -299,33 +299,16 @@ export default function ValettoPage() {
         <section className="close vt-close" aria-label="Get early access">
           <p className="say">Start with one customer and one job.</p>
           <p className="vt-close-sub">Valetto is in early access for Grok Bot owners.</p>
-          <a className="btn vt-btn" href={EARLY}>
+          <Link className="btn vt-btn" href={EARLY_ACCESS}>
             Ask for early access
-          </a>
+          </Link>
           <p className="vt-soon">
             <span>Coming soon</span> Telegram, WhatsApp and SMS. For now, customers use the chat page.
           </p>
         </section>
       </main>
 
-      <footer className="foot vt-foot">
-        <p>
-          Valetto is built by{' '}
-          <a className="link" href="https://clairevue.ai">
-            ClaireVue
-          </a>
-          , Montréal
-        </p>
-        <p className="foot-legal">
-          <Link className="link" href="/privacy">
-            Privacy
-          </Link>
-          <Link className="link" href="/terms">
-            Terms
-          </Link>
-        </p>
-        <p className="yr">© 2026 ClaireVue</p>
-      </footer>
+      <ValettoFoot />
       <ValettoEffects />
     </div>
   );
