@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull, max, sql } from 'drizzle-orm';
 import { getDb } from '@/db';
-import { agentKeys, agents, joinCodes, watcherKeys, type AgentRow, type JoinCodeRow } from '@/db/schema';
+import { agentBranding, agentKeys, agents, joinCodes, watcherKeys, type AgentRow, type JoinCodeRow } from '@/db/schema';
 import type { SessionUser } from './auth';
 import {
   AGENT_NAME_PATTERN,
@@ -14,6 +14,7 @@ import { randomToken, sha256, tokenPrefix } from './crypto';
 import { applyDeliveryUpdate, deliveryColumns, publicDelivery, type DeliveryInput, type DeliveryUpdate } from './delivery';
 import { agentCountForUpdate, loadFirstAgentNotice, queueFirstAgentAlert } from './first-agent-alert';
 import { HttpError, isUniqueViolation } from './errors';
+import { deleteLogoQuietly } from './logo-store';
 import { clientIp } from './origin';
 import { assertWithinLimit } from './plans';
 import { consumeRateLimit } from './rate-limit';
@@ -156,13 +157,20 @@ export async function revokeAgent(workspaceId: string, agentId: string): Promise
   const agent = await getAgent(workspaceId, agentId);
   if (agent.revokedAt) return agent;
   const now = new Date();
-  await db.transaction(async (tx) => {
+  const logoPath = await db.transaction(async (tx) => {
     await tx.update(agents).set({ revokedAt: now }).where(eq(agents.id, agent.id));
     await tx
       .update(agentKeys)
       .set({ revokedAt: now })
       .where(and(eq(agentKeys.agentId, agent.id), isNull(agentKeys.revokedAt)));
+    // Spec 13.5: a revoked agent keeps no branding, and its logo blob goes too (after commit).
+    const [branding] = await tx
+      .delete(agentBranding)
+      .where(eq(agentBranding.agentId, agent.id))
+      .returning({ logoBlobPath: agentBranding.logoBlobPath });
+    return branding?.logoBlobPath ?? null;
   });
+  await deleteLogoQuietly(logoPath);
   return { ...agent, revokedAt: now };
 }
 

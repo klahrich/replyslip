@@ -259,6 +259,10 @@ export const tasks = pgTable(
     inputSchema: jsonb('input_schema').$type<Record<string, unknown>>(),
     /** The guest's form fields, already validated against inputSchema. */
     input: jsonb('input').$type<Record<string, unknown>>(),
+    /** Customer-supplied idempotency key (R5). Unique per sending workspace. */
+    clientRequestId: uuid('client_request_id'),
+    /** When the current question was asked. Cleared when the sender answers. */
+    questionAskedAt: ts('question_asked_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     completedAt: ts('completed_at'),
@@ -270,6 +274,51 @@ export const tasks = pgTable(
     index('tasks_to_agent_idx').on(table.toAgentId, table.status),
     index('tasks_from_agent_idx').on(table.fromAgentId, table.status),
     index('tasks_from_workspace_idx').on(table.fromWorkspaceId, table.createdAt),
+    index('tasks_from_workspace_to_agent_idx').on(table.fromWorkspaceId, table.toAgentId, table.createdAt),
+    uniqueIndex('tasks_client_request_unique')
+      .on(table.fromWorkspaceId, table.clientRequestId)
+      .where(sql`${table.clientRequestId} is not null`),
+  ],
+);
+
+/** Each answer a sender gave to a needs_info question, oldest first. */
+export const taskAnswers = pgTable(
+  'task_answers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    question: text('question').notNull(),
+    answer: text('answer').notNull(),
+    askedAt: ts('asked_at').notNull(),
+    answeredAt: ts('answered_at').notNull().defaultNow(),
+  },
+  (table) => [index('task_answers_task_idx').on(table.taskId, table.answeredAt)],
+);
+
+/** Customer-facing look of one shared agent. Missing row = Valetto defaults. */
+export const agentBranding = pgTable(
+  'agent_branding',
+  {
+    agentId: uuid('agent_id')
+      .primaryKey()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    displayName: text('display_name'),
+    primaryColor: text('primary_color'),
+    accentColor: text('accent_color'),
+    logoBlobPath: text('logo_blob_path'),
+    logoUrl: text('logo_url'),
+    logoWidth: integer('logo_width'),
+    logoHeight: integer('logo_height'),
+    logoSha256: text('logo_sha256'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    check('agent_branding_primary_color_check', sql`${table.primaryColor} is null or ${table.primaryColor} ~ '^#[0-9A-F]{6}$'`),
+    check('agent_branding_accent_color_check', sql`${table.accentColor} is null or ${table.accentColor} ~ '^#[0-9A-F]{6}$'`),
+    check('agent_branding_logo_check', sql`(${table.logoUrl} is null) = (${table.logoBlobPath} is null)`),
   ],
 );
 
@@ -503,7 +552,7 @@ export const wakes = pgTable(
     check('wakes_status_check', sql`${table.status} in ('pending', 'delivered', 'failed', 'cancelled')`),
     check(
       'wakes_reason_check',
-      sql`${table.reason} in ('message', 'task', 'result', 'question', 'failure', 'test')`,
+      sql`${table.reason} in ('message', 'task', 'result', 'question', 'failure', 'test', 'answer')`,
     ),
     index('wakes_due_idx').on(table.status, table.nextAttemptAt),
   ],
@@ -518,3 +567,5 @@ export type JoinCodeRow = typeof joinCodes.$inferSelect;
 export type AgentInviteRow = typeof agentInvites.$inferSelect;
 export type AgentShareRow = typeof agentShares.$inferSelect;
 export type CustomerInviteRow = typeof customerInvites.$inferSelect;
+export type AgentBrandingRow = typeof agentBranding.$inferSelect;
+export type TaskAnswerRow = typeof taskAnswers.$inferSelect;

@@ -1,9 +1,20 @@
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { getDb, type Db } from '@/db';
-import { agentOffers, agents, messages, tasks, workspaces, type AgentRow, type MessageRow, type TaskRow } from '@/db/schema';
+import {
+  agentOffers,
+  agents,
+  messages,
+  taskAnswers,
+  tasks,
+  workspaces,
+  type AgentRow,
+  type MessageRow,
+  type TaskAnswerRow,
+  type TaskRow,
+} from '@/db/schema';
 import type { AgentPrincipal } from './agents';
-import { MESSAGE_BODY_MAX } from './constants';
+import { MESSAGE_BODY_MAX, TASK_ANSWER_MAX } from './constants';
 import { HttpError } from './errors';
 import { assertResultSchema, validateResult } from './validate';
 import { assertWithinLimit } from './plans';
@@ -196,7 +207,16 @@ export async function sendMessage(
 
 export async function createTask(
   caller: AgentPrincipal,
-  input: { to: string; title?: string; description?: string; input?: unknown; resultSchema?: unknown; offer?: string },
+  input: {
+    to: string;
+    title?: string;
+    description?: string;
+    input?: unknown;
+    resultSchema?: unknown;
+    offer?: string;
+    /** Customer idempotency key (R5). Unique per sending workspace. */
+    clientRequestId?: string;
+  },
 ) {
   const address = parseRecipient(input.to);
   // In-workspace tasks are always free text (input_not_allowed). A shared offer decides in resolveSharedTask.
@@ -267,6 +287,7 @@ export async function createTask(
         resultSchema,
         inputSchema,
         input: formInput,
+        clientRequestId: input.clientRequestId ?? null,
         status: 'open',
       })
       .returning();
@@ -335,7 +356,75 @@ export async function getTask(caller: AgentPrincipal, taskId: string) {
     messages: thread.map((message) =>
       serializeMessage(message, nameById.get(message.fromAgentId) ?? 'unknown', nameById.get(message.toAgentId) ?? 'unknown'),
     ),
+    answers: (await taskAnswersFor(db, task.id)).map(serializeAnswer),
   };
+}
+
+export function serializeAnswer(answer: TaskAnswerRow) {
+  return {
+    question: answer.question,
+    answer: answer.answer,
+    asked_at: answer.askedAt.toISOString(),
+    answered_at: answer.answeredAt.toISOString(),
+  };
+}
+
+export async function taskAnswersFor(db: Db, taskId: string): Promise<TaskAnswerRow[]> {
+  return db
+    .select()
+    .from(taskAnswers)
+    .where(eq(taskAnswers.taskId, taskId))
+    .orderBy(taskAnswers.answeredAt, taskAnswers.id);
+}
+
+/**
+ * The sender answers a needs_info question (15.8). Works across workspaces, where task-thread
+ * messages do not. Records the round in task_answers, reopens the task, and wakes the target.
+ * It does not use the daily cap: it is the same request.
+ */
+export async function answerTask(caller: AgentPrincipal, taskId: string, answer: string) {
+  const trimmed = answer.trim();
+  if (trimmed.length < 1 || trimmed.length > TASK_ANSWER_MAX) {
+    throw new HttpError(400, 'validation_error', `Answer must be 1-${TASK_ANSWER_MAX} characters.`, {
+      fields: { answer: trimmed.length < 1 ? 'Required.' : `Use ${TASK_ANSWER_MAX} characters or fewer.` },
+    });
+  }
+  const written = await getDb().transaction(async (tx) => {
+    await tx.execute(sql`select id from tasks where id = ${taskId} for update`);
+    const task = await loadTask(tx, caller.workspaceId, taskId);
+    assertParticipant(task, caller);
+    if (task.fromAgentId !== caller.agentId) {
+      throw new HttpError(403, 'forbidden', 'Only the sender of this task can answer its question.');
+    }
+    if (task.status !== 'needs_info' || !task.question) {
+      throw new HttpError(409, 'task_not_waiting', 'This request is not waiting for an answer.');
+    }
+    const now = new Date();
+    await tx.insert(taskAnswers).values({
+      taskId: task.id,
+      question: task.question,
+      answer: trimmed,
+      askedAt: task.questionAskedAt ?? task.updatedAt,
+      answeredAt: now,
+    });
+    const [updated] = await tx
+      .update(tasks)
+      .set({ status: 'open', question: null, questionAskedAt: null, updatedAt: now })
+      .where(and(eq(tasks.id, task.id), eq(tasks.status, 'needs_info')))
+      .returning();
+    if (!updated) throw new HttpError(409, 'task_not_waiting', 'This request is not waiting for an answer.');
+    const wakeId = await enqueueWake(tx, {
+      workspaceId: updated.workspaceId,
+      agentId: updated.toAgentId,
+      reason: 'answer',
+      taskId: updated.id,
+    });
+    const names = await namesFor(tx, updated);
+    const labels = await labelsFor(tx, [updated]);
+    return { payload: serializeTask(updated, names.from, names.to, labels.get(updated.id)), wakeId };
+  });
+  await afterWake(written.wakeId);
+  return written.payload;
 }
 
 export async function listTasks(
@@ -398,6 +487,7 @@ async function closeOrQuestion(
         result: change.result === undefined ? task.result : change.result,
         question: change.question === undefined ? task.question : change.question,
         failReason: change.failReason === undefined ? task.failReason : change.failReason,
+        questionAskedAt: change.status === 'needs_info' ? now : task.questionAskedAt,
         updatedAt: now,
         completedAt: change.completed ? now : task.completedAt,
       })

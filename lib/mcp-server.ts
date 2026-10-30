@@ -21,7 +21,7 @@ import {
 } from './sharing';
 import { agentGuestsEnabled } from './constants';
 import { redeemInvite } from './invites';
-import { askTask, completeTask, createTask, failTask, getTask, listTasks, sendMessage } from './tasks';
+import { answerTask, askTask, completeTask, createTask, failTask, getTask, listTasks, sendMessage } from './tasks';
 
 type ToolCtx = {
   http?: {
@@ -195,6 +195,23 @@ export const mcpHandler = createMcpHandler(
       async (args, ctx) => {
         try {
           const task = await failTask(principalFrom(ctx as ToolCtx), args.id, args.reason);
+          return ok({ task });
+        } catch (err) {
+          return fail(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'answer_task',
+      {
+        title: docsByName.get('answer_task')!.title,
+        description: docsByName.get('answer_task')!.description,
+        inputSchema: toolInputs.answer_task,
+      },
+      async (args, ctx) => {
+        try {
+          const task = await answerTask(principalFrom(ctx as ToolCtx), args.id, args.answer);
           return ok({ task });
         } catch (err) {
           return fail(err);

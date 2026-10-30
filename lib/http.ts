@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS } from './constants';
 import { HttpError } from './errors';
@@ -63,7 +64,63 @@ export async function handleCustomer(fn: () => Promise<Response>): Promise<Respo
     }
   }
   for (const [name, value] of Object.entries(CUSTOMER_API_HEADERS)) response.headers.set(name, value);
+  // 17.13: a conditional GET (ETag or 304) must be revalidated, not refused by the cache.
+  if (response.status === 304 || response.headers.has('etag')) {
+    response.headers.set('cache-control', CUSTOMER_ETAG_CACHE_CONTROL);
+  }
   return response;
+}
+
+export const CUSTOMER_ETAG_CACHE_CONTROL = 'private, no-cache';
+
+/** Weak ETag over the exact response body, so any visible change gives a new tag. */
+export function weakEtag(body: unknown): string {
+  return `W/"${createHash('sha256').update(JSON.stringify(body)).digest('base64url').slice(0, 27)}"`;
+}
+
+function etagMatches(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  return header
+    .split(',')
+    .map((part) => part.trim())
+    .some((part) => part === '*' || part === etag || `W/${part}` === etag || part.replace(/^W\//, '') === etag.replace(/^W\//, ''));
+}
+
+/** 200 with an ETag, or 304 with no body when If-None-Match already has it (15.9). */
+export function jsonWithEtag(req: Request, body: unknown, etag = weakEtag(body)): Response {
+  if (etagMatches(req.headers.get('if-none-match'), etag)) {
+    return new Response(null, { status: 304, headers: { etag } });
+  }
+  return json(body, 200, { etag });
+}
+
+/**
+ * Raw request body capped at maxBytes. Rejects early on Content-Length, and stops reading the
+ * stream past the cap, both as 413 image_too_large (13.4).
+ */
+export async function readImageBody(req: Request, maxBytes: number): Promise<{ bytes: Buffer; contentType: string }> {
+  const contentType = (req.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+  const tooLarge = () =>
+    new HttpError(413, 'image_too_large', `The image must be at most ${Math.round(maxBytes / 1024)} KB.`, {
+      max_bytes: maxBytes,
+    });
+  const declared = Number(req.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
+  if (!req.body) return { bytes: Buffer.alloc(0), contentType };
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw tooLarge();
+    }
+    chunks.push(value);
+  }
+  return { bytes: Buffer.concat(chunks), contentType };
 }
 
 export async function readJson(req: Request): Promise<unknown> {

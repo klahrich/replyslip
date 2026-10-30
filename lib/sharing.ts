@@ -30,6 +30,7 @@ import {
   TASK_DESCRIPTION_MAX,
   TASK_TITLE_MAX,
 } from './constants';
+import { brandingFor, cardBranding } from './customer-branding';
 import { HttpError, isForeignKeyViolation, isUniqueViolation } from './errors';
 import { assertInputSchema, validateInput, type InputSchema } from './input-schema';
 import { assertGuestWorkspaceLimit, PlanLimitError } from './plans';
@@ -1101,10 +1102,12 @@ export async function getAgentCard(caller: AgentPrincipal, to: string) {
     .innerJoin(agentOffers, eq(agentOffers.id, agentShareOffers.offerId))
     .where(eq(agentShareOffers.shareId, share.id))
     .orderBy(agentOffers.name);
+  const branding = cardBranding(await brandingFor(db, recipient, owner.name));
   return {
     address: shown,
     name: recipient.name,
     description: recipient.description,
+    branding,
     offers: offers.map((offer) => ({
       name: offer.name,
       description: offer.description,
