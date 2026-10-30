@@ -51,7 +51,7 @@ You can run your own copy. It's a Next.js app on Postgres, and it doesn't need V
 2. Copy `.env.example` to `.env` and set the four required values: `DATABASE_URL`, `ENCRYPTION_KEY` (32 random bytes, base64), `CRON_SECRET` and `UNSUBSCRIBE_SECRET`. Everything else is optional.
 3. Run `npm run db:migrate`, then `npm run build && npm start`.
 4. Have a scheduler call `GET /api/cron/wakes` every minute with `Authorization: Bearer $CRON_SECRET`. This retries webhook wake-ups that failed. On Vercel, `vercel.json` schedules it once a day, which is the Hobby plan limit.
-5. For sign-in email, set `RESEND_API_KEY` and `EMAIL_FROM`. Without them, login codes print to the server log, which is fine for trying it out.
+5. For sign-in email, set `RESEND_API_KEY` and `EMAIL_FROM`. Without them, login codes print to the server log, which is fine for trying it out. Production requires them: there, a missing `RESEND_API_KEY` makes every send fail.
 
 Point agents and the CLI at your own origin with `--url` or `REPLYSLIP_URL`. If you get stuck, [open an issue](https://github.com/klahrich/replyslip/issues).
 
@@ -115,7 +115,7 @@ A workspace is the tenant. The first successful sign-in creates one and names it
 Sign-up and sign-in are the same passwordless flow. There is no password.
 
 1. `POST /api/v1/auth/request-code` with `{ "email" }` stores a 6-digit code as an HMAC (keyed with `ENCRYPTION_KEY`), expires it in 10 minutes, and emails it. Optional `source` is trimmed, capped at 200 characters, and stored on `users.signup_source` only when that request creates the user. A later request does not replace it. The field is not returned by the API. A newer code invalidates older unused codes. The `200` body is the same whether or not the email already exists.
-2. When `RESEND_API_KEY` is unset, `lib/email.ts` prints the code to the server log. When it is set, `EMAIL_FROM` is required and mail goes out through the Resend HTTP API.
+2. When `RESEND_API_KEY` is unset outside production, `lib/email.ts` prints the code to the server log; in production the send fails. When it is set, `EMAIL_FROM` is required and mail goes out through the Resend HTTP API.
 3. Over the limit (5 per email or 100 per IP per 15 minutes) the route returns `429` with `error.code` `rate_limited`, `retry_after_seconds`, and `Retry-After`. That request does not send a code and does not count toward the window.
 4. `POST /api/v1/auth/verify-code` with `{ "email", "code" }` allows 5 attempts, then the code is dead. Optional `marketing_opt_in: true` and `consent_text` record explicit marketing consent. The checkbox must start unchecked. Omitting them leaves consent untouched. Success sets an HttpOnly, Secure, SameSite=Lax cookie named `replyslip_session` (30 days). Only the SHA-256 hash of the session token is stored.
 5. `POST /api/v1/auth/logout` clears it. `GET /api/v1/auth/me` returns the user (including `marketing_opt_in`) and the workspace (including `plan`, `usage`, and `limits`). `PATCH /api/v1/auth/me` with `{ "marketing_opt_in" }` changes that choice. `GET` or `POST /api/v1/unsubscribe?token=...` opts out without a session.
@@ -289,9 +289,9 @@ Names only. Real values stay in `.env` or the host. `.env.example` lists the sam
 | `ENCRYPTION_KEY` | 32 bytes, base64. AES-256-GCM for webhook secrets, and the HMAC pepper for sign-in codes. |
 | `CRON_SECRET` | Bearer token for `/api/cron/wakes`. |
 | `UNSUBSCRIBE_SECRET` | HMAC key for one-click marketing unsubscribe links. Required for `unsubscribeUrl` and `/api/v1/unsubscribe`. Not a default; set it on the host. |
-| `RESEND_API_KEY` | When set, sign-in codes are sent with Resend. When empty, codes are logged. |
+| `RESEND_API_KEY` | When set, sign-in codes and notices are sent with Resend (10 s timeout per call). When empty, they are logged. In production (`VERCEL_ENV=production`, or `NODE_ENV=production` off Vercel) it is required: without it every send fails instead of logging. |
 | `EMAIL_FROM` | From address. Required only when `RESEND_API_KEY` is set. |
-| `APP_ORIGIN` | Public origin, e.g. `https://replyslip.com`. Set it in production: it is then the only Origin allowed on cookie-authenticated customer POSTs, and Host / X-Forwarded-Host are ignored for that check. |
+| `APP_ORIGIN` | Public origin, or a comma-separated list of origins, e.g. `https://replyslip.com,https://www.replyslip.com,https://valetto.tech`. Entries are trimmed, a trailing slash is removed, and empty entries and a literal `null` are dropped. Every other entry must be an exact origin (lowercase `scheme://host[:port]`, no path, no default port); a malformed entry fails at server start with an error that names the fix. The first entry is the canonical origin used for absolute URLs the app hands out or serves (invite and customer links, MCP and docs URLs, `/llms.txt`, `/skill.md`, `/docs/*.md`). Set it in production: a cookie-authenticated customer POST and `POST /api/valetto/early-access` must then send an `Origin` exactly equal to one entry (list `https://valetto.tech` when the Valetto site is served on its own domain), and Host / X-Forwarded-Host are ignored for that check. Unset: the request's own origin is used for both, and production logs a warning once. |
 | `VALETTO_AGENT_GUESTS` | Set to `1` to turn on anonymous agent invite links (redeem, claim, and the dashboard option). Off by default; customer links work without it. |
 | `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhook URLs on loopback and private networks. Leave unset in production. |
 | `REPLYSLIP_URL` | Public origin for `unsubscribeUrl` when set. Also the default origin for the watcher CLI and for `replyslip register` when `--url` is omitted. |

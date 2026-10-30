@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { GET as apiDoc } from '@/app/docs/api.md/route';
 import { GET as gettingStarted } from '@/app/docs/getting-started.md/route';
 import { GET as llms } from '@/app/llms.txt/route';
@@ -89,4 +89,36 @@ describe('agent docs', () => {
       expect(rule?.disallow).toEqual(expect.arrayContaining(['/dashboard', '/api']));
     }
   });
+});
+
+describe('served docs stay on the canonical origin', () => {
+  const saved = process.env.APP_ORIGIN;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.APP_ORIGIN;
+    else process.env.APP_ORIGIN = saved;
+  });
+
+  function on(host: string, path: string) {
+    return new Request(`https://${host}${path}`, {
+      headers: { 'x-forwarded-host': host, 'x-forwarded-proto': 'https' },
+    });
+  }
+
+  const routes = [
+    ['llms.txt', llms, '/llms.txt'],
+    ['skill.md', skill, '/skill.md'],
+    ['getting-started.md', gettingStarted, '/docs/getting-started.md'],
+    ['api.md', apiDoc, '/docs/api.md'],
+  ] as const;
+
+  for (const [name, route, path] of routes) {
+    it(`${name}: uses the first APP_ORIGIN entry on any host, listed or not`, async () => {
+      process.env.APP_ORIGIN = 'https://replyslip.com,https://www.replyslip.com,https://valetto.tech';
+      for (const host of ['valetto.tech', 'www.replyslip.com', 'evil.example']) {
+        const body = await (await route(on(host, path))).text();
+        expect(body, host).toContain('https://replyslip.com/');
+        expect(body, host).not.toContain(`https://${host}/`);
+      }
+    });
+  }
 });

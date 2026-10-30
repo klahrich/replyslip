@@ -52,7 +52,7 @@ Response `200` when a code may have been sent. The body is the same whether or n
 
 The response also sets `Retry-After` to that number of seconds. `retry_after_seconds` is how long until the oldest counted request leaves the window.
 
-A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in 10 minutes. A newer code invalidates older unused codes for that email. Limits: 5 requests per email and 100 per IP per 15 minutes. Mail is sent with Resend when `RESEND_API_KEY` and `EMAIL_FROM` are set; otherwise the code is written to the server log.
+A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in 10 minutes. A newer code invalidates older unused codes for that email. Limits: 5 requests per email and 100 per IP per 15 minutes. Mail is sent with Resend when `RESEND_API_KEY` and `EMAIL_FROM` are set; otherwise the code is written to the server log, except in production, where the request fails.
 
 ### POST `/api/v1/auth/verify-code`
 
@@ -221,7 +221,7 @@ Public. Every `/api/v1/c/*` response has `Cache-Control: private, no-store`, `X-
 
 ### POST `/api/v1/c/links/:token/accept`
 
-Session cookie only, with body `{}`. A present `Origin` must equal the app origin exactly (`APP_ORIGIN` when the deployment sets it; `Host` and `X-Forwarded-Host` are then ignored); otherwise the response is `403` `bad_origin`. `200` `{ "share": { "status", "requested_at" }, "bot": { "agent_id" }, "next" }`. `status` is `approved` for personal links, `open_link` mode, or a pre-approved email; otherwise it is `pending`. Accepting again returns the existing grant. Errors: `403` `share_revoked`, `403` `invite_email_mismatch`, `400` `invalid_guest` on your own agent, `410` `invite_expired` or `invite_used_up`, `403` `plan_limit` (in the error envelope; `details` has the plan body), and `429` `pending_queue_full` or `rate_limited`.
+Session cookie only, with body `{}`. A present `Origin` must exactly equal an allowed origin: one of the comma-separated `APP_ORIGIN` entries when the deployment sets it (`Host` and `X-Forwarded-Host` are then ignored), otherwise the request's own origin. Anything else is `403` `bad_origin`. `200` `{ "share": { "status", "requested_at" }, "bot": { "agent_id" }, "next" }`. `status` is `approved` for personal links, `open_link` mode, or a pre-approved email; otherwise it is `pending`. Accepting again returns the existing grant. Errors: `403` `share_revoked`, `403` `invite_email_mismatch`, `400` `invalid_guest` on your own agent, `410` `invite_expired` or `invite_used_up`, `403` `plan_limit` (in the error envelope; `details` has the plan body), and `429` `pending_queue_full` or `rate_limited`.
 
 ## Agent invite links
 
@@ -558,6 +558,18 @@ Tool results are JSON text. Failures set the MCP tool error flag and return `{ "
 
 See https://<host>/docs/getting-started.md for arguments and the task rules.
 
+## Valetto
+
+Not an agent API. The Valetto early-access form posts here. Nothing is stored except rate-limit counters.
+
+### POST `/api/valetto/early-access`
+
+`Content-Type: application/json`. Body: `name` (1 to 100 chars), `email` (up to 254 chars, `name@domain.tld`), `business` (1 to 120), `website` (optional, up to 200, a domain or http(s) URL), `industry` (`retail`, `services`, `manufacturing`, `professional`, `other`), `teamSize` (`solo`, `2-10`, `11-50`, `50+`), `usesGrokBot` (`yes`, `not_yet`), `customerJobs` (1 to 1000, line breaks allowed), `heardFrom` (optional, up to 200). Strings are trimmed. An empty or `null` optional field is `null`. Single-line fields reject control characters. Unknown keys are ignored.
+
+`200` is exactly `{ "ok": true }`. The request is emailed as plain text to karim@valetto.tech with the submitter's address as Reply-To, never as From, through the same sender as sign-in codes. The same address again within 24 hours (case-insensitive) gets the same `200` and sends nothing. If the send fails, the route is `500` and a retry can send.
+
+`400` `{ "ok": false, "errors": { "<field>": "<message>" } }` has one message per bad field. A body that is not a JSON object is `400` without `errors`, and a non-JSON Content-Type is `415`. Each IP gets 10 requests per 60 minutes, valid or not; then `429` with `Retry-After`. A present `Origin` must exactly equal one of the comma-separated `APP_ORIGIN` entries (or the request's own origin when `APP_ORIGIN` is unset), and `Sec-Fetch-Site: cross-site` is refused; both are `403` `bad_origin`. Responses set `Cache-Control: no-store`.
+
 ## Admin
 
 Not an agent API. `GET /api/admin/stats` is counts for the operator. The route is off unless `STATS_API_KEY` is set.
@@ -582,7 +594,7 @@ Each day and the totals have `signups`, `workspaces`, `agents_registered`, `acti
 
 ## Public docs
 
-These are markdown or plain text, not JSON. Absolute links use the request host.
+These are markdown or plain text, not JSON. Absolute links use the first `APP_ORIGIN` entry, or the request host when `APP_ORIGIN` is unset.
 
 | Path | Content-Type | Body |
 | --- | --- | --- |

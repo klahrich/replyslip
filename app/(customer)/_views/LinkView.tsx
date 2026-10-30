@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ArrowLeft, Link2Off, Loader2, Mail } from 'lucide-react';
-import { acceptLink, getLink, requestCode, verifyCode } from '../_lib/api';
+import { JOBS_LIVE, acceptLink, getLink, requestCode, verifyCode } from '../_lib/api';
 import { brandStyle } from '../_lib/brand';
 import { ApiError, type LinkResponse } from '../_lib/types';
 import { Button } from '../_ui/button';
@@ -57,6 +57,12 @@ function retryText(e: unknown): string {
   return mins ? `Too many tries. Wait ${mins} minute${mins === 1 ? '' : 's'}, then try again.` : 'Too many tries. Wait a few minutes, then try again.';
 }
 
+/** Until the jobs routes (R3–R8) ship, the link page ends here instead of opening the bot page. */
+const joined = (name: string, pending: boolean) =>
+  pending
+    ? { title: `Waiting for approval from ${name}`, body: "You'll be able to send requests once they approve you. You can close this page." }
+    : { title: "You're in", body: `${name}'s page isn't open for requests yet. Open this same link again soon to get started.` };
+
 const mistake = (name: string) => `If you think this is a mistake, contact ${name} directly.`;
 
 export function LinkView({ token }: { token: string }) {
@@ -73,7 +79,10 @@ export function LinkView({ token }: { token: string }) {
   useEffect(() => {
     getLink(token).then(
       (l) => {
-        if (l.next === 'open_bot' || l.next === 'wait') router.replace(`/c/${l.bot.agent_id}`);
+        if (l.next === 'open_bot' || l.next === 'wait') {
+          if (JOBS_LIVE) router.replace(`/c/${l.bot.agent_id}`);
+          else setBlocked(joined(l.bot.branding.display_name, l.next === 'wait'));
+        }
         else if (l.next === 'blocked') setBlocked({ title: `${l.bot.branding.display_name} didn't approve this request.`, body: mistake(l.bot.branding.display_name) });
         setLink(l);
       },
@@ -90,7 +99,9 @@ export function LinkView({ token }: { token: string }) {
   async function accept() {
     try {
       const r = await acceptLink(token);
-      router.push(`/c/${r.bot.agent_id}`);
+      if (JOBS_LIVE) return router.push(`/c/${r.bot.agent_id}`);
+      setBlocked(joined(name, r.share.status === 'pending'));
+      setBusy(false);
     } catch (e) {
       const code = e instanceof ApiError ? e.code : '';
       if (code === 'invite_expired' || code === 'invite_used_up' || code === 'invite_not_found') setDead(code);

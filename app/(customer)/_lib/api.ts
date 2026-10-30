@@ -32,6 +32,9 @@ const LIVE = { R3: false, R4: false, R5: false, R6: false, R7: false, R8: false 
 
 /** Inlined at build time (next.config.ts `env`). Never true in a production build. */
 export const MOCK = process.env.NODE_ENV !== 'production' && process.env.VALETTO_MOCK === '1';
+
+/** False until the server ships the jobs list (R4): the /c pages then show a "you're in" notice, not sample data. */
+export const JOBS_LIVE = MOCK || LIVE.R4;
 const mock = () => import('./api-mock');
 
 /** Fired on window when a signed-in route answers 401; SessionGate swaps the page for a sign-in notice. */
