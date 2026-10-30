@@ -13,9 +13,26 @@ export type FirstAgentAlertEmail = {
   createdAt: Date;
 };
 
+/** Valetto early-access request. Every field but `to` is submitter input; the body is plain text. */
+export type EarlyAccessNoticeEmail = {
+  to: string;
+  /** The submitter's address. Sent as Reply-To, never as From. */
+  replyTo: string;
+  name: string;
+  business: string;
+  website: string | null;
+  industry: string;
+  teamSize: string;
+  usesGrokBot: string;
+  customerJobs: string;
+  heardFrom: string | null;
+  createdAt: Date;
+};
+
 export interface EmailSender {
   sendLoginCode(message: LoginCodeEmail): Promise<void>;
   sendFirstAgentAlert(message: FirstAgentAlertEmail): Promise<void>;
+  sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void>;
 }
 
 const GENERIC_SUBJECT = 'Your ReplySlip sign-in code';
@@ -42,6 +59,35 @@ export function firstAgentAlertText(message: Omit<FirstAgentAlertEmail, 'to'>): 
   ].join('\n');
 }
 
+/** One line, no control characters, so submitter text cannot add header-like lines to a subject. */
+function singleLine(value: string, max: number): string {
+  const flat = value.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+export function earlyAccessSubject(message: Pick<EarlyAccessNoticeEmail, 'business'>): string {
+  return `Valetto early access: ${singleLine(message.business, 80)}`;
+}
+
+export function earlyAccessNoticeText(message: Omit<EarlyAccessNoticeEmail, 'to'>): string {
+  return [
+    'New Valetto early-access request. Reply to this email to answer the sender.',
+    '',
+    `Name: ${singleLine(message.name, 200)}`,
+    `Email: ${singleLine(message.replyTo, 300)}`,
+    `Business: ${singleLine(message.business, 200)}`,
+    `Website: ${message.website === null ? 'none' : singleLine(message.website, 300)}`,
+    `Industry: ${message.industry}`,
+    `Team size: ${message.teamSize}`,
+    `Uses Grok Bot: ${message.usesGrokBot}`,
+    `Heard from: ${message.heardFrom === null ? 'none' : singleLine(message.heardFrom, 300)}`,
+    `Time (UTC): ${message.createdAt.toISOString()}`,
+    '',
+    'What would your customers ask your bot to do?',
+    message.customerJobs,
+  ].join('\n');
+}
+
 class ConsoleEmailSender implements EmailSender {
   async sendLoginCode(message: LoginCodeEmail): Promise<void> {
     console.info(`[replyslip] sign-in code for ${message.to}: ${message.code}`);
@@ -49,6 +95,10 @@ class ConsoleEmailSender implements EmailSender {
 
   async sendFirstAgentAlert(message: FirstAgentAlertEmail): Promise<void> {
     console.info(`[replyslip] first-agent alert for ${message.to}\n${firstAgentAlertText(message)}`);
+  }
+
+  async sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void> {
+    console.info(`[replyslip] Valetto early-access notice for ${message.to}\n${earlyAccessNoticeText(message)}`);
   }
 }
 
@@ -66,7 +116,17 @@ class ResendEmailSender implements EmailSender {
     await this.post(message.to, FIRST_AGENT_SUBJECT, firstAgentAlertText(message), 'first-agent alert');
   }
 
-  private async post(to: string, subject: string, text: string, label: string): Promise<void> {
+  async sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void> {
+    await this.post(
+      message.to,
+      earlyAccessSubject(message),
+      earlyAccessNoticeText(message),
+      'Valetto early-access notice',
+      message.replyTo,
+    );
+  }
+
+  private async post(to: string, subject: string, text: string, label: string, replyTo?: string): Promise<void> {
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -78,6 +138,7 @@ class ResendEmailSender implements EmailSender {
         to: [to],
         subject,
         text,
+        ...(replyTo ? { reply_to: replyTo } : {}),
       }),
     });
     if (!response.ok) {

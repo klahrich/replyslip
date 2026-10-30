@@ -299,6 +299,8 @@ Names only. Real values stay in `.env` or the host. `.env.example` lists the sam
 | `STATS_API_KEY` | Bearer token for `GET /api/admin/stats`. When unset, that route is 404. |
 | `STATS_EXCLUDE_WORKSPACE_IDS` | Comma-separated workspace UUIDs left out of `/api/admin/stats` and out of the first-agent alert. |
 | `ALERT_EMAIL` | Inbox for the first-agent alert. When unset, the alert is skipped. |
+| `APP_ORIGIN` | Public origin of the app, e.g. `https://replyslip.com`. When set, it is the only `Origin` (with `VALETTO_ORIGIN`) that `POST /api/valetto/early-access` accepts. When unset, the request's own origin is used. |
+| `VALETTO_ORIGIN` | Optional. Origin of the Valetto site when this app serves it on its own domain, e.g. `https://valetto.tech`. Also accepted by `POST /api/valetto/early-access`. |
 
 ## Deployment
 

@@ -1,12 +1,19 @@
-import { setEmailSenderForTests, type FirstAgentAlertEmail, type LoginCodeEmail } from '@/lib/email';
+import {
+  setEmailSenderForTests,
+  type EarlyAccessNoticeEmail,
+  type FirstAgentAlertEmail,
+  type LoginCodeEmail,
+} from '@/lib/email';
 import { installChainedFirstAgentAlertsForTests } from '@/lib/first-agent-alert';
 
 export const inbox: LoginCodeEmail[] = [];
 export const alerts: FirstAgentAlertEmail[] = [];
+export const earlyAccessNotices: EarlyAccessNoticeEmail[] = [];
 
 export function installInbox(): void {
   inbox.length = 0;
   alerts.length = 0;
+  earlyAccessNotices.length = 0;
   installChainedFirstAgentAlertsForTests();
   setEmailSenderForTests({
     async sendLoginCode(message) {
@@ -14,6 +21,9 @@ export function installInbox(): void {
     },
     async sendFirstAgentAlert(message) {
       alerts.push(message);
+    },
+    async sendEarlyAccessNotice(message) {
+      earlyAccessNotices.push(message);
     },
   });
 }

@@ -463,6 +463,18 @@ Tool results are JSON text. Failures set the MCP tool error flag and return `{ "
 
 See https://<host>/docs/getting-started.md for arguments and the task rules.
 
+## Valetto
+
+Not an agent API. The Valetto early-access form posts here. Nothing is stored except rate-limit counters.
+
+### POST `/api/valetto/early-access`
+
+`Content-Type: application/json`. Body: `name` (1 to 100 chars), `email` (up to 254 chars, `name@domain.tld`), `business` (1 to 120), `website` (optional, up to 200, a domain or http(s) URL), `industry` (`retail`, `services`, `manufacturing`, `professional`, `other`), `teamSize` (`solo`, `2-10`, `11-50`, `50+`), `usesGrokBot` (`yes`, `not_yet`), `customerJobs` (1 to 1000, line breaks allowed), `heardFrom` (optional, up to 200). Strings are trimmed. An empty or `null` optional field is `null`. Single-line fields reject control characters. Unknown keys are ignored.
+
+`200` is exactly `{ "ok": true }`. The request is emailed as plain text to karim@valetto.tech with the submitter's address as Reply-To, never as From, through the same sender as sign-in codes. The same address again within 24 hours (case-insensitive) gets the same `200` and sends nothing. If the send fails, the route is `500` and a retry can send.
+
+`400` `{ "ok": false, "errors": { "<field>": "<message>" } }` has one message per bad field. A body that is not a JSON object is `400` without `errors`, and a non-JSON Content-Type is `415`. Each IP gets 10 requests per 60 minutes, valid or not; then `429` with `Retry-After`. A present `Origin` must match `APP_ORIGIN` (or the request's own origin when `APP_ORIGIN` is unset) or `VALETTO_ORIGIN`, and `Sec-Fetch-Site: cross-site` is refused; both are `403` `bad_origin`. Responses set `Cache-Control: no-store`.
+
 ## Admin
 
 Not an agent API. `GET /api/admin/stats` is counts for the operator. The route is off unless `STATS_API_KEY` is set.
