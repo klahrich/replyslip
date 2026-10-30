@@ -13,11 +13,11 @@ import { POST as createOfferRoute, GET as listOffersRoute } from '@/app/api/v1/a
 import { PATCH as patchOfferRoute } from '@/app/api/v1/agents/[id]/offers/[offerId]/route';
 import { POST as revokeAgentRoute } from '@/app/api/v1/agents/[id]/revoke/route';
 import { getDb } from '@/db';
-import { agents, taskAnswers, tasks, wakes } from '@/db/schema';
+import { agentOffers, agents, taskAnswers, tasks, wakes } from '@/db/schema';
 import { RATE_LIMITS } from '@/lib/constants';
 import { fieldErrors, inputDisplay, resultDisplay } from '@/lib/customer-api';
 import { getAgentCard } from '@/lib/sharing';
-import { humanizeOfferName, normalizeOfferTitle, offerDisplayTitle } from '@/lib/offer-title';
+import { assertOfferNameNotValetto, humanizeOfferName, normalizeOfferTitle, offerDisplayTitle } from '@/lib/offer-title';
 import {
   approvedCustomer,
   directRequest,
@@ -802,7 +802,7 @@ describe('offer titles', () => {
     await patchOffer(o, 'ring-quote', { title: 'Back again' });
     expect((await patchOffer(o, 'ring-quote', { title: null })).data.offer.title).toBeNull();
 
-    for (const title of ['x'.repeat(61), 'Ring\u202Equote', 'Ring\u200Bquote', 'Ring\u00ADquote']) {
+    for (const title of ['x'.repeat(61), 'x'.repeat(1_001), 42, ['Ring'], { t: 'Ring' }, 'Ring\u202Equote', 'Ring\u200Bquote', 'Ring\u00ADquote']) {
       const bad = await patchOffer(o, 'ring-quote', { title });
       expect(bad.status, JSON.stringify(title)).toBe(400);
       expect(bad.data.error.code).toBe('invalid_offer_title');
@@ -848,6 +848,93 @@ describe('offer titles', () => {
     });
     expect(badMcp.isError).toBe(true);
     expect(badMcp.text).toContain('invalid_offer_title');
+  });
+
+  it('refuses titles that look like Valetto and accepts normal ones', async () => {
+    const refused = ['Valetto', 'Valetto ring quote', 'VALETTO', 'Vaʟetto quote', 'ᴠᴀʟᴇᴛᴛᴏ', 'Vаlеttо', 'V4l3tt0', 'v.a.l.e.t.t.o', 'Va-letto', 'v a l e t t o', 'v.a l.e t.t.o', 'Va le tt o', 'Chevaletto quote'];
+    for (const title of refused) {
+      expect(() => normalizeOfferTitle(title), title).toThrow(expect.objectContaining({ code: 'invalid_offer_title', message: 'title cannot contain "Valetto".' }));
+    }
+    for (const title of ['Ring quote', 'Valet parking quote', 'Valet Toronto', 'Chevalet Tobacco', 'Le Valet T O']) {
+      expect(normalizeOfferTitle(title), title).toBe(title);
+    }
+
+    const o = await owner();
+    const make = (name: string, title?: string) =>
+      call(createOfferRoute, offersUrl(o), {
+        cookie: o.cookie,
+        params: { id: o.agentId },
+        body: { name, ...(title === undefined ? {} : { title }), description: 'Price it.', result_schema: { type: 'object' } },
+      });
+    for (const title of ['Valetto ring quote', 'Va le tt o', 'ᴠᴀʟᴇᴛᴛᴏ']) {
+      const bad = await make('ring-quote', title);
+      expect(bad.status, title).toBe(400);
+      expect(bad.data.error).toMatchObject({ code: 'invalid_offer_title', message: 'title cannot contain "Valetto".' });
+    }
+    for (const title of ['Ring quote', 'Valet parking quote']) {
+      const ok = await make(title === 'Ring quote' ? 'ring-quote' : 'valet-parking', title);
+      expect(ok.status, ok.text).toBe(201);
+      expect(ok.data.offer.title).toBe(title);
+    }
+    const badPatch = await patchOffer(o, 'ring-quote', { title: 'v.a l.e t.t.o' });
+    expect(badPatch.status).toBe(400);
+    expect(badPatch.data.error.code).toBe('invalid_offer_title');
+    expect((await patchOffer(o, 'ring-quote', { description: 'Still here.' })).data.offer.title).toBe('Ring quote');
+
+    const mcpArgs = { agent: 'Grok', name: 'ring-quote', description: 'Price a ring.', result_schema: { type: 'object' } };
+    const badMcp = await mcpTool(o.agentKey, 'upsert_offer', { ...mcpArgs, title: 'Valetto quote' });
+    expect(badMcp.isError).toBe(true);
+    expect(badMcp.text).toContain('invalid_offer_title');
+    expect(badMcp.text).toContain('Valetto');
+    const okMcp = await mcpTool(o.agentKey, 'upsert_offer', { ...mcpArgs, title: 'Valet parking quote' });
+    expect(okMcp.isError, okMcp.text).toBe(false);
+    expect(okMcp.payload.offer.title).toBe('Valet parking quote');
+  });
+
+  it('refuses new or renamed offer names that read as Valetto, and leaves existing ones alone', async () => {
+    for (const name of ['valetto', 'valetto-quote', 'va-l-e-t-t-o', 'v_a_l_e_t_t_o', 'va-le-tt-o', 'chevaletto']) {
+      expect(() => assertOfferNameNotValetto(name), name).toThrow(expect.objectContaining({ code: 'invalid_offer' }));
+    }
+    for (const name of ['ring-quote', 'valet-parking', 'valet-to', 'valet-toronto', 'chevalet-tobacco']) {
+      expect(() => assertOfferNameNotValetto(name), name).not.toThrow();
+    }
+
+    const o = await owner();
+    const make = (name: string) =>
+      call(createOfferRoute, offersUrl(o), {
+        cookie: o.cookie,
+        params: { id: o.agentId },
+        body: { name, title: 'Ring quote', description: 'Price it.', result_schema: { type: 'object' } },
+      });
+    const bad = await make('valetto-quote');
+    expect(bad.status).toBe(400);
+    expect(bad.data.error.code).toBe('invalid_offer');
+    expect((await make('valet-to')).status).toBe(201);
+    const renamed = await patchOffer(o, 'valet-to', { name: 'ring-valetto' });
+    expect(renamed.status).toBe(400);
+    expect(renamed.data.error.code).toBe('invalid_offer');
+    const newMcp = await mcpTool(o.agentKey, 'upsert_offer', {
+      agent: 'Grok',
+      name: 'valetto',
+      description: 'Price it.',
+      result_schema: { type: 'object' },
+    });
+    expect(newMcp.isError).toBe(true);
+    expect(newMcp.text).toContain('invalid_offer');
+
+    // An offer stored before this check keeps working under its name.
+    await getDb().insert(agentOffers).values({ agentId: o.agentId, name: 'valetto', description: 'Old.', resultSchema: { type: 'object' } });
+    const keptPatch = await patchOffer(o, 'valetto', { name: 'valetto', description: 'Older.' });
+    expect(keptPatch.status, keptPatch.text).toBe(200);
+    const keptMcp = await mcpTool(o.agentKey, 'upsert_offer', {
+      agent: 'Grok',
+      name: 'valetto',
+      title: 'Ring quote',
+      description: 'Price it.',
+      result_schema: { type: 'object' },
+    });
+    expect(keptMcp.isError, keptMcp.text).toBe(false);
+    expect(keptMcp.payload.offer.display_title).toBe('Ring quote');
   });
 
   it('shows the title on R4, R5, R6, R7, and get_agent_card, with the name kept as the slug', async () => {

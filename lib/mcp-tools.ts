@@ -218,7 +218,7 @@ export const TOOL_DOCS: ToolDoc[] = [
         required: false,
         type: 'string | null',
         description:
-          'Readable job title customers see, at most 60 characters, no control, bidi, or zero-width characters. Omit to keep the current one; null or "" clears it, and customers then see the name humanized ("ring-quote" becomes "Ring quote").',
+          'Readable job title customers see, at most 60 characters, no control, bidi, or zero-width characters, and nothing that reads as "Valetto". Omit to keep the current one; null or "" clears it, and customers then see the name humanized ("ring-quote" becomes "Ring quote").',
       },
       { name: 'description', required: true, type: 'string', description: 'What the guest is asking the agent to do.' },
       {

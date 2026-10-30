@@ -32,7 +32,7 @@ import {
 } from './constants';
 import { brandingFor, cardBranding } from './customer-branding';
 import { HttpError, isForeignKeyViolation, isUniqueViolation } from './errors';
-import { normalizeOfferTitle, offerDisplayTitle } from './offer-title';
+import { assertOfferNameNotValetto, normalizeOfferTitle, offerDisplayTitle } from './offer-title';
 import { assertInputSchema, validateInput, type InputSchema } from './input-schema';
 import { assertGuestWorkspaceLimit, PlanLimitError } from './plans';
 import { consumeKeyedRateLimit } from './rate-limit';
@@ -326,6 +326,7 @@ export async function createOffer(
   },
 ) {
   const name = assertOfferName(input.name);
+  assertOfferNameNotValetto(name);
   const title = normalizeOfferTitle(input.title) ?? null;
   const description = assertOfferDescription(input.description);
   const resultSchema = assertResultSchema(input.resultSchema);
@@ -431,6 +432,7 @@ export async function updateOffer(
         .where(and(eq(agentOffers.id, offerId), eq(agentOffers.agentId, agent.id)))
         .limit(1);
       if (!existing) throw new HttpError(404, 'not_found', 'No offer was found.');
+      if (name !== undefined && name !== existing.name) assertOfferNameNotValetto(name);
       assertNotesSetting(
         inputSchema === undefined ? existing.inputSchema : inputSchema,
         notesEnabled ?? existing.notesEnabled,
@@ -504,6 +506,7 @@ export async function upsertOfferByName(
       .where(and(eq(agentOffers.agentId, agent.id), eq(agentOffers.name, name)))
       .limit(1);
     if (!existing) {
+      assertOfferNameNotValetto(name);
       const finalSchema = inputSchema ?? null;
       const finalNotes = notesEnabled ?? true;
       assertNotesSetting(finalSchema, finalNotes);
