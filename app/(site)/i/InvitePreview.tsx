@@ -35,7 +35,12 @@ type Kind = { kind: 'loading' } | { kind: 'invalid' } | { kind: 'agent'; token: 
 export function InvitePreview() {
   const [link, setLink] = useState<Kind>({ kind: 'loading' });
   useEffect(() => {
-    const token = decodeURIComponent(window.location.hash.slice(1));
+    let token = '';
+    try {
+      token = decodeURIComponent(window.location.hash.slice(1));
+    } catch {
+      // a malformed % escape falls through to the invalid-link message
+    }
     queueMicrotask(() =>
       setLink(
         token.startsWith('rsi_')

@@ -29,7 +29,13 @@ const onHash = (cb: () => void) => {
   window.addEventListener('hashchange', cb);
   return () => window.removeEventListener('hashchange', cb);
 };
-const hashToken = () => decodeURIComponent(window.location.hash.slice(1));
+const hashToken = () => {
+  try {
+    return decodeURIComponent(window.location.hash.slice(1));
+  } catch {
+    return ''; // a malformed % escape: shown as a dead link
+  }
+};
 
 /** Reads the token from the URL fragment (/c/link#rsl_…), which browsers never send to the server. */
 export function LinkFromHash() {
@@ -63,6 +69,8 @@ const joined = (name: string, pending: boolean) =>
     ? { title: `Waiting for approval from ${name}`, body: "You'll be able to send requests once they approve you. You can close this page." }
     : { title: "You're in", body: `${name}'s page isn't open for requests yet. Open this same link again soon to get started.` };
 
+const turnedOff = (name: string) => ({ title: `${name} has turned off your access.`, body: mistake(name) });
+
 const mistake = (name: string) => `If you think this is a mistake, contact ${name} directly.`;
 
 export function LinkView({ token }: { token: string }) {
@@ -83,7 +91,7 @@ export function LinkView({ token }: { token: string }) {
           if (JOBS_LIVE) router.replace(`/c/${l.bot.agent_id}`);
           else setBlocked(joined(l.bot.branding.display_name, l.next === 'wait'));
         }
-        else if (l.next === 'blocked') setBlocked({ title: `${l.bot.branding.display_name} didn't approve this request.`, body: mistake(l.bot.branding.display_name) });
+        else if (l.next === 'blocked') setBlocked(turnedOff(l.bot.branding.display_name));
         setLink(l);
       },
       (e) => setDead(e instanceof ApiError ? e.code : 'invite_not_found'),
@@ -105,7 +113,7 @@ export function LinkView({ token }: { token: string }) {
     } catch (e) {
       const code = e instanceof ApiError ? e.code : '';
       if (code === 'invite_expired' || code === 'invite_used_up' || code === 'invite_not_found') setDead(code);
-      else if (code === 'share_revoked') setBlocked({ title: `${name} didn't approve this request.`, body: mistake(name) });
+      else if (code === 'share_revoked') setBlocked(turnedOff(name));
       // Section 17.6: show the server's wording; it deliberately doesn't say why.
       else if (code === 'pending_queue_full') setBlocked({ title: (e instanceof Error && e.message) || "This business isn't accepting new customers right now. Try again later." });
       else if (code === 'plan_limit') setBlocked({ title: (e instanceof Error && e.message) || "This business can't add new customers right now." });
@@ -137,12 +145,16 @@ export function LinkView({ token }: { token: string }) {
     setBusy(true);
     try {
       await verifyCode(email.trim(), value);
-      if (link?.next === 'sign_in' || link?.next === 'accept') await accept();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
       setCode('');
       setBusy(false);
+      return;
     }
+    // Signed in now. Show the one-tap step, so if the join below fails its error sits next to a working
+    // Continue / Ask for access button instead of a code that's already used.
+    setLink((l) => (l ? { ...l, next: 'accept', viewer: { ...l.viewer, signed_in: true } } : l));
+    await accept();
   }
 
   return (

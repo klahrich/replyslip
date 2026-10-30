@@ -10,8 +10,8 @@ export function SoonGate({ children }: { children: React.ReactNode }) {
   if (JOBS_LIVE) return children;
   return (
     <PlainFrame>
-      <Notice title="You're in">
-        <p>This business's page isn't open for requests yet. Open the link the business sent you again soon to get started.</p>
+      <Notice title="Not open yet">
+        <p>This business’s page isn’t open for requests yet. Open the link the business sent you again soon to get started.</p>
       </Notice>
     </PlainFrame>
   );
