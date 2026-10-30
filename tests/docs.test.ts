@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { GET as apiDoc } from '@/app/docs/api.md/route';
 import { GET as gettingStarted } from '@/app/docs/getting-started.md/route';
 import { GET as llms } from '@/app/llms.txt/route';
@@ -89,4 +89,42 @@ describe('agent docs', () => {
       expect(rule?.disallow).toEqual(expect.arrayContaining(['/dashboard', '/api']));
     }
   });
+});
+
+describe('served docs use the request origin only when APP_ORIGIN lists it', () => {
+  const saved = process.env.APP_ORIGIN;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.APP_ORIGIN;
+    else process.env.APP_ORIGIN = saved;
+  });
+
+  function on(host: string, path: string, extra: Record<string, string> = {}) {
+    return new Request(`https://${host}${path}`, {
+      headers: { 'x-forwarded-host': host, 'x-forwarded-proto': 'https', ...extra },
+    });
+  }
+
+  const routes = [
+    ['llms.txt', llms, '/llms.txt'],
+    ['skill.md', skill, '/skill.md'],
+    ['getting-started.md', gettingStarted, '/docs/getting-started.md'],
+    ['api.md', apiDoc, '/docs/api.md'],
+  ] as const;
+
+  for (const [name, route, path] of routes) {
+    it(`${name}: listed host is echoed, unlisted host gets the canonical origin`, async () => {
+      process.env.APP_ORIGIN = 'https://replyslip.com,https://www.replyslip.com,https://valetto.tech';
+      const listed = await (await route(on('valetto.tech', path))).text();
+      expect(listed).toContain('https://valetto.tech/');
+      expect(listed).not.toContain('https://replyslip.com/skill.md');
+
+      const unlisted = await (await route(on('evil.example', path))).text();
+      expect(unlisted).not.toContain('evil.example');
+      expect(unlisted).toContain('https://replyslip.com/');
+
+      const spoofed = await (await route(on('replyslip-git-x.vercel.app', path, { host: 'valetto.tech' }))).text();
+      expect(spoofed).not.toContain('vercel.app');
+      expect(spoofed).toContain('https://replyslip.com/');
+    });
+  }
 });

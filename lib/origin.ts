@@ -43,11 +43,53 @@ export function canonicalOrigin(): string | null {
 }
 
 /**
- * Origin for absolute URLs this app hands out (invite links, MCP and docs URLs): the first APP_ORIGIN entry,
- * or the request's own origin when APP_ORIGIN is unset.
+ * Origin for absolute URLs that are shared or stored (agent invite links, register/redeem MCP and docs URLs,
+ * links in emails): the first APP_ORIGIN entry, or the request's own origin when APP_ORIGIN is unset.
  */
 export function publicOrigin(req: Request): string {
   return canonicalOrigin() ?? requestOrigin(req);
+}
+
+/**
+ * Origin for URLs rendered into a response for the current page (llms.txt, skill.md, docs/*.md): the request's
+ * own origin when it exactly equals an APP_ORIGIN entry, otherwise the first entry, so an unlisted Host or
+ * X-Forwarded-Host is never echoed. The request's own origin when APP_ORIGIN is unset.
+ */
+export function servedOrigin(req: Request): string {
+  const own = requestOrigin(req);
+  const configured = configuredOrigins();
+  if (configured.length === 0) return own;
+  return configured.includes(own) ? own : configured[0]!;
+}
+
+/** CUSTOMER_ORIGIN, trimmed with its trailing slash removed, or null when unset or blank. */
+export function configuredCustomerOrigin(raw: string | undefined = process.env.CUSTOMER_ORIGIN): string | null {
+  const value = raw?.trim().replace(/\/+$/, '');
+  return value ? value : null;
+}
+
+const warnedCustomerOrigins = new Set<string>();
+
+/**
+ * Origin for customer-facing Valetto URLs (customer invite links, /i#rsl_...): CUSTOMER_ORIGIN when set, else
+ * publicOrigin. When APP_ORIGIN is set and does not list CUSTOMER_ORIGIN, that is a misconfiguration (the link's
+ * page could not POST back): warn once per value and use publicOrigin instead of failing the request.
+ */
+export function customerOrigin(req: Request): string {
+  const customer = configuredCustomerOrigin();
+  if (!customer) return publicOrigin(req);
+  const configured = configuredOrigins();
+  if (configured.length > 0 && !configured.includes(customer)) {
+    const key = `${customer}\n${configured.join(',')}`;
+    if (!warnedCustomerOrigins.has(key)) {
+      warnedCustomerOrigins.add(key);
+      console.warn(
+        `[replyslip] CUSTOMER_ORIGIN ${customer} is not in APP_ORIGIN; customer links use ${configured[0]} instead.`,
+      );
+    }
+    return configured[0]!;
+  }
+  return customer;
 }
 
 /** Origins a cookie-authenticated POST may come from: every APP_ORIGIN entry, or the request's own origin. */
