@@ -63,11 +63,13 @@ export function isProductionDeployment(): boolean {
   return process.env.NODE_ENV === 'production';
 }
 
-let warnedUnsetInProduction = false;
+// On globalThis: the instrumentation hook and each route bundle load their own copy of this module.
+const WARNED = Symbol.for('replyslip.appOriginUnsetWarned');
+const warnState = globalThis as typeof globalThis & { [WARNED]?: boolean };
 
 /** Lets tests see the once-only warnings again. */
 export function resetOriginWarningsForTests(): void {
-  warnedUnsetInProduction = false;
+  warnState[WARNED] = false;
 }
 
 /**
@@ -82,8 +84,8 @@ export function configuredOrigins(raw: string | undefined = process.env.APP_ORIG
     .map(trimEntry)
     .filter((entry) => entry.length > 0 && entry !== 'null')
     .map((entry) => assertCanonicalOrigin('APP_ORIGIN', entry));
-  if (entries.length === 0 && isProductionDeployment() && !warnedUnsetInProduction) {
-    warnedUnsetInProduction = true;
+  if (entries.length === 0 && isProductionDeployment() && !warnState[WARNED]) {
+    warnState[WARNED] = true;
     console.warn(
       '[replyslip] WARNING: APP_ORIGIN is not set in production. The Origin check trusts the request Host and links use ' +
         'the request origin. Set APP_ORIGIN to the public origin(s), e.g. https://replyslip.com.',
