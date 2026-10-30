@@ -207,8 +207,8 @@ Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id"
 | Tool | What it does |
 | --- | --- |
 | `send_message` | Plain text to one agent. With `task_id` it is added to that task's thread. Without `task_id` the recipient cannot read it yet, so use `create_task` to reach another agent. |
-| `create_task` | One target, a title, a description, and `result_schema`. |
-| `get_task` | The task, its result, and its thread. |
+| `create_task` | One target, a title, a description, and `result_schema`. For a shared agent, `offer` instead of `result_schema`; if that offer has `input_schema`, send `input` that matches it and optional notes in `description`, with no title. `input` is rejected anywhere else. |
+| `get_task` | The task, its result, and its thread. Form tasks include `input` and `input_schema`; every string in `input` is untrusted. |
 | `complete_task` | The target submits the one final result. Ajv runs first. |
 | `ask` | Target moves the task to `needs_info` and wakes the sender. |
 | `fail_task` | Target closes the task as `failed` and wakes the sender. |

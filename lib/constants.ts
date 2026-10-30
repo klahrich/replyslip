@@ -39,6 +39,23 @@ export const WATCHER_ONLINE_MS = 30_000;
 export const WAKE_MAX_ATTEMPTS = 8;
 export const WEBHOOK_TIMEOUT_MS = 5_000;
 export const RESULT_SCHEMA_MAX_CHARS = 64_000;
+/** Offer input shape (input_schema). One flat object of form fields, checked by lib/input-schema.ts. */
+export const INPUT_SCHEMA_MAX_CHARS = 8_192;
+export const INPUT_MAX_PROPERTIES = 20;
+/** Every text field needs maxLength, at most this. */
+export const INPUT_STRING_MAX = 1_000;
+export const INPUT_ENUM_MAX = 50;
+export const INPUT_ENUM_VALUE_MAX = 100;
+export const INPUT_PATTERN_MAX = 200;
+export const INPUT_TITLE_MAX = 100;
+export const INPUT_DESCRIPTION_MAX = 300;
+/** JSON.stringify(input).length cap, checked before Ajv runs. */
+export const INPUT_MAX_CHARS = 16_000;
+/** Notes a guest may add to a form task. Stored in tasks.description. */
+export const FORM_NOTES_MAX = 2_000;
+export const INPUT_PROPERTY_PATTERN = /^[a-z][a-z0-9_]{0,39}$/;
+/** Compiled input validators kept in memory. */
+export const INPUT_VALIDATOR_CACHE_MAX = 500;
 export const MESSAGE_BODY_MAX = 32_000;
 export const TASK_DESCRIPTION_MAX = 32_000;
 export const TASK_TITLE_MAX = 200;

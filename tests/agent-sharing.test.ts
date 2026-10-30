@@ -176,8 +176,17 @@ describe('agent sharing', () => {
     const card = await mcpTool(guestKey, 'get_agent_card', { address: `@${ownerHandle}/Planner` });
     expect(card.isError).toBe(false);
     expect(card.payload.card.offers).toEqual([
-      { name: 'draft', description: 'Draft the requested page.', result_schema: offerSchema },
+      {
+        name: 'draft',
+        description: 'Draft the requested page.',
+        result_schema: offerSchema,
+        input_schema: null,
+        notes_enabled: true,
+        notes_max: null,
+      },
     ]);
+    expect(created.payload.task.input).toBeNull();
+    expect(created.payload.task.input_schema).toBeNull();
     expect(JSON.stringify(card.payload)).not.toContain('Secret');
     expect(JSON.stringify(card.payload)).not.toContain('webhook');
 
