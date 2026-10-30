@@ -128,7 +128,7 @@ export function normalizeColor(value: unknown, field: string): string | null {
 
 // Control (Cc) and format (Cf: soft hyphen, word joiner, zero-width, bidi controls, tags) characters,
 // plus line and paragraph separators (13.4).
-const FORBIDDEN_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+export const FORBIDDEN_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 /**
  * Common look-alikes folded onto Latin after NFKC (which already folds fullwidth and most compatibility
@@ -170,30 +170,38 @@ export function confusableFold(value: string): string {
   return foldChars(value).replace(/[^\p{L}\p{N}]/gu, '');
 }
 
-/**
- * The folded words of a name. Whitespace separates words; punctuation inside a word is dropped
- * ("Va-letto", "v.a.l.e.t.t.o" are one word). A run of single-letter words is joined into one
- * ("v a l e t t o"), so spaced-out spellings are caught while real word boundaries
- * ("Valet Toronto", "Chevalet Tobacco") are kept.
- */
-export function foldedWords(value: string): string[] {
-  const words = foldChars(value)
-    .split(/[\s\p{Z}]+/u)
-    .map((word) => word.replace(/[^\p{L}\p{N}]/gu, ''))
-    .filter(Boolean);
+/** Joins each run of consecutive short pieces (1 or 2 letters) into one; longer pieces stay as they are. */
+function joinShortRuns(pieces: string[]): string[] {
   const out: string[] = [];
   let run = '';
-  for (const word of words) {
-    if ([...word].length === 1) {
-      run += word;
+  for (const piece of pieces) {
+    if ([...piece].length <= 2) {
+      run += piece;
       continue;
     }
     if (run) out.push(run);
     run = '';
-    out.push(word);
+    out.push(piece);
   }
   if (run) out.push(run);
   return out;
+}
+
+/**
+ * The folded words of a name, in two views; a name is reserved if either view has "valetto" in a word.
+ * - Whitespace words with punctuation inside dropped: "Va-letto", "Va_letto", "v.a.l.e.t.t.o".
+ * - Pieces split on spaces and punctuation, with runs of 1- or 2-letter pieces joined:
+ *   "v a l e t t o", "Va le tt o", "v.a l.e t.t.o".
+ * Real word boundaries between longer words are kept ("Valet Toronto", "Chevalet Tobacco").
+ */
+export function foldedWords(value: string): string[] {
+  const folded = foldChars(value);
+  const words = folded
+    .split(/[\s\p{Z}]+/u)
+    .map((word) => word.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean);
+  const pieces = folded.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return [...words, ...joinShortRuns(pieces)];
 }
 
 // "valetto" after the same fold (i and l fold together, so the check is done on the folded copy).

@@ -135,6 +135,8 @@ const VALETTO_VARIANTS = [
   'v.a.l.e.t.t.o',
   'Shop V A L E T T O now',
   'Chevaletto Shop', // inside a word, as before
+  'v.a l.e t.t.o', // 1-2 letter pieces joined
+  'Va le tt o',
 ];
 
 describe('reserved name', () => {
@@ -155,6 +157,14 @@ describe('reserved name', () => {
     expect(looksLikeValetto('\u1D20aletto')).toBe(true); // ᴠaletto
     expect(looksLikeValetto('valett\u0585')).toBe(true); // valettօ
     for (const spaced of ['v a l e t t o', 'v.a.l.e.t.t.o', 'v-a-l-e-t-t-o']) expect(looksLikeValetto(spaced), spaced).toBe(true);
+  });
+
+  it('joins runs of 1- and 2-letter pieces', () => {
+    expect(looksLikeValetto('v.a l.e t.t.o')).toBe(true);
+    expect(looksLikeValetto('Va le tt o')).toBe(true);
+    expect(looksLikeValetto('Valet Toronto')).toBe(false);
+    expect(looksLikeValetto('Chevalet Tobacco')).toBe(false);
+    expect(looksLikeValetto('Le Valet T O')).toBe(false);
   });
 
   it('leaves ordinary names alone', () => {

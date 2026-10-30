@@ -178,6 +178,7 @@ describe('agent sharing', () => {
     expect(card.payload.card.offers).toEqual([
       {
         name: 'draft',
+        title: 'Draft',
         description: 'Draft the requested page.',
         result_schema: offerSchema,
         input_schema: null,

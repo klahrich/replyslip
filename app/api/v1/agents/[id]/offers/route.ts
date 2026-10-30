@@ -8,6 +8,8 @@ export const dynamic = 'force-dynamic';
 
 const bodySchema = z.object({
   name: z.string(),
+  // Readable job title for customers; null or "" clears it. Validated in normalizeOfferTitle.
+  title: z.string().max(1_000).nullable().optional(),
   description: z.string(),
   result_schema: z.record(z.string(), z.json()),
   input_schema: z.record(z.string(), z.json()).nullable().optional(),
@@ -30,6 +32,7 @@ export function POST(req: Request, context: { params: Promise<{ id: string }> })
     const body = parseBody(bodySchema, await readJson(req));
     const offer = await createOffer(user.workspace.id, requireUuid(id, 'agent'), {
       name: body.name,
+      title: body.title,
       description: body.description,
       resultSchema: body.result_schema,
       inputSchema: body.input_schema,

@@ -34,6 +34,7 @@ import {
 } from './constants';
 import { randomToken, sha256, tokenPrefix } from './crypto';
 import { deliveryColumns, type DeliveryInput } from './delivery';
+import { offerDisplayTitle } from './offer-title';
 import { HttpError, isUniqueViolation } from './errors';
 import { consumeRateLimit } from './rate-limit';
 import {
@@ -308,6 +309,7 @@ async function offerCards(db: Db, offerIds: string[]) {
   const rows = await db
     .select({
       name: agentOffers.name,
+      title: agentOffers.title,
       description: agentOffers.description,
       resultSchema: agentOffers.resultSchema,
       inputSchema: agentOffers.inputSchema,
@@ -318,6 +320,7 @@ async function offerCards(db: Db, offerIds: string[]) {
     .orderBy(agentOffers.name);
   return rows.map((offer) => ({
     name: offer.name,
+    title: offerDisplayTitle(offer),
     description: offer.description,
     result_schema: offer.resultSchema,
     input_schema: offer.inputSchema ?? null,
