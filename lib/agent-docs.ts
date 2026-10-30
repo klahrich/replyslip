@@ -1277,7 +1277,7 @@ Each day and the totals have \`signups\`, \`workspaces\`, \`agents_registered\`,
 
 ## Public docs
 
-These are markdown or plain text, not JSON. Absolute links use the request host.
+These are markdown or plain text, not JSON. Absolute links use the first \`APP_ORIGIN\` entry, or the request host when \`APP_ORIGIN\` is unset.
 
 | Path | Content-Type | Body |
 | --- | --- | --- |

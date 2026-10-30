@@ -1,11 +1,23 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpError } from '@/lib/errors';
-import { allowedOrigins, assertSameOrigin, canonicalOrigin, configuredOrigins, publicOrigin } from '@/lib/origin';
+import {
+  allowedOrigins,
+  assertSameOrigin,
+  canonicalOrigin,
+  configuredOrigins,
+  publicOrigin,
+  OriginConfigError,
+  resetOriginWarningsForTests,
+  validateOriginConfig,
+} from '@/lib/origin';
 
 const saved = process.env.APP_ORIGIN;
 afterEach(() => {
   if (saved === undefined) delete process.env.APP_ORIGIN;
   else process.env.APP_ORIGIN = saved;
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  resetOriginWarningsForTests();
 });
 
 function req(headers: Record<string, string> = {}, url = 'http://localhost/api/v1/c/links/x/accept'): Request {
@@ -114,5 +126,92 @@ describe('assertSameOrigin', () => {
     expect(badOrigin(req({ origin: 'http://localhost' }))).toBeNull();
     expect(badOrigin(req({ origin: 'https://replyslip.com' }))).toBe('bad_origin');
     expect(badOrigin(req())).toBeNull();
+  });
+});
+
+describe('origin config validation', () => {
+  it('drops a literal null entry, so Origin: null never passes', () => {
+    expect(configuredOrigins('null, https://replyslip.com ,null')).toEqual(['https://replyslip.com']);
+    process.env.APP_ORIGIN = 'null,https://replyslip.com';
+    expect(badOrigin(req({ origin: 'null' }))).toBe('bad_origin');
+    process.env.APP_ORIGIN = 'null';
+    expect(configuredOrigins()).toEqual([]);
+    expect(badOrigin(req({ origin: 'null' }))).toBe('bad_origin');
+  });
+
+  for (const [label, entry] of [
+    ['uppercase host', 'https://ReplySlip.com'],
+    ['default port', 'https://replyslip.com:443'],
+    ['a path', 'https://replyslip.com/app'],
+    ['missing scheme', 'replyslip.com'],
+    ['host:port without scheme', 'localhost:3000'],
+    ['a query', 'https://replyslip.com?x=1'],
+    ['garbage', 'not a url'],
+  ] as const) {
+    it(`APP_ORIGIN with ${label} fails with a clear error`, () => {
+      expect(() => configuredOrigins(`https://ok.example,${entry}`)).toThrow(OriginConfigError);
+      expect(() => configuredOrigins(entry)).toThrow(/APP_ORIGIN entry/);
+      process.env.APP_ORIGIN = entry;
+      expect(() => validateOriginConfig()).toThrow(OriginConfigError);
+    });
+  }
+
+  it('names the canonical form in the error', () => {
+    expect(() => configuredOrigins('https://ReplySlip.com:443')).toThrow('write it as "https://replyslip.com"');
+  });
+
+  it('accepts canonical origins, including a non-default port and http', () => {
+    expect(configuredOrigins('https://replyslip.com,http://localhost:3000,https://valetto.tech/')).toEqual([
+      'https://replyslip.com',
+      'http://localhost:3000',
+      'https://valetto.tech',
+    ]);
+    process.env.APP_ORIGIN = 'https://valetto.tech, https://www.valetto.tech/,https://replyslip.com';
+    expect(() => validateOriginConfig()).not.toThrow();
+  });
+});
+
+describe('APP_ORIGIN unset in production', () => {
+  function unsetWarnings(warn: { mock: { calls: unknown[][] } }) {
+    return warn.mock.calls.filter((c) => String(c[0]).includes('APP_ORIGIN is not set in production'));
+  }
+
+  it('warns once when NODE_ENV is production, and still works', () => {
+    delete process.env.APP_ORIGIN;
+    vi.stubEnv('NODE_ENV', 'production');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(publicOrigin(req())).toBe('http://localhost');
+    expect(badOrigin(req({ origin: 'http://localhost' }))).toBeNull();
+    configuredOrigins();
+    expect(unsetWarnings(warn)).toHaveLength(1);
+  });
+
+  it('warns once when VERCEL_ENV is production', () => {
+    process.env.APP_ORIGIN = ' , ';
+    vi.stubEnv('VERCEL_ENV', 'production');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    configuredOrigins();
+    configuredOrigins();
+    expect(unsetWarnings(warn)).toHaveLength(1);
+  });
+
+  it('does not warn outside production or when set', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    delete process.env.APP_ORIGIN;
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    configuredOrigins();
+    process.env.APP_ORIGIN = 'https://replyslip.com';
+    vi.stubEnv('VERCEL_ENV', 'production');
+    configuredOrigins();
+    expect(unsetWarnings(warn)).toHaveLength(0);
+  });
+
+  it('does not warn on a Vercel preview, which also runs NODE_ENV=production', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    delete process.env.APP_ORIGIN;
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    configuredOrigins();
+    expect(unsetWarnings(warn)).toHaveLength(0);
   });
 });
