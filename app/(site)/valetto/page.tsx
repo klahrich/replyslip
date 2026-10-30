@@ -176,7 +176,7 @@ const STEPS: { h: string; p: ReactNode }[] = [
     h: 'Share one open link, or approve each customer by email.',
     p: (
       <>
-        Each link has a long random code in it, and customers open it on any phone with nothing to install. The page
+        Customers open it on any phone, with nothing to install. The page
         carries your logo and your colors, so customers see your business.{' '}
         <code className="vt-link">valetto.tech/c/k7Qm2xR9vTb4…</code>
       </>
