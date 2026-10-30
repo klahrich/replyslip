@@ -3,18 +3,21 @@ import { describe, expect, it } from 'vitest';
 import nextConfig from '../next.config';
 
 // Mirrors how Next applies redirects: first rule whose source matches the path and whose `has` host regex
-// matches the Host header wins. Returns the Location (without query) or null when the request passes through.
-async function redirectFor(host: string, pathname: string): Promise<string | null> {
+// matches the Host header wins. Like Next, the incoming query string is appended to the destination.
+// Returns the Location or null when the request passes through.
+async function redirectFor(host: string, url: string): Promise<string | null> {
+  const [pathname, query] = url.split('?');
   const rules = (await nextConfig.redirects?.()) ?? [];
   for (const rule of rules) {
     const hostOk = (rule.has ?? []).every((h) => h.type === 'host' && new RegExp(`^${h.value}$`).test(host));
     if (!hostOk) continue;
     const params = getPathMatch(rule.source, { removeUnnamedParams: true, strict: true })(pathname);
     if (!params) continue;
-    return rule.destination.replace(/:(\w+)\*?/g, (_, name: string) => {
+    const location = rule.destination.replace(/:(\w+)\*?/g, (_, name: string) => {
       const v = params[name];
       return Array.isArray(v) ? v.join('/') : (v ?? '');
     });
+    return query ? `${location}?${query}` : location;
   }
   return null;
 }
@@ -67,6 +70,14 @@ describe('replyslip.com redirects', () => {
       for (const path of NEVER_REDIRECTED) expect(await redirectFor(host, path), path).toBeNull();
     });
   }
+});
+
+describe('query strings', () => {
+  it('are preserved on the replyslip.com and valetto.tech redirects', async () => {
+    expect(await redirectFor('replyslip.com', '/?ref=x')).toBe('https://valetto.tech/?ref=x');
+    expect(await redirectFor('www.replyslip.com', '/how-it-works?ref=x')).toBe('https://valetto.tech/?ref=x');
+    expect(await redirectFor('valetto.tech', '/sharing?ref=x')).toBe('https://valetto.tech/?ref=x');
+  });
 });
 
 describe('valetto.tech redirects', () => {
