@@ -743,6 +743,9 @@ export async function answerCustomerRequest(user: SessionUser, taskId: string, a
   const db = getDb();
   const workspaceId = workspaceOf(user);
   const task = await customerTask(db, workspaceId, taskId);
+  // A revoked bot is gone: its requests stay readable (R7) but cannot be answered or wake it.
+  const [bot] = await db.select({ revokedAt: agents.revokedAt }).from(agents).where(eq(agents.id, task.toAgentId)).limit(1);
+  if (!bot || bot.revokedAt) throw new HttpError(404, 'not_found', REQUEST_NOT_FOUND);
   const [share] = await db
     .select({ status: agentShares.status })
     .from(agentShares)
@@ -760,6 +763,9 @@ export async function answerCustomerRequest(user: SessionUser, taskId: string, a
   } catch (err) {
     if (err instanceof HttpError && err.code === 'validation_error') {
       throw new HttpError(400, 'validation_error', 'Some fields need fixing.', err.details);
+    }
+    if (err instanceof HttpError && err.code === 'not_found') {
+      throw new HttpError(404, 'not_found', REQUEST_NOT_FOUND);
     }
     if (err instanceof HttpError && err.code === 'task_not_waiting') {
       throw new HttpError(409, 'task_not_waiting', 'This request is not waiting for an answer.');

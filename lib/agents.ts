@@ -15,6 +15,7 @@ import { applyDeliveryUpdate, deliveryColumns, publicDelivery, type DeliveryInpu
 import { agentCountForUpdate, loadFirstAgentNotice, queueFirstAgentAlert } from './first-agent-alert';
 import { HttpError, isUniqueViolation } from './errors';
 import { deleteLogoQuietly } from './logo-store';
+import { deliverWakeIds, failGuestTasks } from './sharing';
 import { clientIp } from './origin';
 import { assertWithinLimit } from './plans';
 import { consumeRateLimit } from './rate-limit';
@@ -157,7 +158,11 @@ export async function revokeAgent(workspaceId: string, agentId: string): Promise
   const agent = await getAgent(workspaceId, agentId);
   if (agent.revokedAt) return agent;
   const now = new Date();
-  const logoPath = await db.transaction(async (tx) => {
+  const written = await db.transaction(async (tx) => {
+    // Agent first, then its tasks: the same lock order as answerTask and the task tools.
+    await tx.execute(sql`select id from agents where id = ${agent.id} and workspace_id = ${workspaceId} for update`);
+    const [fresh] = await tx.select().from(agents).where(eq(agents.id, agent.id)).limit(1);
+    if (!fresh || fresh.revokedAt) return { logoPath: null, wakeIds: [] as string[] };
     await tx.update(agents).set({ revokedAt: now }).where(eq(agents.id, agent.id));
     await tx
       .update(agentKeys)
@@ -168,9 +173,12 @@ export async function revokeAgent(workspaceId: string, agentId: string): Promise
       .delete(agentBranding)
       .where(eq(agentBranding.agentId, agent.id))
       .returning({ logoBlobPath: agentBranding.logoBlobPath });
-    return branding?.logoBlobPath ?? null;
+    // Open guest and customer requests to this agent fail as declined_by_owner, and their senders are woken.
+    const closed = await failGuestTasks(tx, fresh, null);
+    return { logoPath: branding?.logoBlobPath ?? null, wakeIds: closed.wakeIds };
   });
-  await deleteLogoQuietly(logoPath);
+  await deliverWakeIds(written.wakeIds);
+  await deleteLogoQuietly(written.logoPath);
   return { ...agent, revokedAt: now };
 }
 

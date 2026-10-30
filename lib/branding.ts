@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import sharp, { type Metadata, type OutputInfo } from 'sharp';
 import { getDb, type Db } from '@/db';
-import { agentBranding, type AgentBrandingRow } from '@/db/schema';
+import { agentBranding, agents, type AgentBrandingRow } from '@/db/schema';
 import {
   BRANDING_LOGO_MAX_BYTES,
   BRANDING_LOGO_MAX_PX,
@@ -14,7 +14,7 @@ import {
 import { normalizeColor, normalizeDisplayName, ownerBranding, ownerDisplayName } from './customer-branding';
 import { HttpError } from './errors';
 import { deleteLogoQuietly, logoStore } from './logo-store';
-import { consumeKeyedRateLimit } from './rate-limit';
+import { consumeKeyedRateLimit, refundKeyedRateLimit } from './rate-limit';
 import { lockOwnerAgent } from './sharing';
 
 type ImageType = 'png' | 'jpeg' | 'webp';
@@ -36,12 +36,16 @@ async function rowFor(db: Db, agentId: string): Promise<AgentBrandingRow | null>
   return row ?? null;
 }
 
+/** A plain read: no row locks. */
 export async function getOwnerBranding(workspaceId: string, agentId: string) {
   const db = getDb();
-  return db.transaction(async (tx) => {
-    const agent = await lockOwnerAgent(tx, workspaceId, agentId);
-    return present(tx, agent, await rowFor(tx, agent.id));
-  });
+  const [agent] = await db
+    .select()
+    .from(agents)
+    .where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId)))
+    .limit(1);
+  if (!agent || agent.revokedAt || agent.role !== 'agent') throw new HttpError(404, 'not_found', 'No agent was found.');
+  return present(db, agent, await rowFor(db, agent.id));
 }
 
 export type BrandingUpdate = {
@@ -184,7 +188,9 @@ export async function uploadOwnerLogo(
   read: (maxBytes: number) => Promise<{ bytes: Buffer; contentType: string }>,
 ) {
   const db = getDb();
-  await db.transaction(async (tx) => {
+  // The upload is counted up front so parallel uploads cannot all slip under the limit, then refunded
+  // if it never reaches storage (too large, wrong type, bad image, storage down): only real uploads count.
+  const rateKey = await db.transaction(async (tx) => {
     const agent = await lockOwnerAgent(tx, workspaceId, agentId);
     const limit = await consumeKeyedRateLimit(tx, {
       kind: BRANDING_LOGO_RATE_KIND,
@@ -197,10 +203,18 @@ export async function uploadOwnerLogo(
         retry_after_seconds: limit.retryAfterSeconds,
       });
     }
+    return agent.workspaceId;
   });
-  const { bytes, contentType } = await read(BRANDING_LOGO_MAX_BYTES);
-  const logo = await processLogo(bytes, contentType);
-  const blob = await logoStore().put(`branding/${agentId}/${logo.sha256}.webp`, logo.webp);
+  let logo: ProcessedLogo;
+  let blob: { url: string; pathname: string };
+  try {
+    const { bytes, contentType } = await read(BRANDING_LOGO_MAX_BYTES);
+    logo = await processLogo(bytes, contentType);
+    blob = await logoStore().put(`branding/${agentId}/${logo.sha256}.webp`, logo.webp);
+  } catch (err) {
+    await refundKeyedRateLimit(db, { kind: BRANDING_LOGO_RATE_KIND, key: rateKey });
+    throw err;
+  }
   let written: { result: Awaited<ReturnType<typeof present>>; oldPath: string | null };
   try {
     written = await db.transaction(async (tx) => {

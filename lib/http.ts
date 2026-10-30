@@ -78,12 +78,14 @@ export function weakEtag(body: unknown): string {
   return `W/"${createHash('sha256').update(JSON.stringify(body)).digest('base64url').slice(0, 27)}"`;
 }
 
+/** Weak comparison per RFC 9110. `*` is not honored: these are JSON reads, and `*` would pin a stale 304. */
 function etagMatches(header: string | null, etag: string): boolean {
   if (!header) return false;
+  const bare = etag.replace(/^W\//, '');
   return header
     .split(',')
     .map((part) => part.trim())
-    .some((part) => part === '*' || part === etag || `W/${part}` === etag || part.replace(/^W\//, '') === etag.replace(/^W\//, ''));
+    .some((part) => part !== '*' && part.replace(/^W\//, '') === bare);
 }
 
 /** 200 with an ETag, or 304 with no body when If-None-Match already has it (15.9). */

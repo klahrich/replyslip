@@ -40,4 +40,6 @@ CREATE INDEX "task_answers_task_idx" ON "task_answers" USING btree ("task_id","a
 --> statement-breakpoint
 ALTER TABLE "wakes" DROP CONSTRAINT "wakes_reason_check";
 --> statement-breakpoint
-ALTER TABLE "wakes" ADD CONSTRAINT "wakes_reason_check" CHECK ("reason" in ('message', 'task', 'result', 'question', 'failure', 'test', 'answer'));
+ALTER TABLE "wakes" ADD CONSTRAINT "wakes_reason_check" CHECK ("reason" in ('message', 'task', 'result', 'question', 'failure', 'test', 'answer')) NOT VALID;
+--> statement-breakpoint
+ALTER TABLE "wakes" VALIDATE CONSTRAINT "wakes_reason_check";

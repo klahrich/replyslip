@@ -11,7 +11,7 @@ import { GET as resolveLink } from '@/app/api/v1/c/links/[token]/route';
 import { getDb } from '@/db';
 import { agentBranding, rateEvents } from '@/db/schema';
 import { BRANDING_LOGO_RATE_KIND, BRANDING_LOGO_UPLOADS_PER_HOUR } from '@/lib/constants';
-import { contrast, foregroundFor, luminance, onWhiteOk, serializeBranding } from '@/lib/customer-branding';
+import { confusableFold, contrast, foregroundFor, looksLikeValetto, luminance, onWhiteOk, serializeBranding } from '@/lib/customer-branding';
 import { setLogoStoreForTests, type LogoStore } from '@/lib/logo-store';
 import { getAgentCard } from '@/lib/sharing';
 import { approvedCustomer, createLink, ORIGIN, owner, senderOf, type Owner } from './customer-fixtures';
@@ -102,6 +102,50 @@ describe('branding colors', () => {
   });
 });
 
+const VALETTO_VARIANTS = [
+  'Valetto',
+  'VALETTO',
+  'Va\u00ADletto', // soft hyphen
+  'Val\u2060etto', // word joiner
+  'Vale\u200Dtto', // zero-width joiner
+  'V\u0430l\u0435tt\u043E', // Cyrillic а е о
+  '\uFF36\uFF21\uFF2C\uFF25\uFF34\uFF34\uFF2F', // fullwidth ＶＡＬＥＴＴＯ
+  '\uFF56alett\uFF4F', // mixed fullwidth
+  '\u03BDal\u03B5tt\u03BF', // Greek ν ε ο
+  'Va1etto',
+  'VaIetto', // capital I as l
+  'V4l3tt0',
+  'Valett0',
+  'Vàlëttó', // accents
+  'Va\u0301letto', // combining mark
+  'V a l e t t o',
+  'Va-letto',
+  'Va.l.e.t.t.o',
+  'Va_letto Pro',
+  'My valetto shop',
+  'VaLeT\u0442O', // Cyrillic т
+  '\u24CB\u24D0\u24DB\u24D4\u24E3\u24E3\u24DE', // circled letters
+  '\uD835\uDC15aletto', // mathematical bold V
+];
+
+describe('reserved name', () => {
+  it('folds look-alikes to plain ASCII', () => {
+    expect(confusableFold('V\u0430l\u0435tt\u043E')).toBe('valetto');
+    expect(confusableFold('\uFF36\uFF21\uFF2C\uFF25\uFF34\uFF34\uFF2F')).toBe('valetto');
+    expect(confusableFold('Va\u00ADletto')).toBe('valetto');
+  });
+
+  it('spots every Valetto variant', () => {
+    for (const name of VALETTO_VARIANTS) expect(looksLikeValetto(name), JSON.stringify(name)).toBe(true);
+  });
+
+  it('leaves ordinary names alone', () => {
+    for (const name of ['Acme Tables', 'Valley Toys', 'Violet', 'Let it go', 'Velvet Tot', 'Wallet Co', 'Palette', 'Valencia', 'Vale Totem', 'Valet Services']) {
+      expect(looksLikeValetto(name), name).toBe(false);
+    }
+  });
+});
+
 describe('PUT /api/v1/agents/:id/branding', () => {
   it('saves, normalizes, falls back, and resets', async () => {
     const o = await owner();
@@ -141,6 +185,17 @@ describe('PUT /api/v1/agents/:id/branding', () => {
       expect(res.status, JSON.stringify(display_name)).toBe(400);
       expect(res.data.error.code).toBe('invalid_display_name');
     }
+    for (const display_name of ['Acme\u00ADTables', 'Acme\u2060Tables', 'Acme\uFEFF', 'A\u200Ccme', 'A\u061Ccme', '\u2066Acme\u2069']) {
+      const res = await putBranding(o, { display_name });
+      expect(res.status, JSON.stringify(display_name)).toBe(400);
+      expect(res.data.error.code).toBe('invalid_display_name');
+    }
+    for (const display_name of VALETTO_VARIANTS) {
+      const res = await putBranding(o, { display_name });
+      expect(res.status, JSON.stringify(display_name)).toBe(400);
+      expect(res.data.error.code).toBe('invalid_display_name');
+    }
+    expect((await putBranding(o, { display_name: 'Vale Totem' })).status).toBe(200);
     expect((await putBranding(o, { display_name: 'é'.repeat(60) })).status).toBe(200);
     expect((await putBranding(o, { logo_url: 'https://evil.example/x.png' })).status).toBe(400);
   });
@@ -248,6 +303,35 @@ describe('PUT /api/v1/agents/:id/branding/logo', () => {
     const res = await putLogo(o, await png(100, 100), 'image/png');
     expect(res.status).toBe(429);
     expect(res.data.error.code).toBe('rate_limited');
+  });
+
+  it('counts only uploads that reach storage against the rate limit', async () => {
+    const o = await owner();
+    const me = await signIn(o.email);
+    const count = async () =>
+      (await getDb().select().from(rateEvents).where(eq(rateEvents.email, me.workspace.id))).filter(
+        (row) => row.kind === BRANDING_LOGO_RATE_KIND,
+      ).length;
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    const big = Buffer.concat([await png(100, 100), Buffer.alloc(600 * 1024)]);
+    for (let i = 0; i < BRANDING_LOGO_UPLOADS_PER_HOUR + 5; i++) {
+      const res = await putLogo(o, i % 3 === 0 ? big : i % 3 === 1 ? svg : await png(10, 10), 'image/png');
+      expect([400, 413, 415]).toContain(res.status);
+    }
+    expect(await count()).toBe(0);
+    const ok = await putLogo(o, await png(100, 100), 'image/png');
+    expect(ok.status, JSON.stringify(ok.data)).toBe(200);
+    expect(await count()).toBe(1);
+
+    // A storage failure is refunded too.
+    const realPut = store.put;
+    store.put = async () => {
+      throw new Error('blob down');
+    };
+    const down = await putLogo(o, await png(100, 100), 'image/png');
+    expect(down.status).toBeGreaterThanOrEqual(500);
+    store.put = realPut;
+    expect(await count()).toBe(1);
   });
 
   it('commits the new logo even when deleting the old blob fails', async () => {

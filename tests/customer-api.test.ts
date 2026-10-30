@@ -9,6 +9,7 @@ import { GET as listRequestsRoute, POST as createRequestRoute } from '@/app/api/
 import { GET as getRequestRoute } from '@/app/api/v1/c/requests/[task_id]/route';
 import { POST as answerRequestRoute } from '@/app/api/v1/c/requests/[task_id]/answer/route';
 import { POST as agentAnswerRoute } from '@/app/api/v1/tasks/[id]/answer/route';
+import { POST as revokeAgentRoute } from '@/app/api/v1/agents/[id]/revoke/route';
 import { getDb } from '@/db';
 import { agents, taskAnswers, tasks, wakes } from '@/db/schema';
 import { RATE_LIMITS } from '@/lib/constants';
@@ -22,6 +23,7 @@ import {
   quoteForm,
   quoteResult,
   revokeCustomer,
+  senderOf,
   shareIdOf,
   validInput,
   type Customer,
@@ -165,6 +167,11 @@ describe('R4 GET /api/v1/c/bots/:agent_id', () => {
     expect(cached.status).toBe(304);
     expect(cached.text).toBe('');
     expectCustomerHeaders(cached.res, true);
+    expect((await getBot(customer, o.agentId, { 'if-none-match': etag.slice(2) })).status).toBe(304);
+    expect((await getBot(customer, o.agentId, { 'if-none-match': `"nope", ${etag}` })).status).toBe(304);
+    const star = await getBot(customer, o.agentId, { 'if-none-match': '*' });
+    expect(star.status).toBe(200);
+    expect(star.data.bot).toBeTruthy();
     await quote(o, customer);
     const changed = await getBot(customer, o.agentId, { 'if-none-match': etag });
     expect(changed.status).toBe(200);
@@ -322,6 +329,27 @@ describe('R5 POST /api/v1/c/bots/:agent_id/requests', () => {
     const revoked = await quote(o, customer);
     expect(revoked.status).toBe(403);
     expect(revoked.data.error.code).toBe('share_revoked');
+  });
+
+  it('replays a client_request_id on the same bot whatever the body says', async () => {
+    const o = await owner();
+    const customer = await approvedCustomer(o);
+    const id = randomUUID();
+    const first = await createRequest(customer, o.agentId, { offer: 'draft', notes: 'first', client_request_id: id });
+    expect(first.status).toBe(201);
+    for (const body of [
+      { offer: 'quote', input: validInput, client_request_id: id },
+      { offer: 'draft', notes: 'something else entirely', client_request_id: id },
+      { offer: 'no_such_job', client_request_id: id },
+      { offer: 'quote', input: { wood: 'plastic' }, client_request_id: id },
+    ]) {
+      const again = await createRequest(customer, o.agentId, body);
+      expect(again.status, JSON.stringify(body)).toBe(200);
+      expect(again.data.request.id).toBe(first.data.request.id);
+      expect(again.data.request.offer).toBe('draft');
+    }
+    const rows = await getDb().select().from(tasks).where(eq(tasks.clientRequestId, id));
+    expect(rows).toHaveLength(1);
   });
 
   it('rejects a client_request_id reused on another bot', async () => {
@@ -541,6 +569,89 @@ describe('R8 POST /api/v1/c/requests/:task_id/answer', () => {
   });
 });
 
+const revokeAgent = (o: Owner) =>
+  call(revokeAgentRoute, `http://localhost/api/v1/agents/${o.agentId}/revoke`, {
+    method: 'POST',
+    cookie: o.cookie,
+    params: { id: o.agentId },
+    body: {},
+    headers: ORIGIN,
+  });
+
+describe('revoking a bot', () => {
+  it('fails its open and waiting customer requests and wakes the senders', async () => {
+    const o = await owner();
+    const customer = await approvedCustomer(o);
+    const open = await directRequest(o, customer, 'one');
+    const waiting = await directRequest(o, customer, 'two');
+    await mcpTool(o.agentKey, 'ask', { id: waiting.id, question: 'Q?' });
+    const done = await directRequest(o, customer, 'three');
+    await mcpTool(o.agentKey, 'complete_task', { id: done.id, result: { headline: 'Done' } });
+
+    const res = await revokeAgent(o);
+    expect(res.status, res.text).toBe(200);
+
+    const rows = await getDb().select().from(tasks).where(eq(tasks.toAgentId, o.agentId));
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.get(open.id)!.status).toBe('failed');
+    expect(byId.get(waiting.id)!.status).toBe('failed');
+    expect(byId.get(done.id)!.status).toBe('done');
+    for (const id of [open.id, waiting.id]) {
+      const seen = await getRequest(customer, id);
+      expect(seen.status).toBe(200);
+      expect(seen.data.request).toMatchObject({ status: 'failed', fail_code: 'declined_by_owner', question: null });
+      const failureWakes = await getDb()
+        .select()
+        .from(wakes)
+        .where(and(eq(wakes.taskId, id), eq(wakes.reason, 'failure')));
+      const sender = await senderOf(customer);
+      expect(failureWakes.every((w) => w.agentId === sender.id)).toBe(true);
+    }
+    // Revoking twice is a no-op, not an error.
+    expect((await revokeAgent(o)).status).toBeLessThan(500);
+  });
+
+  it('404s R8 for a revoked bot even if the request is still waiting', async () => {
+    const o = await owner();
+    const customer = await approvedCustomer(o);
+    const task = await directRequest(o, customer);
+    await mcpTool(o.agentKey, 'ask', { id: task.id, question: 'Q?' });
+    // Revoked without the revoke path, so the task stays needs_info: the answer path itself must refuse.
+    await getDb().update(agents).set({ revokedAt: new Date() }).where(eq(agents.id, o.agentId));
+    const res = await answerRequest(customer, task.id, { answer: 'A' });
+    expect(res.status, res.text).toBe(404);
+    expect(res.data.error.code).toBe('not_found');
+    const [row] = await getDb().select().from(tasks).where(eq(tasks.id, task.id));
+    expect(row!.status).toBe('needs_info');
+    expect(await getDb().select().from(taskAnswers).where(eq(taskAnswers.taskId, task.id))).toEqual([]);
+  });
+
+  it('404s R8 after a real revoke', async () => {
+    const o = await owner();
+    const customer = await approvedCustomer(o);
+    const task = await directRequest(o, customer);
+    await mcpTool(o.agentKey, 'ask', { id: task.id, question: 'Q?' });
+    expect((await revokeAgent(o)).status).toBe(200);
+    const res = await answerRequest(customer, task.id, { answer: 'A' });
+    expect(res.status).toBe(404);
+    expect(res.data.error.code).toBe('not_found');
+  });
+
+  it('runs revoke and a concurrent answer without deadlocking (agent locked before task)', async () => {
+    for (let round = 0; round < 5; round++) {
+      const o = await owner();
+      const customer = await approvedCustomer(o);
+      const task = await directRequest(o, customer);
+      await mcpTool(o.agentKey, 'ask', { id: task.id, question: 'Q?' });
+      const [answer, revoke] = await Promise.all([answerRequest(customer, task.id, { answer: 'A' }), revokeAgent(o)]);
+      expect(revoke.status, revoke.text).toBe(200);
+      expect([200, 404], answer.text).toContain(answer.status);
+      const [row] = await getDb().select().from(tasks).where(eq(tasks.id, task.id));
+      expect(row!.status).toBe('failed');
+    }
+  });
+});
+
 describe('approved after pending', () => {
   it('lets a pending customer request once the owner approves', async () => {
     const o = await owner();
@@ -595,6 +706,35 @@ describe('answer_task for agent senders', () => {
     expect(noKey.status).toBe(401);
     const got = await mcpTool(fromKey, 'get_task', { id });
     expect(got.payload.answers.map((a: any) => a.answer)).toEqual(['The blue one.', 'Large.']);
+  });
+
+  it('refuses MCP and REST answers when the target agent is revoked', async () => {
+    const session = await signIn();
+    const from = await createAgent(session.cookie, 'Asker');
+    const to = await createAgent(session.cookie, 'Worker');
+    const fromKey = await createKey(session.cookie, from.id);
+    const toKey = await createKey(session.cookie, to.id);
+    const created = await mcpTool(fromKey, 'create_task', {
+      to: 'Worker',
+      title: 'Help',
+      description: 'Do it.',
+      result_schema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+    });
+    const id = created.payload.task.id;
+    await mcpTool(toKey, 'ask', { id, question: 'Which one?' });
+    await getDb().update(agents).set({ revokedAt: new Date() }).where(eq(agents.id, to.id));
+    const viaMcp = await mcpTool(fromKey, 'answer_task', { id, answer: 'Blue.' });
+    expect(viaMcp.isError).toBe(true);
+    expect(viaMcp.text).toContain('not_found');
+    const viaRest = await call(agentAnswerRoute, `http://localhost/api/v1/tasks/${id}/answer`, {
+      bearer: fromKey,
+      params: { id },
+      body: { answer: 'Blue.' },
+    });
+    expect(viaRest.status).toBe(404);
+    expect(viaRest.data.error.code).toBe('not_found');
+    const [row] = await getDb().select().from(tasks).where(eq(tasks.id, id));
+    expect(row!.status).toBe('needs_info');
   });
 });
 

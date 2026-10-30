@@ -126,22 +126,57 @@ export function normalizeColor(value: unknown, field: string): string | null {
   return value.toUpperCase();
 }
 
-// Control characters, bidi overrides and isolates, and zero-width characters (13.4).
-const FORBIDDEN_NAME_CHARS = /[\p{Cc}\u202A-\u202E\u2066-\u2069\u200B-\u200D\uFEFF]/u;
+// Control (Cc) and format (Cf: soft hyphen, word joiner, zero-width, bidi controls, tags) characters,
+// plus line and paragraph separators (13.4).
+const FORBIDDEN_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/**
+ * Common look-alikes folded onto Latin after NFKC (which already folds fullwidth and most compatibility
+ * forms). Enough to catch "Valetto" spelled with Cyrillic, Greek, or digits; not a full UTS #39 table.
+ */
+const CONFUSABLES: Record<string, string> = {
+  // Cyrillic
+  а: 'a', в: 'b', с: 'c', е: 'e', ё: 'e', һ: 'h', і: 'l', ї: 'l', ј: 'j', к: 'k', ӏ: 'l', м: 'm', н: 'h',
+  о: 'o', р: 'p', ԛ: 'q', ѕ: 's', т: 't', у: 'y', ѵ: 'v', ԝ: 'w', х: 'x', ү: 'y', л: 'l', п: 'n', г: 'r',
+  // Greek
+  α: 'a', β: 'b', ε: 'e', η: 'n', ι: 'l', κ: 'k', ν: 'v', ο: 'o', ρ: 'p', τ: 't', υ: 'u', χ: 'x', λ: 'l',
+  ϲ: 'c', ϳ: 'j', ω: 'w',
+  // Digits and symbols
+  '0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', $: 's', '|': 'l', '!': 'l',
+  // Latin look-alikes
+  i: 'l', ı: 'l', ł: 'l', ŀ: 'l', ƚ: 'l', ɩ: 'l', ʋ: 'v', ʌ: 'v', ŧ: 't', ø: 'o', đ: 'd',
+};
+
+/** NFKC, lowercase, combining marks stripped, look-alikes folded, everything but letters dropped. */
+export function confusableFold(value: string): string {
+  const base = value.normalize('NFKC').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  let out = '';
+  for (const ch of base) out += CONFUSABLES[ch] ?? ch;
+  return out.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+// "valetto" after the same fold (i and l fold together, so the check is done on the folded copy).
+const RESERVED_FOLDED = confusableFold('valetto');
+
+/** True when a name spells "Valetto" through spacing, punctuation, format characters, or look-alikes. */
+export function looksLikeValetto(value: string): boolean {
+  return confusableFold(value).includes(RESERVED_FOLDED);
+}
 
 export function normalizeDisplayName(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== 'string') {
     throw new HttpError(400, 'invalid_display_name', 'display_name must be text.');
   }
+  // Checked before trim(): trim() quietly drops U+FEFF and would hide it.
+  if (FORBIDDEN_NAME_CHARS.test(value)) {
+    throw new HttpError(400, 'invalid_display_name', 'display_name has characters that are not allowed.');
+  }
   const name = value.normalize('NFC').trim();
   if (name.length < 1 || [...name].length > DISPLAY_NAME_MAX) {
     throw new HttpError(400, 'invalid_display_name', `display_name must be 1-${DISPLAY_NAME_MAX} characters.`);
   }
-  if (FORBIDDEN_NAME_CHARS.test(name)) {
-    throw new HttpError(400, 'invalid_display_name', 'display_name has characters that are not allowed.');
-  }
-  if (/valetto/i.test(name)) {
+  if (looksLikeValetto(name)) {
     throw new HttpError(400, 'invalid_display_name', 'display_name cannot contain "Valetto".');
   }
   return name;

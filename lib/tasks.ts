@@ -378,6 +378,20 @@ export async function taskAnswersFor(db: Db, taskId: string): Promise<TaskAnswer
 }
 
 /**
+ * FOR SHARE on the task's target agent, taken before any task lock. A revoked target is 404: its
+ * tasks are closed and nothing may queue a wake for it.
+ */
+async function lockTargetAgentShared(tx: Db, agentId: string): Promise<void> {
+  const [agent] = await tx
+    .select({ revokedAt: agents.revokedAt })
+    .from(agents)
+    .where(eq(agents.id, agentId))
+    .for('share')
+    .limit(1);
+  if (!agent || agent.revokedAt) throw new HttpError(404, 'not_found', 'No task was found.');
+}
+
+/**
  * The sender answers a needs_info question (15.8). Works across workspaces, where task-thread
  * messages do not. Records the round in task_answers, reopens the task, and wakes the target.
  * It does not use the daily cap: it is the same request.
@@ -390,7 +404,13 @@ export async function answerTask(caller: AgentPrincipal, taskId: string, answer:
     });
   }
   const written = await getDb().transaction(async (tx) => {
-    await tx.execute(sql`select id from tasks where id = ${taskId} for update`);
+    // Lock order everywhere: agent, then task (revokeAgent takes the agent FOR UPDATE, then fails its tasks).
+    const seen = await loadTask(tx, caller.workspaceId, taskId);
+    assertParticipant(seen, caller);
+    await lockTargetAgentShared(tx, seen.toAgentId);
+    await tx.execute(
+      sql`select id from tasks where id = ${taskId} and (workspace_id = ${caller.workspaceId} or from_workspace_id = ${caller.workspaceId}) for update`,
+    );
     const task = await loadTask(tx, caller.workspaceId, taskId);
     assertParticipant(task, caller);
     if (task.fromAgentId !== caller.agentId) {
@@ -475,6 +495,8 @@ async function closeOrQuestion(
   },
 ) {
   const written = await getDb().transaction(async (tx) => {
+    // Same lock order as answerTask and revokeAgent: the target agent (the caller), then the task.
+    await lockTargetAgentShared(tx, caller.agentId);
     await tx.execute(sql`select id from tasks where id = ${taskId} and workspace_id = ${caller.workspaceId} for update`);
     const task = await loadTask(tx, caller.workspaceId, taskId);
     assertTarget(task, caller);
