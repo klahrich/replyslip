@@ -145,7 +145,7 @@
   .vt-hero h1 .vt-dim .w{animation-delay:calc(var(--i) * 55ms + 350ms)}
 }
 
-/* the valet key band: three big lines snap in once, one after another */
+/* the "what customers get" band: three big lines snap in once, one after another */
 .vt-key{margin-top:clamp(80px,10vw,128px);background:var(--field);padding:clamp(72px,10vw,128px) var(--m);text-align:center;
   background-image:radial-gradient(60% 120% at 50% 0%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 70%)}
 .vt-key p{margin-inline:auto;max-width:20em;font-size:clamp(1.75rem,1.1rem + 2.6vw,3.25rem);line-height:1.12;letter-spacing:-.03em;font-weight:600}
@@ -195,8 +195,6 @@
 .vt-log li{padding:6px}
 .vt-log li:first-child{background:var(--paper-2)}
 .vt-ok{color:var(--ok);font-weight:600}.vt-run{color:var(--info);font-weight:600}
-.vt-limit{margin-top:28px;padding:18px 22px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--surface) 70%,transparent);color:var(--muted);max-width:44em;line-height:1.55}
-.vt-limit b{color:var(--ink);font-weight:600}
 @media (max-width:719px){.vt-control{grid-template-columns:1fr;gap:6px}.vt-cell.wide-cell{grid-template-columns:1fr;gap:0}.vt-cell.wide-cell .frag{order:0;margin-bottom:20px}.vt-cell:nth-child(n){background:var(--surface)}.vt-cell:nth-child(even){background:#22332a}}
 
 /* jobs */

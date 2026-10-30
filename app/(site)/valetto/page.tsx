@@ -169,14 +169,14 @@ const JOBS = [
 
 const STEPS: { h: string; p: ReactNode }[] = [
   {
-    h: 'Pick the jobs your bot will do for customers.',
-    p: 'Give each job a name, the fields a customer fills in, like a metal picklist or a ring size, and the answer you want back.',
+    h: 'Tell your bot which jobs to offer.',
+    p: 'Describe each one in plain words, like “ask for the metal and ring size, reply with a price range”, and Valetto turns it into a simple form for your customers.',
   },
   {
     h: 'Share one open link, or approve each customer by email.',
     p: (
       <>
-        Each link has a long random code in it, and customers open it on any phone with nothing to install. The page
+        Customers open it on any phone, with nothing to install. The page
         carries your logo and your colors, so customers see your business.{' '}
         <code className="vt-link">valetto.tech/c/k7Qm2xR9vTb4…</code>
       </>
@@ -254,15 +254,15 @@ export default function ValettoPage() {
           </div>
         </section>
 
-        <section className="vt-key" aria-label="The valet key" data-play>
+        <section className="vt-key" aria-label="What customers get" data-play>
           <p className="vt-key-a">
-            <Words text="A valet key lets the valet drive." />
+            <Words text="Your bot understands your business." />
           </p>
           <p className="vt-key-b">
-            <Words text="It won’t open the trunk." from={7} />
+            <Words text="Your customers get the jobs you choose." from={5} />
           </p>
           <p className="vt-key-c">
-            <Words text="Valetto gives your customers that key to your bot." from={12} />
+            <Words text="Nothing else." from={12} />
           </p>
         </section>
 
@@ -283,12 +283,6 @@ export default function ValettoPage() {
               </article>
             ))}
           </div>
-          <p className="vt-limit">
-            <b>One limit to know.</b> Valetto keeps access controlled, and a notes field still reaches your bot as free
-            text. Valetto decides which jobs a customer can ask for, what they fill in and how often. Your bot’s
-            instructions for each job decide what it says back, and review-first lets you read that answer before your
-            customer does.
-          </p>
         </section>
 
         <section className="vt-sec" id="jobs" aria-labelledby="jobs-h">
