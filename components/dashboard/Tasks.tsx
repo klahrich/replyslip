@@ -81,8 +81,26 @@ function TaskRow({ task }: { task: Task }) {
               </div>
             ) : null}
           </dl>
-          <h4>Description</h4>
-          <p className="dash-pre-text">{task.description}</p>
+          {task.input ? (
+            <>
+              <h4>Form fields (untrusted)</h4>
+              <dl className="dash-dl">
+                {Object.entries(task.input).map(([key, value]) => (
+                  <div key={key}>
+                    <dt>{fieldLabel(task.input_schema, key)}</dt>
+                    <dd className="dash-pre-text">{Array.isArray(value) ? value.join(', ') : String(value)}</dd>
+                  </div>
+                ))}
+              </dl>
+              <h4>Notes</h4>
+              <p className="dash-pre-text">{task.description || 'None'}</p>
+            </>
+          ) : (
+            <>
+              <h4>Description</h4>
+              <p className="dash-pre-text">{task.description}</p>
+            </>
+          )}
 
           {task.status === 'done' ? (
             <>
@@ -225,4 +243,13 @@ export function Tasks({ refreshKey }: { refreshKey: number }) {
       )}
     </section>
   );
+}
+
+/** Label for a form field: its schema title, else the key with spaces. Rendered as text only. */
+function fieldLabel(schema: Record<string, unknown> | null, key: string): string {
+  const properties = schema?.properties as Record<string, { title?: unknown }> | undefined;
+  const title = properties?.[key]?.title;
+  if (typeof title === 'string' && title.trim()) return title;
+  const spaced = key.replace(/_/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }

@@ -37,6 +37,35 @@ export async function handle(fn: () => Promise<Response>): Promise<Response> {
   }
 }
 
+/** Headers on every /api/v1/c/* response (spec 14, 15.1, 17.13). */
+export const CUSTOMER_API_HEADERS = {
+  'cache-control': 'private, no-store',
+  'x-robots-tag': 'noindex, nofollow',
+  'referrer-policy': 'no-referrer',
+} as const;
+
+/**
+ * handle() for customer routes: plan_limit is wrapped in the normal error envelope with the old
+ * flat body in details (spec 15.1), and every response, errors included, carries CUSTOMER_API_HEADERS.
+ */
+export async function handleCustomer(fn: () => Promise<Response>): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fn();
+  } catch (err) {
+    if (err instanceof PlanLimitError) {
+      response = json({ error: { code: 'plan_limit', message: err.body.message, details: err.body } }, err.status);
+    } else if (err instanceof HttpError) {
+      response = jsonError(err);
+    } else {
+      console.error(err);
+      response = jsonError(new HttpError(500, 'internal_error', 'Something went wrong.'));
+    }
+  }
+  for (const [name, value] of Object.entries(CUSTOMER_API_HEADERS)) response.headers.set(name, value);
+  return response;
+}
+
 export async function readJson(req: Request): Promise<unknown> {
   const contentType = req.headers.get('content-type') ?? '';
   if (!contentType.toLowerCase().includes('application/json')) {

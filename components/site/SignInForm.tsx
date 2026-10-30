@@ -21,8 +21,11 @@ const noSubscribe = () => () => {};
 /** Visitors from /sharing arrive with ?ref=sharing. Their sign-in sends wants_sharing: true, which feeds the wants_sharing count, separate from source. */
 const fromSharing = () => new URLSearchParams(window.location.search).get('ref') === 'sharing';
 
-/** `sent` means the landing form already asked for a code; the email itself comes from sessionStorage. */
-export function SignInForm({ sent }: { sent: boolean }) {
+/**
+ * `sent` means the landing form already asked for a code; the email itself comes from sessionStorage.
+ * `claimToken` (from /claim) attaches a new account to an invite workspace instead of creating one.
+ */
+export function SignInForm({ sent, claimToken }: { sent: boolean; claimToken?: string }) {
   const router = useRouter();
   const stored = useSyncExternalStore(noSubscribe, storedSignInEmail, () => null);
   const [stepChoice, setStep] = useState<Step | null>(null);
@@ -81,7 +84,7 @@ export function SignInForm({ sent }: { sent: boolean }) {
     setBusy(true);
     setError('');
     setNotice('');
-    const res = await verifySignInCode(email.trim(), value, marketing);
+    const res = await verifySignInCode(email.trim(), value, marketing, claimToken);
     if (!res.ok) {
       setBusy(false);
       setError(res.message);
@@ -96,8 +99,14 @@ export function SignInForm({ sent }: { sent: boolean }) {
   if (step === 'email') {
     return (
       <>
-        <h1>Sign in to ReplySlip</h1>
-        <p className="lead">Enter your email and we’ll send you a 6-digit code. New here? The same code creates your workspace.</p>
+        {claimToken ? (
+          <h2>Claim it with your email</h2>
+        ) : (
+          <>
+            <h1>Sign in to ReplySlip</h1>
+            <p className="lead">Enter your email and we’ll send you a 6-digit code. New here? The same code creates your workspace.</p>
+          </>
+        )}
         <form className="signup" noValidate onSubmit={sendCode}>
           <label htmlFor="si-email">Your email</label>
           <input

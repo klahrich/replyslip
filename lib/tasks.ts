@@ -3,11 +3,11 @@ import { alias } from 'drizzle-orm/pg-core';
 import { getDb, type Db } from '@/db';
 import { agentOffers, agents, messages, tasks, workspaces, type AgentRow, type MessageRow, type TaskRow } from '@/db/schema';
 import type { AgentPrincipal } from './agents';
-import { MESSAGE_BODY_MAX, TASK_DESCRIPTION_MAX, TASK_TITLE_MAX } from './constants';
+import { MESSAGE_BODY_MAX } from './constants';
 import { HttpError } from './errors';
 import { assertResultSchema, validateResult } from './validate';
 import { assertWithinLimit } from './plans';
-import { parseRecipient, resolveSharedTask } from './sharing';
+import { assertFreeTextFields, parseRecipient, resolveSharedTask } from './sharing';
 import { CROSS_WORKSPACE_TASK_NOTICE } from './wake-notice';
 import { deliverWebhookWake, enqueueWake, type WakeReason } from './wakes';
 
@@ -39,6 +39,8 @@ export function serializeTask(task: TaskRow, fromName: string, toName: string, l
     title: task.title,
     description: task.description,
     result_schema: task.resultSchema,
+    input_schema: task.inputSchema ?? null,
+    input: task.input ?? null,
     status: task.status,
     result: task.result ?? null,
     question: task.question,
@@ -114,7 +116,8 @@ async function activeAgentByName(db: Db, workspaceId: string, name: string): Pro
     .from(agents)
     .where(and(eq(agents.workspaceId, workspaceId), eq(agents.name, name)))
     .limit(1);
-  if (!agent || agent.revokedAt) {
+  // The hidden customer sender only sends; nothing in its workspace can assign it work.
+  if (!agent || agent.revokedAt || agent.role !== 'agent') {
     throw new HttpError(404, 'agent_not_found', `No active agent named ${name} is in this workspace.`);
   }
   return agent;
@@ -193,15 +196,11 @@ export async function sendMessage(
 
 export async function createTask(
   caller: AgentPrincipal,
-  input: { to: string; title: string; description: string; resultSchema?: unknown; offer?: string },
+  input: { to: string; title?: string; description?: string; input?: unknown; resultSchema?: unknown; offer?: string },
 ) {
-  if (input.title.trim().length < 1 || input.title.length > TASK_TITLE_MAX) {
-    throw new HttpError(400, 'validation_error', `Title must be 1-${TASK_TITLE_MAX} characters.`);
-  }
-  if (input.description.length < 1 || input.description.length > TASK_DESCRIPTION_MAX) {
-    throw new HttpError(400, 'validation_error', `Description must be 1-${TASK_DESCRIPTION_MAX} characters.`);
-  }
   const address = parseRecipient(input.to);
+  // In-workspace tasks are always free text (input_not_allowed). A shared offer decides in resolveSharedTask.
+  const workspaceFields = address.kind === 'workspace' ? assertFreeTextFields(input) : null;
   const written = await getDb().transaction(async (tx) => {
     // The monthly cap is the sender's. A guest task is stored in the owner's workspace
     // so the shared agent's wakes and complete path stay the same, and from_workspace_id
@@ -211,7 +210,14 @@ export async function createTask(
     let resultSchema: Record<string, unknown>;
     let workspaceId = caller.workspaceId;
     let offerId: string | null = null;
+    let title: string;
+    let description: string;
+    let inputSchema: Record<string, unknown> | null = null;
+    let formInput: Record<string, unknown> | null = null;
     if (address.kind === 'workspace') {
+      const fields = workspaceFields ?? assertFreeTextFields(input);
+      title = fields.title;
+      description = fields.description;
       if (input.offer) {
         throw new HttpError(400, 'offer_not_allowed', 'offer is only for a shared address, @handle/agentname.');
       }
@@ -234,8 +240,16 @@ export async function createTask(
       if (!input.offer) {
         throw new HttpError(400, 'offer_required', 'A guest task must name an offer from get_agent_card.');
       }
-      const resolved = await resolveSharedTask(tx, caller, address, input.offer);
+      const resolved = await resolveSharedTask(tx, caller, address, input.offer, {
+        title: input.title,
+        description: input.description,
+        input: input.input,
+      });
       recipient = resolved.recipient;
+      title = resolved.title;
+      description = resolved.description;
+      inputSchema = resolved.inputSchema;
+      formInput = resolved.input;
       resultSchema = resolved.resultSchema;
       workspaceId = recipient.workspaceId;
       offerId = resolved.offerId;
@@ -248,9 +262,11 @@ export async function createTask(
         fromAgentId: caller.agentId,
         toAgentId: recipient.id,
         offerId,
-        title: input.title.trim(),
-        description: input.description,
+        title,
+        description,
         resultSchema,
+        inputSchema,
+        input: formInput,
         status: 'open',
       })
       .returning();
