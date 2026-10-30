@@ -4,8 +4,6 @@ import { useState } from 'react';
 import { api, errorText, formatTime } from './api';
 import { OnceSecret } from './CopyButton';
 import { DeliveryPanel } from './DeliveryPanel';
-import { Guests } from './Guests';
-import { SharingToggle } from './SharingToggle';
 import type { Agent, AgentKey, NewAgentKey } from './types';
 
 function deliveryLabel(a: Agent): string {
@@ -58,15 +56,12 @@ export function Agents({
   keys,
   onChange,
   handle,
-  guestLimit,
 }: {
   agents: Agent[];
   keys: Record<string, AgentKey[]>;
   onChange: () => void;
   /** Workspace handle, for a shared agent's @handle/name address. */
   handle: string | null;
-  /** Free-plan guest workspaces per shared agent. Null when the plan has no cap. */
-  guestLimit: number | null;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; text: string } | null>(null);
@@ -120,6 +115,18 @@ export function Agents({
                     <p className="dash-muted">
                       Joined {formatTime(a.created_at)} · {deliveryLabel(a)}
                     </p>
+                    {!revoked && a.shared && handle ? (
+                      <p className="dash-muted">
+                        <span className="dash-pill dash-pill-done">shared</span> as{' '}
+                        <code translate="no">
+                          @{handle}/{a.name}
+                        </code>{' '}
+                        ·{' '}
+                        <a className="link" href="#sharing">
+                          Manage sharing
+                        </a>
+                      </p>
+                    ) : null}
                     <DeliveryHealth a={a} />
                   </div>
                   {!revoked ? (
@@ -219,10 +226,6 @@ export function Agents({
                   <p className="dash-muted">No keys.</p>
                 )}
 
-                {!revoked ? <SharingToggle agent={a} handle={handle} onChange={onChange} /> : null}
-                {!revoked ? (
-                  <Guests agentId={a.id} agentName={a.name} handle={handle} shared={!!a.shared} guestLimit={guestLimit} />
-                ) : null}
                 {!revoked ? (
                   <div className="dash-agent-danger">
                     {confirming === a.id ? (

@@ -23,8 +23,10 @@ describe('agent self-registration', () => {
 
     const listed = await mcpListTools(registered.data.api_key);
     const names = listed.map((tool) => tool.name).sort();
-    expect(names).toEqual(TOOL_DOCS.map((tool) => tool.name).sort());
-    for (const tool of TOOL_DOCS) {
+    // redeem_invite is registered only when VALETTO_AGENT_GUESTS is on, which it is not here.
+    const expected = TOOL_DOCS.filter((tool) => tool.name !== 'redeem_invite');
+    expect(names).toEqual(expected.map((tool) => tool.name).sort());
+    for (const tool of expected) {
       const remote = listed.find((item) => item.name === tool.name);
       for (const arg of tool.args) {
         expect(remote?.inputSchema?.properties).toHaveProperty(arg.name);

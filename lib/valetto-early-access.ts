@@ -3,7 +3,7 @@ import { getDb, type Db } from '@/db';
 import { sha256 } from './crypto';
 import { getEmailSender } from './email';
 import { HttpError } from './errors';
-import { assertSameOrigin, clientIp } from './origin';
+import { clientIp } from './origin';
 import { consumeKeyedRateLimit } from './rate-limit';
 import {
   EARLY_ACCESS_EMAIL_WINDOW_MS,
@@ -153,16 +153,6 @@ export function validateEarlyAccess(input: unknown): EarlyAccessValidation {
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return { ok: true, value: value as unknown as EarlyAccessRequest };
-}
-
-/**
- * Valetto pages are served from this app. VALETTO_ORIGIN (e.g. https://valetto.tech) is also allowed when the
- * site is reached on its own domain while APP_ORIGIN names the ReplySlip one. Otherwise the shared check applies.
- */
-export function assertEarlyAccessOrigin(req: Request): void {
-  const valetto = process.env.VALETTO_ORIGIN?.trim().replace(/\/$/, '');
-  if (valetto && req.headers.get('origin') === valetto && req.headers.get('sec-fetch-site') !== 'cross-site') return;
-  assertSameOrigin(req);
 }
 
 async function lockKey(tx: Db, kind: string, key: string): Promise<void> {

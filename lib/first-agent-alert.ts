@@ -90,6 +90,11 @@ export function setFirstAgentAlertSchedulerForTests(next: FirstAgentScheduler | 
     });
 }
 
+/** Run a task after the response with the same scheduler (and test hook) as the first-agent alert. */
+export function runAfterResponse(task: () => Promise<void>): void {
+  scheduler(task);
+}
+
 /** Queue alerts on a promise chain and reset it. `flushFirstAgentAlerts` waits for that chain. */
 export function installChainedFirstAgentAlertsForTests(): void {
   chain = Promise.resolve();

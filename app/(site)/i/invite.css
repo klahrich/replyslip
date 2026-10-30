@@ -1,0 +1,9 @@
+/* /i and /claim, scoped under .si */
+.si .inv-desc{margin-top:16px;color:var(--muted)}
+.si .inv-h{margin-top:40px;font-size:var(--s-lead);line-height:1.2}
+.si .inv-offers{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:12px}
+.si .inv-offers li{padding:14px 16px;border:1px solid var(--muted);border-radius:6px}
+.si .inv-offers p{margin-top:6px}
+.si .inv-offers summary{margin-top:8px;cursor:pointer;font-size:var(--s-small);color:var(--muted)}
+.si .inv-offers pre,.si .inv-prompt{margin:10px 0 0;padding:12px 14px;overflow-x:auto;font:var(--s-small)/1.55 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid var(--muted);border-radius:4px}
+.si .inv-prompt{margin-bottom:16px}

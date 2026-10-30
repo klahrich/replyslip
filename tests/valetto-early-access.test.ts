@@ -36,7 +36,6 @@ function post(body: unknown, headers: Record<string, string> = {}, ip = freshIp(
 
 afterEach(() => {
   delete process.env.APP_ORIGIN;
-  delete process.env.VALETTO_ORIGIN;
 });
 
 describe('POST /api/valetto/early-access', () => {
@@ -221,16 +220,36 @@ describe('POST /api/valetto/early-access', () => {
       expect(earlyAccessNotices).toHaveLength(0);
     });
 
-    it('trusts only APP_ORIGIN when set, plus VALETTO_ORIGIN', async () => {
+    it('trusts only APP_ORIGIN when set (single value)', async () => {
       process.env.APP_ORIGIN = 'https://replyslip.com';
       expect((await post(validBody(), { origin: 'http://localhost' })).status).toBe(403);
       expect((await post(validBody(), { origin: 'https://replyslip.com' })).status).toBe(200);
       expect((await post(validBody(), { origin: 'https://valetto.tech' })).status).toBe(403);
-      process.env.VALETTO_ORIGIN = 'https://valetto.tech/';
-      expect((await post(validBody(), { origin: 'https://valetto.tech' })).status).toBe(200);
+    });
+
+    it('accepts every entry of an APP_ORIGIN list, and nothing else', async () => {
+      process.env.APP_ORIGIN = 'https://replyslip.com, https://www.replyslip.com ,https://valetto.tech/';
+      for (const origin of ['https://replyslip.com', 'https://www.replyslip.com', 'https://valetto.tech']) {
+        expect((await post(validBody(), { origin })).status, origin).toBe(200);
+      }
+      for (const origin of ['http://localhost', 'https://sub.valetto.tech', 'http://valetto.tech', 'https://evil.example']) {
+        const res = await post(validBody(), { origin, 'x-forwarded-host': 'valetto.tech' });
+        expect(res.status, origin).toBe(403);
+        expect(res.data.error.code).toBe('bad_origin');
+      }
       expect(
         (await post(validBody(), { origin: 'https://valetto.tech', 'sec-fetch-site': 'cross-site' })).status,
       ).toBe(403);
+    });
+
+    it('ignores a leftover VALETTO_ORIGIN', async () => {
+      process.env.APP_ORIGIN = 'https://replyslip.com';
+      process.env.VALETTO_ORIGIN = 'https://valetto.tech';
+      try {
+        expect((await post(validBody(), { origin: 'https://valetto.tech' })).status).toBe(403);
+      } finally {
+        delete process.env.VALETTO_ORIGIN;
+      }
     });
   });
 });

@@ -115,6 +115,18 @@ export default function SharingPage() {
           </p>
         </section>
 
+        <section aria-labelledby="link-h">
+          <h2 id="link-h">Share your agent with a link</h2>
+          <p>
+            Your customers don’t need a ReplySlip account. Create an invite link in the dashboard and send them the prompt
+            that comes with it. Their agent joins in one step, gets its own key, and can send tasks right away. You choose
+            the tasks, the daily cap, how many agents can use the link, and when it expires.{' '}
+            <Link className="link" href="/how-it-works#invite-links">
+              How invite links work
+            </Link>
+          </p>
+        </section>
+
         <section aria-labelledby="how-h">
           <h2 id="how-h">How it works</h2>
           <ol className="sh-steps">

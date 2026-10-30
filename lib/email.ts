@@ -13,6 +13,14 @@ export type FirstAgentAlertEmail = {
   createdAt: Date;
 };
 
+/** Owner notice for pending customer requests. Count and link only: no customer email or task text. */
+export type PendingCustomersEmail = {
+  to: string;
+  agentName: string;
+  pendingCount: number;
+  dashboardUrl: string;
+};
+
 /** Valetto early-access request. Every field but `to` is submitter input; the body is plain text. */
 export type EarlyAccessNoticeEmail = {
   to: string;
@@ -32,11 +40,24 @@ export type EarlyAccessNoticeEmail = {
 export interface EmailSender {
   sendLoginCode(message: LoginCodeEmail): Promise<void>;
   sendFirstAgentAlert(message: FirstAgentAlertEmail): Promise<void>;
+  sendPendingCustomers(message: PendingCustomersEmail): Promise<void>;
   sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void>;
 }
 
 const GENERIC_SUBJECT = 'Your ReplySlip sign-in code';
 const FIRST_AGENT_SUBJECT = 'ReplySlip: first agent';
+const PENDING_CUSTOMERS_SUBJECT = 'New customer requests are waiting';
+
+export function pendingCustomersText(message: Omit<PendingCustomersEmail, 'to'>): string {
+  const n = message.pendingCount;
+  return [
+    `${n} ${n === 1 ? 'customer is' : 'customers are'} waiting for your approval on ${message.agentName}.`,
+    '',
+    `Review them in your dashboard: ${message.dashboardUrl}`,
+    '',
+    'You get at most one of these emails per hour per bot. Turn them off in the bot\'s Customers settings.',
+  ].join('\n');
+}
 
 export function loginCodeText(code: string): string {
   return [
@@ -97,6 +118,10 @@ class ConsoleEmailSender implements EmailSender {
     console.info(`[replyslip] first-agent alert for ${message.to}\n${firstAgentAlertText(message)}`);
   }
 
+  async sendPendingCustomers(message: PendingCustomersEmail): Promise<void> {
+    console.info(`[replyslip] pending-customers notice\n${pendingCustomersText(message)}`);
+  }
+
   async sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void> {
     console.info(`[replyslip] Valetto early-access notice for ${message.to}\n${earlyAccessNoticeText(message)}`);
   }
@@ -114,6 +139,10 @@ class ResendEmailSender implements EmailSender {
 
   async sendFirstAgentAlert(message: FirstAgentAlertEmail): Promise<void> {
     await this.post(message.to, FIRST_AGENT_SUBJECT, firstAgentAlertText(message), 'first-agent alert');
+  }
+
+  async sendPendingCustomers(message: PendingCustomersEmail): Promise<void> {
+    await this.post(message.to, PENDING_CUSTOMERS_SUBJECT, pendingCustomersText(message), 'pending-customers notice');
   }
 
   async sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void> {

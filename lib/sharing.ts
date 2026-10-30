@@ -1,18 +1,23 @@
 import { and, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import { getDb, type Db } from '@/db';
 import {
+  agentInvites,
   agentOffers,
+  customerInvites,
+  users,
   agentShareOffers,
   agentShares,
   agents,
   tasks,
   workspaces,
   type AgentRow,
+  type AgentShareRow,
 } from '@/db/schema';
 import type { AgentPrincipal } from './agents';
 import {
   ACCESS_REVOKED_REASON,
   AGENT_NAME_PATTERN,
+  BOT_GUEST_TASK_RATE_KIND,
   DEFAULT_SHARE_DAILY_CAP,
   FORM_NOTES_MAX,
   GUEST_TASK_RATE_KIND,
@@ -27,7 +32,7 @@ import {
 } from './constants';
 import { HttpError, isForeignKeyViolation, isUniqueViolation } from './errors';
 import { assertInputSchema, validateInput, type InputSchema } from './input-schema';
-import { assertGuestWorkspaceLimit } from './plans';
+import { assertGuestWorkspaceLimit, PlanLimitError } from './plans';
 import { consumeKeyedRateLimit } from './rate-limit';
 import { assertResultSchema } from './validate';
 import { deliverWebhookWake, enqueueWake } from './wakes';
@@ -149,14 +154,14 @@ export async function setWorkspaceHandle(workspaceId: string, handle: string | n
   }
 }
 
-async function lockOwnerAgent(tx: Db, workspaceId: string, agentId: string): Promise<AgentRow> {
+export async function lockOwnerAgent(tx: Db, workspaceId: string, agentId: string): Promise<AgentRow> {
   await tx.execute(sql`select id from agents where id = ${agentId} and workspace_id = ${workspaceId} for update`);
   const [agent] = await tx
     .select()
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId)))
     .limit(1);
-  if (!agent || agent.revokedAt) throw new HttpError(404, 'not_found', 'No agent was found.');
+  if (!agent || agent.revokedAt || agent.role !== 'agent') throw new HttpError(404, 'not_found', 'No agent was found.');
   return agent;
 }
 
@@ -173,17 +178,19 @@ export async function agentInWorkspaceByName(workspaceId: string, name: string):
     .from(agents)
     .where(and(eq(agents.workspaceId, workspaceId), eq(agents.name, name)))
     .limit(1);
-  if (!agent || agent.revokedAt) throw new HttpError(404, 'not_found', `No active agent named ${name} is in this workspace.`);
+  if (!agent || agent.revokedAt || agent.role !== 'agent') {
+    throw new HttpError(404, 'not_found', `No active agent named ${name} is in this workspace.`);
+  }
   return agent;
 }
 
-async function deliverWakeIds(wakeIds: string[]): Promise<void> {
+export async function deliverWakeIds(wakeIds: string[]): Promise<void> {
   for (const wakeId of wakeIds) {
     await deliverWebhookWake(wakeId);
   }
 }
 
-async function failGuestTasks(
+export async function failGuestTasks(
   tx: Db,
   agent: AgentRow,
   guestWorkspaceId: string | null,
@@ -218,10 +225,23 @@ async function failGuestTasks(
   return { wakeIds, failed: closed.length };
 }
 
+/** Invite workspaces cannot share agents or create invites until a human claims them. */
+export async function assertClaimed(db: Db, workspaceId: string): Promise<void> {
+  const [workspace] = await db
+    .select({ origin: workspaces.origin, claimedAt: workspaces.claimedAt })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  if (workspace?.origin === 'invite' && !workspace.claimedAt) {
+    throw new HttpError(403, 'claim_required', 'Claim this workspace before sharing its agents.');
+  }
+}
+
 export async function setAgentShared(workspaceId: string, agentId: string, shared: boolean): Promise<AgentRow> {
   const written = await getDb().transaction(async (tx) => {
     const agent = await lockOwnerAgent(tx, workspaceId, agentId);
     if (shared) {
+      await assertClaimed(tx, workspaceId);
       const [workspace] = await tx
         .select({ handle: workspaces.handle })
         .from(workspaces)
@@ -301,15 +321,60 @@ export async function createOffer(
   try {
     const [offer] = await getDb().transaction(async (tx) => {
       const agent = await lockOwnerAgent(tx, workspaceId, agentId);
-      return tx
+      const rows = await tx
         .insert(agentOffers)
         .values({ agentId: agent.id, name, description, resultSchema, inputSchema, notesEnabled })
         .returning();
+      if (rows[0]) await grantToAllOffersCustomers(tx, agent.id, rows[0].id);
+      return rows;
     });
     if (!offer) throw new HttpError(500, 'internal_error', 'Something went wrong.');
     return serializeOffer(offer);
   } catch (err) {
     if (isUniqueViolation(err)) throw new HttpError(409, 'offer_taken', `An offer named ${name} already exists on this agent.`);
+    throw err;
+  }
+}
+
+/**
+ * A customer whose invite grants all offers gets every new offer too (spec 11.4), in the same
+ * transaction, so agent_share_offers stays the only grant table the task path reads.
+ */
+async function grantToAllOffersCustomers(tx: Db, agentId: string, offerId: string): Promise<void> {
+  await tx.execute(sql`
+    insert into agent_share_offers (share_id, offer_id)
+    select s.id, ${offerId}::uuid
+    from agent_shares s
+    join customer_invites ci on ci.id = s.customer_invite_id
+    where s.agent_id = ${agentId} and s.status <> 'revoked' and ci.all_offers
+    on conflict do nothing
+  `);
+}
+
+/**
+ * Shares that use one of the agent's guest slots: approved shares of any source, plus pending
+ * invite_guest and agent-invite shares. A pending customer request counts only toward MAX_PENDING_PER_BOT.
+ */
+export async function countGuestSlots(tx: Db, agentId: string): Promise<number> {
+  const [row] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(agentShares)
+    .where(
+      and(
+        eq(agentShares.agentId, agentId),
+        sql`(${agentShares.status} = 'approved' or (${agentShares.status} = 'pending' and ${agentShares.source} <> 'customer'))`,
+      ),
+    );
+  const used = Number(row?.count ?? 0);
+  return Number.isFinite(used) ? used : 0;
+}
+
+/** Refuse one more guest slot on a free owner at the cap. `message` rewords the error for whoever sees it. */
+export async function assertGuestSlot(tx: Db, owner: AgentRow, message?: string): Promise<void> {
+  try {
+    await assertGuestWorkspaceLimit(owner.workspaceId, await countGuestSlots(tx, owner.id), tx);
+  } catch (err) {
+    if (message && err instanceof PlanLimitError) throw new PlanLimitError({ ...err.body, message });
     throw err;
   }
 }
@@ -414,6 +479,7 @@ export async function upsertOfferByName(
         .values({ agentId: agent.id, name, description, resultSchema, inputSchema: finalSchema, notesEnabled: finalNotes })
         .returning();
       if (!created) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+      await grantToAllOffersCustomers(tx, agent.id, created.id);
       return { offer: created, created: true, cleared: false };
     }
     assertNotesSetting(inputSchema === undefined ? existing.inputSchema : inputSchema, notesEnabled ?? existing.notesEnabled);
@@ -449,7 +515,7 @@ export async function deleteOfferByName(workspaceId: string, agentId: string, na
   await deleteOffer(workspaceId, agentId, offer.id);
 }
 
-type ShareRow = typeof agentShares.$inferSelect;
+type ShareRow = AgentShareRow;
 
 async function offersForShares(db: Db, shareIds: string[]) {
   const map = new Map<string, { id: string; name: string }[]>();
@@ -468,22 +534,57 @@ async function offersForShares(db: Db, shareIds: string[]) {
   return map;
 }
 
-async function serializeShare(db: Db, share: ShareRow, guestHandle: string | null) {
-  const offers = await offersForShares(db, [share.id]);
+type ShareExtras = { invitePrefix: string | null; customerEmail: string | null; customerInvitePrefix: string | null };
+
+/** Owner-only view of a share. customer_email never goes to a guest, a card, or an agent tool. */
+function shareBody(share: ShareRow, guestHandle: string | null, extras: ShareExtras, offers: { id: string; name: string }[]) {
   return {
     id: share.id,
     agent_id: share.agentId,
     guest_workspace_id: share.guestWorkspaceId,
     guest_handle: guestHandle,
+    label: share.label,
+    source: share.source,
+    invite_id: share.inviteId,
+    invite_prefix: extras.invitePrefix,
+    customer_invite_id: share.customerInviteId,
+    customer_invite_prefix: extras.customerInvitePrefix,
+    customer_email: extras.customerEmail,
     status: share.status,
     daily_cap: share.dailyCap,
-    offers: offers.get(share.id) ?? [],
+    offers,
     created_at: share.createdAt.toISOString(),
     updated_at: share.updatedAt.toISOString(),
   };
 }
 
-async function loadOffersByName(tx: Db, agentId: string, names: string[]) {
+export async function serializeShare(db: Db, share: ShareRow, guestHandle: string | null) {
+  const offers = await offersForShares(db, [share.id]);
+  const extras: ShareExtras = { invitePrefix: null, customerEmail: null, customerInvitePrefix: null };
+  if (share.inviteId) {
+    const [invite] = await db
+      .select({ prefix: agentInvites.tokenPrefix })
+      .from(agentInvites)
+      .where(eq(agentInvites.id, share.inviteId))
+      .limit(1);
+    extras.invitePrefix = invite?.prefix ?? null;
+  }
+  if (share.customerInviteId) {
+    const [invite] = await db
+      .select({ prefix: customerInvites.tokenPrefix })
+      .from(customerInvites)
+      .where(eq(customerInvites.id, share.customerInviteId))
+      .limit(1);
+    extras.customerInvitePrefix = invite?.prefix ?? null;
+  }
+  if (share.requestedByUserId) {
+    const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, share.requestedByUserId)).limit(1);
+    extras.customerEmail = user?.email ?? null;
+  }
+  return shareBody(share, guestHandle, extras, offers.get(share.id) ?? []);
+}
+
+export async function loadOffersByName(tx: Db, agentId: string, names: string[]) {
   const rows = await tx
     .select()
     .from(agentOffers)
@@ -496,13 +597,13 @@ async function loadOffersByName(tx: Db, agentId: string, names: string[]) {
   return rows;
 }
 
-async function replaceShareOffers(tx: Db, shareId: string, offerIds: string[]) {
+export async function replaceShareOffers(tx: Db, shareId: string, offerIds: string[]) {
   await tx.delete(agentShareOffers).where(eq(agentShareOffers.shareId, shareId));
   if (offerIds.length === 0) return;
   await tx.insert(agentShareOffers).values(offerIds.map((offerId) => ({ shareId, offerId })));
 }
 
-function dedupeOfferNames(names: string[]): string[] {
+export function dedupeOfferNames(names: string[]): string[] {
   if (names.length < 1 || names.length > 50) {
     throw new HttpError(400, 'validation_error', 'Send between 1 and 50 offer names.');
   }
@@ -513,26 +614,32 @@ export async function listShares(workspaceId: string, agentId: string) {
   const db = getDb();
   await lockOwnerAgent(db, workspaceId, agentId);
   const rows = await db
-    .select({ share: agentShares, guestHandle: workspaces.handle })
+    .select({
+      share: agentShares,
+      guestHandle: workspaces.handle,
+      invitePrefix: agentInvites.tokenPrefix,
+      customerInvitePrefix: customerInvites.tokenPrefix,
+      customerEmail: users.email,
+    })
     .from(agentShares)
     .innerJoin(workspaces, eq(workspaces.id, agentShares.guestWorkspaceId))
+    .leftJoin(agentInvites, eq(agentInvites.id, agentShares.inviteId))
+    .leftJoin(customerInvites, eq(customerInvites.id, agentShares.customerInviteId))
+    .leftJoin(users, eq(users.id, agentShares.requestedByUserId))
     .where(eq(agentShares.agentId, agentId))
     .orderBy(agentShares.createdAt);
   const offers = await offersForShares(
     db,
     rows.map((row) => row.share.id),
   );
-  return rows.map((row) => ({
-    id: row.share.id,
-    agent_id: row.share.agentId,
-    guest_workspace_id: row.share.guestWorkspaceId,
-    guest_handle: row.guestHandle,
-    status: row.share.status,
-    daily_cap: row.share.dailyCap,
-    offers: offers.get(row.share.id) ?? [],
-    created_at: row.share.createdAt.toISOString(),
-    updated_at: row.share.updatedAt.toISOString(),
-  }));
+  return rows.map((row) =>
+    shareBody(
+      row.share,
+      row.guestHandle,
+      { invitePrefix: row.invitePrefix, customerEmail: row.customerEmail, customerInvitePrefix: row.customerInvitePrefix },
+      offers.get(row.share.id) ?? [],
+    ),
+  );
 }
 
 async function guestWorkspaceByHandle(tx: Db, handle: string, ownerWorkspaceId: string) {
@@ -562,19 +669,17 @@ export async function inviteGuest(
       .from(agentShares)
       .where(and(eq(agentShares.agentId, agent.id), eq(agentShares.guestWorkspaceId, guest.id)))
       .limit(1);
-    const needsSlot = !existing || existing.status === 'revoked';
-    if (needsSlot) {
-      const [countRow] = await tx
-        .select({ count: sql<number>`count(*)::int` })
-        .from(agentShares)
-        .where(and(eq(agentShares.agentId, agent.id), inArray(agentShares.status, ['pending', 'approved'])));
-      const used = typeof countRow?.count === 'number' ? countRow.count : Number(countRow?.count ?? 0);
-      await assertGuestWorkspaceLimit(workspaceId, Number.isFinite(used) ? used : 0, tx);
-    }
+    // A pending customer request does not hold a slot, so turning it into an invite_guest grant needs one.
+    const needsSlot =
+      !existing || existing.status === 'revoked' || (existing.status === 'pending' && existing.source === 'customer');
+    if (needsSlot) await assertGuestSlot(tx, agent);
     const now = new Date();
     // Invite never approves. A new grant and a re-opened revoked grant are pending.
     // A grant that is already pending or approved keeps that status.
     const nextStatus = existing?.status === 'pending' || existing?.status === 'approved' ? existing.status : 'pending';
+    // Re-opening a revoked share, or turning a pending customer request into a grant, makes it the owner's
+    // invite_guest grant. It leaves the customer queue: no 14-day expiry, no all-offers top-ups.
+    const becomesHandle = existing !== undefined && existing.source === 'customer' && existing.status !== 'approved';
     let saved: ShareRow | undefined;
     if (!existing) {
       const [created] = await tx
@@ -595,6 +700,7 @@ export async function inviteGuest(
           status: nextStatus,
           dailyCap,
           updatedAt: now,
+          ...(becomesHandle ? { source: 'handle', customerInviteId: null } : {}),
         })
         .where(eq(agentShares.id, existing.id))
         .returning();
@@ -632,12 +738,49 @@ export async function approveShare(workspaceId: string, agentId: string, shareId
       throw new HttpError(409, 'share_revoked', 'This grant was revoked. Invite the guest again.');
     }
     if (current.share.status === 'approved') return current;
+    // A pending customer request moves from the pending queue into the customer cap here (spec 11.6).
+    if (current.share.source === 'customer') await assertGuestSlot(tx, current.agent);
     const [updated] = await tx
       .update(agentShares)
       .set({ status: 'approved', updatedAt: new Date() })
       .where(eq(agentShares.id, current.share.id))
       .returning();
     if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    return { ...current, share: updated };
+  });
+  return serializeShare(db, saved.share, saved.guestHandle);
+}
+
+/**
+ * Re-admit a revoked customer (owner session only). The share goes straight to approved, takes a guest
+ * slot, and keeps its offers; an all-offers customer also gets offers added while they were out.
+ * Only customer shares: invite_guest grants are re-opened with invite_guest, agent guests with a new invite.
+ */
+export async function restoreCustomerShare(workspaceId: string, agentId: string, shareId: string) {
+  const db = getDb();
+  const saved = await db.transaction(async (tx) => {
+    const current = await shareInWorkspace(tx, workspaceId, agentId, shareId);
+    if (current.share.source !== 'customer') {
+      throw new HttpError(409, 'not_customer_share', 'Only a customer can be restored. Invite this guest again instead.');
+    }
+    if (current.share.status !== 'revoked') {
+      throw new HttpError(409, 'share_not_revoked', 'This customer still has access or is waiting for approval.');
+    }
+    await assertGuestSlot(tx, current.agent);
+    const [updated] = await tx
+      .update(agentShares)
+      .set({ status: 'approved', updatedAt: new Date() })
+      .where(eq(agentShares.id, current.share.id))
+      .returning();
+    if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    await tx.execute(sql`
+      insert into agent_share_offers (share_id, offer_id)
+      select ${updated.id}::uuid, o.id
+      from agent_offers o
+      join customer_invites ci on ci.id = ${updated.customerInviteId}::uuid and ci.all_offers
+      where o.agent_id = ${current.agent.id}
+      on conflict do nothing
+    `);
     return { ...current, share: updated };
   });
   return serializeShare(db, saved.share, saved.guestHandle);
@@ -682,21 +825,29 @@ export async function updateShare(
   return serializeShare(db, saved.share, saved.guestHandle);
 }
 
+/** Revoke one locked share row and fail that guest's open tasks. Deliver the returned wake ids after commit. */
+export async function revokeShareRow(
+  tx: Db,
+  agent: AgentRow,
+  share: ShareRow,
+): Promise<{ share: ShareRow; wakeIds: string[]; failed: number }> {
+  if (share.status === 'revoked') return { share, wakeIds: [], failed: 0 };
+  const [updated] = await tx
+    .update(agentShares)
+    .set({ status: 'revoked', lastRevokedAt: new Date(), updatedAt: new Date() })
+    .where(eq(agentShares.id, share.id))
+    .returning();
+  if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+  const closed = await failGuestTasks(tx, agent, updated.guestWorkspaceId);
+  return { share: updated, wakeIds: closed.wakeIds, failed: closed.failed };
+}
+
 export async function revokeShare(workspaceId: string, agentId: string, shareId: string) {
   const db = getDb();
   const saved = await db.transaction(async (tx) => {
     const current = await shareInWorkspace(tx, workspaceId, agentId, shareId);
-    if (current.share.status === 'revoked') {
-      return { share: current.share, guestHandle: current.guestHandle, wakeIds: [] as string[], failed: 0 };
-    }
-    const [updated] = await tx
-      .update(agentShares)
-      .set({ status: 'revoked', updatedAt: new Date() })
-      .where(eq(agentShares.id, current.share.id))
-      .returning();
-    if (!updated) throw new HttpError(500, 'internal_error', 'Something went wrong.');
-    const closed = await failGuestTasks(tx, current.agent, updated.guestWorkspaceId);
-    return { share: updated, guestHandle: current.guestHandle, wakeIds: closed.wakeIds, failed: closed.failed };
+    const revoked = await revokeShareRow(tx, current.agent, current.share);
+    return { ...revoked, guestHandle: current.guestHandle };
   });
   await deliverWakeIds(saved.wakeIds);
   const share = await serializeShare(db, saved.share, saved.guestHandle);
@@ -882,6 +1033,22 @@ export async function resolveSharedTask(
     throw new HttpError(429, 'rate_limited', 'This share is at its daily task cap.', {
       retry_after_seconds: cap.retryAfterSeconds,
       daily_cap: fresh.dailyCap,
+      scope: 'share',
+    });
+  }
+  // Total across every customer of this agent (customer-link shares only, so existing handle and agent-invite
+  // guests keep their per-share cap alone). Both cap rows roll back with the task if anything later fails.
+  const botCap = fresh.source !== 'customer' ? { limited: false as const, retryAfterSeconds: 0 } : await consumeKeyedRateLimit(tx, {
+    kind: BOT_GUEST_TASK_RATE_KIND,
+    key: recipient.id,
+    limit: recipient.customerDailyCap,
+    windowMs: SHARE_CAP_WINDOW_MS,
+  });
+  if (botCap.limited) {
+    throw new HttpError(429, 'rate_limited', 'This agent is at its daily task cap for guests.', {
+      retry_after_seconds: botCap.retryAfterSeconds,
+      daily_cap: recipient.customerDailyCap,
+      scope: 'bot',
     });
   }
   return {

@@ -1,6 +1,6 @@
 import { handle, json, readJson } from '@/lib/http';
+import { assertSameOrigin } from '@/lib/origin';
 import {
-  assertEarlyAccessOrigin,
   consumeEarlyAccessIpLimit,
   submitEarlyAccess,
   validateEarlyAccess,
@@ -14,7 +14,7 @@ const NO_STORE = { 'cache-control': 'no-store' };
 /** Valetto early-access form. Contract: 200 `{ ok: true }`, 400 `{ ok: false, errors }`; anything else falls back to mailto. */
 export function POST(req: Request) {
   return handle(async () => {
-    assertEarlyAccessOrigin(req);
+    assertSameOrigin(req);
     const limit = await consumeEarlyAccessIpLimit(req);
     if (limit.limited) {
       return json(

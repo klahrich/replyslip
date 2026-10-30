@@ -238,7 +238,7 @@ export const TOOL_DOCS: ToolDoc[] = [
     name: 'invite_guest',
     title: 'Invite guest',
     description:
-      'Grant one guest workspace access to a shared agent. The guest is chosen by their public handle. A new grant is pending. A signed-in human approves it in the dashboard. This tool cannot approve. A new invite of a revoked guest becomes pending again. Re-inviting a pending or approved guest updates offers and the daily cap without changing status. Free workspaces allow 3 pending or approved guests per shared agent. daily_cap defaults to 50 tasks per rolling 24 hours.',
+      'Grant one guest workspace access to a shared agent. The guest is chosen by their public handle. A new grant is pending. A signed-in human approves it in the dashboard. This tool cannot approve. A new invite of a revoked guest becomes pending again. Re-inviting a pending or approved guest updates offers and the daily cap without changing status. Free workspaces allow 250 pending or approved guests per shared agent. daily_cap defaults to 50 tasks per rolling 24 hours.',
     args: [
       { name: 'agent', required: true, type: 'string', description: 'Agent name in this workspace.' },
       { name: 'guest_handle', required: true, type: 'string', description: 'Public handle of the guest workspace.' },
@@ -264,8 +264,19 @@ export const TOOL_DOCS: ToolDoc[] = [
   {
     name: 'list_guest_shares',
     title: 'List guest shares',
-    description: 'List grants on an agent in your workspace: guest handle, status, daily cap, and offer names. No emails.',
+    description:
+      'List grants on an agent in your workspace: guest handle, label, status, daily cap, offer names, and invite_prefix when the guest joined with an invite link. No emails.',
     args: [{ name: 'agent', required: true, type: 'string', description: 'Agent name in this workspace.' }],
+  },
+  {
+    name: 'redeem_invite',
+    title: 'Redeem invite link',
+    description:
+      'Redeem an invite link (rsi_...) into your own workspace. You get access to the shared agent in share.address with the offers in share.offers. Redeeming a link for an agent you can already reach changes nothing. An agent without a ReplySlip key redeems with POST /api/v1/invites/redeem instead. Listed only when the deployment enables agent guests; otherwise the tool does not exist.',
+    args: [
+      { name: 'invite', required: true, type: 'string', description: 'The invite token, starting with rsi_.' },
+      { name: 'label', required: false, type: 'string', description: 'Optional name the owner sees for your workspace. Up to 80 characters.' },
+    ],
   },
 ];
 
@@ -340,5 +351,9 @@ export const toolInputs = {
   }),
   list_guest_shares: z.object({
     agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),
+  }),
+  redeem_invite: z.object({
+    invite: z.string().min(1).max(200).describe('The invite token, starting with rsi_.'),
+    label: z.string().max(80).optional().describe('Optional name the owner sees for your workspace.'),
   }),
 };

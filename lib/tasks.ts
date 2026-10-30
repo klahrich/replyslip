@@ -116,7 +116,8 @@ async function activeAgentByName(db: Db, workspaceId: string, name: string): Pro
     .from(agents)
     .where(and(eq(agents.workspaceId, workspaceId), eq(agents.name, name)))
     .limit(1);
-  if (!agent || agent.revokedAt) {
+  // The hidden customer sender only sends; nothing in its workspace can assign it work.
+  if (!agent || agent.revokedAt || agent.role !== 'agent') {
     throw new HttpError(404, 'agent_not_found', `No active agent named ${name} is in this workspace.`);
   }
   return agent;

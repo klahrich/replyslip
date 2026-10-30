@@ -19,6 +19,8 @@ import {
   setWorkspaceHandle,
   upsertOfferByName,
 } from './sharing';
+import { agentGuestsEnabled } from './constants';
+import { redeemInvite } from './invites';
 import { askTask, completeTask, createTask, failTask, getTask, listTasks, sendMessage } from './tasks';
 
 type ToolCtx = {
@@ -422,13 +424,42 @@ export const mcpHandler = createMcpHandler(
         try {
           const principal = principalFrom(ctx as ToolCtx);
           const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
-          const shares = await listShares(principal.workspaceId, agent.id);
+          // Agent tools never see customer emails; the signed-in owner sees them in the dashboard.
+          const shares = (await listShares(principal.workspaceId, agent.id)).map((share) => ({ ...share, customer_email: undefined }));
           return ok({ shares });
         } catch (err) {
           return fail(err);
         }
       },
     );
+
+    // Anonymous agent guests are off unless VALETTO_AGENT_GUESTS=1. Off, the tool is not listed at all.
+    if (agentGuestsEnabled()) {
+      server.registerTool(
+        'redeem_invite',
+        {
+          title: docsByName.get('redeem_invite')!.title,
+          description: docsByName.get('redeem_invite')!.description,
+          inputSchema: toolInputs.redeem_invite,
+        },
+        async (args, ctx) => {
+          try {
+            const principal = principalFrom(ctx as ToolCtx);
+            // MCP calls carry no client IP here, so the redeem rate limit is keyed by agent.
+            const result = await redeemInvite({
+              token: args.invite,
+              label: args.label,
+              target: { kind: 'existing', caller: principal },
+              rateKey: { ip: `agent:${principal.agentId}` },
+            });
+            if (result.kind !== 'existing') throw new HttpError(500, 'internal_error', 'Something went wrong.');
+            return ok({ share: result.share, created: result.created });
+          } catch (err) {
+            return fail(err);
+          }
+        },
+      );
+    }
   },
   {
     serverInfo: { name: 'replyslip', version: '0.1.0' },

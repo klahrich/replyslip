@@ -26,17 +26,46 @@ export function clientIp(req: Request): string {
 }
 
 /**
+ * APP_ORIGIN as a list: comma-separated, each entry trimmed with its trailing slash removed, empties dropped.
+ * Empty when APP_ORIGIN is unset or blank.
+ */
+export function configuredOrigins(raw: string | undefined = process.env.APP_ORIGIN): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((entry) => entry.trim().replace(/\/+$/, ''))
+    .filter((entry) => entry.length > 0);
+}
+
+/** The first APP_ORIGIN entry, or null when APP_ORIGIN is unset. */
+export function canonicalOrigin(): string | null {
+  return configuredOrigins()[0] ?? null;
+}
+
+/**
+ * Origin for absolute URLs this app hands out (invite links, MCP and docs URLs): the first APP_ORIGIN entry,
+ * or the request's own origin when APP_ORIGIN is unset.
+ */
+export function publicOrigin(req: Request): string {
+  return canonicalOrigin() ?? requestOrigin(req);
+}
+
+/** Origins a cookie-authenticated POST may come from: every APP_ORIGIN entry, or the request's own origin. */
+export function allowedOrigins(req: Request): string[] {
+  const configured = configuredOrigins();
+  return configured.length > 0 ? configured : [requestOrigin(req)];
+}
+
+/**
  * CSRF guard for cookie-authenticated POSTs. A browser always sends Origin on a cross-site POST, so a
- * present Origin must match exactly. When APP_ORIGIN is set (production), it is the only allowed origin:
- * Host and X-Forwarded-Host come from the client and are not trusted. Without APP_ORIGIN (local dev and
- * previews) the request's own origin is used. No Origin means a non-browser client.
+ * present Origin must exactly equal one allowed origin. When APP_ORIGIN is set (production), only its entries
+ * are allowed: Host and X-Forwarded-Host come from the client and are not trusted. Without APP_ORIGIN (local
+ * dev and previews) the request's own origin is used. No Origin means a non-browser client.
  */
 export function assertSameOrigin(req: Request): void {
   const site = req.headers.get('sec-fetch-site');
   if (site === 'cross-site') throw new HttpError(403, 'bad_origin', 'This request came from another site.');
   const origin = req.headers.get('origin');
   if (origin === null) return;
-  const configured = process.env.APP_ORIGIN?.trim().replace(/\/$/, '');
-  const allowed = configured || requestOrigin(req);
-  if (origin !== allowed) throw new HttpError(403, 'bad_origin', 'This request came from another site.');
+  if (!allowedOrigins(req).includes(origin)) throw new HttpError(403, 'bad_origin', 'This request came from another site.');
 }
