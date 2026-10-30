@@ -221,3 +221,23 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-steps li.is-done .dash-step-mark{border-color:#1f5f3a;background:#1f5f3a;color:#fff}
 .dash-steps li.is-done .dash-step-label{color:var(--muted)}
 .dash-step-note{display:block;margin-top:2px}
+.dash-tabs{display:flex;gap:4px;border-bottom:1px solid var(--surface-2);margin:0 0 12px}
+.dash-tab{height:44px;padding:0 16px;background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;font:500 var(--s-small)/1 var(--font);color:var(--muted);cursor:pointer}
+.dash-tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--ink)}
+@media (hover:hover) and (pointer:fine){.dash-tab:hover{color:var(--ink)}}
+.dash-tabpanel{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start}
+.dash-tabpanel[hidden]{display:none}
+.dash-share-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.dash-share-steps li{display:flex;gap:12px;background:var(--bg);border-radius:6px;padding:14px 16px}
+.dash-share-num{flex:none;width:26px;height:26px;border-radius:50%;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-size:var(--s-small);font-weight:500}
+.dash-invites{margin-top:20px;padding-top:16px;border-top:1px solid #c4c9ce}
+.dash-invites>h4{font-size:var(--s-body)}
+.dash-invite-form{margin-top:14px;display:grid;gap:12px}
+.dash-invite-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.dash-invite-uses{width:7ch;height:32px;padding:0 6px;font:inherit;background:#f7f8f9;border:1px solid #8a9097;border-radius:4px}
+.dash-invite-check{display:flex;gap:8px;align-items:flex-start;font-size:var(--s-small)}
+.dash-invite-made{margin-top:14px}
+.dash-invite-msg-label,.dash-invite-part{display:block;margin-top:14px;font-size:var(--s-small);font-weight:500}
+.dash-invite-msg{display:block;width:100%;margin-top:6px;padding:10px 12px;font:var(--s-small)/1.5 var(--mono,ui-monospace,monospace);color:var(--input-ink);background:var(--bg);border:1px solid var(--input-border);border-radius:4px;resize:vertical}
+.dash-invite-warn{margin-top:14px}
+.dash-invite-next{margin:10px 0 0;padding-left:1.2em}

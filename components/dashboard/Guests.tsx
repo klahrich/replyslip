@@ -10,7 +10,28 @@ const MAX_CAP = 10_000;
 type Loaded = { shares: Share[]; offers: Offer[] };
 
 function who(s: Share): string {
-  return s.guest_handle ? `@${s.guest_handle}` : 'A workspace with no handle';
+  // A customer who signed in from a link is known by email; the owner's label still wins.
+  if (s.source === 'customer') return s.label ?? s.customer_email ?? 'A customer';
+  const at = s.guest_handle ? `@${s.guest_handle}` : null;
+  if (s.label) return at ? `${s.label} (${at})` : s.label;
+  return at ?? 'A workspace with no handle';
+}
+
+/** "Joined with invite link rsi_8hQx…" under a guest that redeemed a link. */
+function via(s: Share) {
+  if (s.customer_invite_prefix) {
+    return (
+      <p className="dash-muted">
+        Customer from link <code translate="no">{s.customer_invite_prefix}…</code>
+        {s.status === 'pending' ? ' · asked for access' : ''}
+      </p>
+    );
+  }
+  return s.invite_prefix ? (
+    <p className="dash-muted">
+      Joined with invite link <code translate="no">{s.invite_prefix}…</code>
+    </p>
+  ) : null;
 }
 
 function taskList(s: Share): string {
@@ -143,7 +164,9 @@ export function Guests({
 
   const pending = data.shares.filter((s) => s.status === 'pending');
   const active = data.shares.filter((s) => s.status === 'approved');
-  const used = pending.length + active.length;
+  const removedCustomers = data.shares.filter((s) => s.status === 'revoked' && s.source === 'customer');
+  // A customer asking for access does not hold a slot until approved (the API counts the same way).
+  const used = pending.filter((s) => s.source !== 'customer').length + active.length;
   const full = guestLimit !== null && used >= guestLimit;
   const chosen = picked ?? data.offers.map((o) => o.name);
 
@@ -408,7 +431,9 @@ export function Guests({
         </p>
       ) : null}
 
-      {used === 0 ? <p className="dash-empty">No guests yet. Invite a workspace by its handle, then approve it here.</p> : null}
+      {used === 0 ? (
+        <p className="dash-empty">No guests yet. Invite a workspace by its handle, or send an invite link.</p>
+      ) : null}
 
       {pending.length ? (
         <>
@@ -420,6 +445,7 @@ export function Guests({
                   <p className="dash-guest-name" translate="no">
                     {who(s)}
                   </p>
+                  {via(s)}
                   <p className="dash-muted">
                     Tasks: <span translate="no">{taskList(s)}</span>
                   </p>
@@ -464,11 +490,49 @@ export function Guests({
                   <p className="dash-guest-name" translate="no">
                     {who(s)}
                   </p>
+                  {via(s)}
                   {tasksEditor(s)}
                   {capEditor(s, 'Up to ')}
                 </div>
                 <div className="dash-actions">
                   {revokeButtons(s, 'Revoke', `Revoke ${who(s)}? Open tasks from this guest will fail with “access revoked”.`)}
+                </div>
+                {rowError(s.id)}
+                {rowSaved(s.id)}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      {shared && removedCustomers.length ? (
+        <>
+          <h5 className="dash-guests-sub">Removed customers</h5>
+          <p className="dash-muted">A removed customer can’t get back in through any link. Restore lets them in again.</p>
+          <ul className="dash-guest-list">
+            {removedCustomers.map((s) => (
+              <li key={s.id} className="dash-guest">
+                <div className="dash-guest-main">
+                  <p className="dash-guest-name" translate="no">
+                    {who(s)}
+                  </p>
+                  {via(s)}
+                </div>
+                <div className="dash-actions">
+                  <button
+                    type="button"
+                    className="dash-btn dash-btn-sm"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      run(`rs${s.id}`, async () => {
+                        const r = await api<{ share: Share }>(`${base}/shares/${s.id}/restore`, { method: 'POST' });
+                        put(r.share);
+                        setSaved({ id: s.id, text: `Restored. ${who(s)} can send tasks again.` });
+                      })
+                    }
+                  >
+                    {busy === `rs${s.id}` ? 'Restoring…' : 'Restore'}
+                  </button>
                 </div>
                 {rowError(s.id)}
                 {rowSaved(s.id)}

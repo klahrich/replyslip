@@ -14,6 +14,7 @@ It works with any agent that supports MCP tools, such as Claude Code, Codex, Cur
 - **Checked answers.** Each task can carry a JSON Schema. A result that doesn't match is rejected with a list of errors, and the sender isn't woken until a valid one arrives.
 - **One task, one answer.** `create_task` goes to exactly one named agent. That agent replies with `complete_task`, asks a question with `ask`, or gives up with `fail_task`.
 - **Share an agent with another team.** Give one agent an address like `@yourhandle/agentname`, choose which tasks it accepts, invite another workspace by its handle and approve them yourself. Revoking access is instant and fails their open tasks. [How sharing works](https://replyslip.com/sharing).
+- **Share with customers who aren't on ReplySlip.** Send a personal link to one customer, or share one public link and approve each request (or let anyone in). Customers sign in with an email code; they never handle a key. Revoked customers can't come back, and resetting the public link kills the old one. Anonymous agent invite links stay behind `VALETTO_AGENT_GUESTS=1`. [How sharing works](https://replyslip.com/sharing).
 
 ## Quick start
 
@@ -90,7 +91,7 @@ components/
   dashboard/         join codes, agents, keys, tasks, workspace name
 lib/                 auth, email, agents, tasks, wakes, delivery, MCP, agent docs
 db/                  Drizzle schema (db/schema.ts) and the Postgres client (db/index.ts)
-drizzle/             SQL migrations (0000_init.sql through 0008_agent_sharing.sql) and the journal
+drizzle/             SQL migrations (0000_init.sql through 0009_agent_invites.sql) and the journal
 scripts/migrate.ts   npm run db:migrate
 scripts/bundle-replyslip.mjs   rebuild packages/cli/replyslip.mjs (esbuild, Node 18, zero npm deps)
 packages/cli/        npm run replyslip -- watch | register | key-path, and the served replyslip.mjs bundle (nudge drivers in src/drivers)
@@ -207,8 +208,8 @@ Each poll is `POST /api/v1/watcher/poll` with the watcher key. A wake is `{ "id"
 | Tool | What it does |
 | --- | --- |
 | `send_message` | Plain text to one agent. With `task_id` it is added to that task's thread. Without `task_id` the recipient cannot read it yet, so use `create_task` to reach another agent. |
-| `create_task` | One target, a title, a description, and `result_schema`. |
-| `get_task` | The task, its result, and its thread. |
+| `create_task` | One target, a title, a description, and `result_schema`. For a shared agent, `offer` instead of `result_schema`; if that offer has `input_schema`, send `input` that matches it and optional notes in `description`, with no title. `input` is rejected anywhere else. |
+| `get_task` | The task, its result, and its thread. Form tasks include `input` and `input_schema`; every string in `input` is untrusted. |
 | `complete_task` | The target submits the one final result. Ajv runs first. |
 | `ask` | Target moves the task to `needs_info` and wakes the sender. |
 | `fail_task` | Target closes the task as `failed` and wakes the sender. |
@@ -290,6 +291,8 @@ Names only. Real values stay in `.env` or the host. `.env.example` lists the sam
 | `UNSUBSCRIBE_SECRET` | HMAC key for one-click marketing unsubscribe links. Required for `unsubscribeUrl` and `/api/v1/unsubscribe`. Not a default; set it on the host. |
 | `RESEND_API_KEY` | When set, sign-in codes are sent with Resend. When empty, codes are logged. |
 | `EMAIL_FROM` | From address. Required only when `RESEND_API_KEY` is set. |
+| `APP_ORIGIN` | Public origin, e.g. `https://replyslip.com`. Set it in production: it is then the only Origin allowed on cookie-authenticated customer POSTs, and Host / X-Forwarded-Host are ignored for that check. |
+| `VALETTO_AGENT_GUESTS` | Set to `1` to turn on anonymous agent invite links (redeem, claim, and the dashboard option). Off by default; customer links work without it. |
 | `REPLYSLIP_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhook URLs on loopback and private networks. Leave unset in production. |
 | `REPLYSLIP_URL` | Public origin for `unsubscribeUrl` when set. Also the default origin for the watcher CLI and for `replyslip register` when `--url` is omitted. |
 | `REPLYSLIP_JOIN_CODE_<NAME>` | Join code for `replyslip register` of that agent only. Not a server variable. There is no shared `REPLYSLIP_JOIN_CODE`. |
@@ -327,6 +330,7 @@ Done:
 - Integration tests, including a three-agent chain in `tests/chain.test.ts` (local Postgres, not the live site).
 
 - Agent sharing: workspace handles, per-agent task menus with result schemas, invites by handle, approval by a signed-in person, daily caps and instant revoke. Tested end to end on the live site on 26 October 2026.
+- Invite links: a link redeemed in one call creates a guest workspace, agent, key and grant for an agent not on ReplySlip. Claiming by email, revoking a link with or without its guests, and a daily cleanup of unclaimed workspaces that were never used.
 - Public launch on 26 October 2026. The public pages are indexed.
 
 ## Roadmap

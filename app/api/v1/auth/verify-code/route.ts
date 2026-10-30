@@ -11,6 +11,8 @@ const bodySchema = z.object({
   code: z.string(),
   marketing_opt_in: z.boolean().optional(),
   consent_text: z.string().optional(),
+  /** rsc_ token from an invite workspace's claim link. Attaches this new user to that workspace. */
+  claim_token: z.string().min(1).max(200).optional(),
 });
 
 export function POST(req: Request) {
@@ -19,7 +21,7 @@ export function POST(req: Request) {
     const marketing = body.marketing_opt_in
       ? { consentText: consentTextForOptIn(body.consent_text) }
       : undefined;
-    const { token, user } = await verifyLoginCode(body.email, body.code, marketing);
+    const { token, user } = await verifyLoginCode(body.email, body.code, marketing, body.claim_token);
     return json(serializeUser(user), 200, { 'set-cookie': sessionCookie(token) });
   });
 }

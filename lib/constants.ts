@@ -27,9 +27,51 @@ export const JOIN_CODE_MAX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const JOIN_CODE_MIN_TTL_MS = 60 * 60 * 1000;
 export const JOIN_CODE_MAX_PENDING = 25;
 
+export const INVITE_DEFAULT_TTL_DAYS = 30;
+export const INVITE_MIN_TTL_DAYS = 1;
+export const INVITE_MAX_TTL_DAYS = 90;
+export const INVITE_MAX_USES = 1_000;
+export const INVITE_MAX_ACTIVE_PER_AGENT = 50;
+export const INVITE_LABEL_MAX = 80;
+/** Auto handle for an invite workspace: g- plus 10 lowercase base32 characters. Matches HANDLE_PATTERN. */
+export const INVITE_HANDLE_PREFIX = 'g-';
+/** Unclaimed invite workspaces whose agent never called the API are deleted after this. */
+export const INVITE_WORKSPACE_IDLE_DAYS = 30;
+
+/** Customer invites (personal and public links). */
+export const CUSTOMER_DEFAULT_DAILY_CAP = 20;
+export const CUSTOMER_BOT_DAILY_CAP = 300;
+/** rate_events.kind for the per-bot guest task cap. The agent id is stored in rate_events.email. */
+export const BOT_GUEST_TASK_RATE_KIND = 'bot_guest_task';
+export const MAX_PENDING_PER_BOT = 50;
+export const PENDING_REQUEST_TTL_DAYS = 14;
+export const PREAPPROVED_EMAILS_MAX = 500;
+export const PENDING_NOTIFY_INTERVAL_MS = 60 * 60 * 1000;
+export const CUSTOMER_LINK_MAX_USES = 100_000;
+export const CUSTOMER_INVITE_MAX_TTL_DAYS = 365;
+export const CUSTOMER_INVITE_MAX_ACTIVE_PER_AGENT = 200;
+/** Name of the hidden, keyless agent a customer workspace sends tasks as. */
+export const CUSTOMER_SENDER_NAME = 'valetto';
+/** An anonymous agent-guest workspace must be claimed within this many days. */
+export const CLAIM_TOKEN_TTL_DAYS = 7;
+
+/**
+ * Karim's anonymous agent guests (redeem an rsi_ invite without an account, claim later).
+ * Off unless VALETTO_AGENT_GUESTS=1. Read on every call so tests and deploys can flip it.
+ */
+export function agentGuestsEnabled(): boolean {
+  return process.env.VALETTO_AGENT_GUESTS?.trim() === '1';
+}
+
 export const RATE_LIMITS = {
   requestCode: { email: 5, ip: 100, windowMs: 15 * 60 * 1000 },
   register: { ip: 60, windowMs: 15 * 60 * 1000 },
+  redeem: { ip: 30, windowMs: 15 * 60 * 1000 },
+  invitePreview: { ip: 120, windowMs: 15 * 60 * 1000 },
+  claimPreview: { ip: 60, windowMs: 15 * 60 * 1000 },
+  customerLink: { ip: 60, windowMs: 15 * 60 * 1000 },
+  /** Keyed by the signed-in user id (stored where agent keys go). */
+  customerAccept: { agent: 20, windowMs: 15 * 60 * 1000 },
   testWake: { agent: 10, windowMs: 15 * 60 * 1000 },
 } as const;
 
@@ -39,6 +81,23 @@ export const WATCHER_ONLINE_MS = 30_000;
 export const WAKE_MAX_ATTEMPTS = 8;
 export const WEBHOOK_TIMEOUT_MS = 5_000;
 export const RESULT_SCHEMA_MAX_CHARS = 64_000;
+/** Offer input shape (input_schema). One flat object of form fields, checked by lib/input-schema.ts. */
+export const INPUT_SCHEMA_MAX_CHARS = 8_192;
+export const INPUT_MAX_PROPERTIES = 20;
+/** Every text field needs maxLength, at most this. */
+export const INPUT_STRING_MAX = 1_000;
+export const INPUT_ENUM_MAX = 50;
+export const INPUT_ENUM_VALUE_MAX = 100;
+export const INPUT_PATTERN_MAX = 200;
+export const INPUT_TITLE_MAX = 100;
+export const INPUT_DESCRIPTION_MAX = 300;
+/** JSON.stringify(input).length cap, checked before Ajv runs. */
+export const INPUT_MAX_CHARS = 16_000;
+/** Notes a guest may add to a form task. Stored in tasks.description. */
+export const FORM_NOTES_MAX = 2_000;
+export const INPUT_PROPERTY_PATTERN = /^[a-z][a-z0-9_]{0,39}$/;
+/** Compiled input validators kept in memory. */
+export const INPUT_VALIDATOR_CACHE_MAX = 500;
 export const MESSAGE_BODY_MAX = 32_000;
 export const TASK_DESCRIPTION_MAX = 32_000;
 export const TASK_TITLE_MAX = 200;

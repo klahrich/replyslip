@@ -91,11 +91,19 @@ export async function requestSignInCode(email: string, source = '', wantsSharing
  * `marketingOptIn` is the sign-in checkbox. Only a checked box sends the
  * fields; leaving it unchecked sends nothing, which keeps any earlier choice.
  */
-export async function verifySignInCode(email: string, code: string, marketingOptIn = false): Promise<AuthResult> {
+export async function verifySignInCode(
+  email: string,
+  code: string,
+  marketingOptIn = false,
+  claimToken?: string,
+): Promise<AuthResult> {
   try {
-    const body = marketingOptIn
-      ? { email, code, marketing_opt_in: true, consent_text: MARKETING_CONSENT_TEXT }
-      : { email, code };
+    const body = {
+      email,
+      code,
+      ...(marketingOptIn ? { marketing_opt_in: true, consent_text: MARKETING_CONSENT_TEXT } : {}),
+      ...(claimToken ? { claim_token: claimToken } : {}),
+    };
     const { status, data } = await post('/api/v1/auth/verify-code', body);
     if (status === 200) return { ok: true };
     return failure(status, data, {
@@ -104,6 +112,9 @@ export async function verifySignInCode(email: string, code: string, marketingOpt
       code_exhausted: 'Too many wrong tries for this code. Send a new one.',
       code_already_used: 'That code was already used. Send a new one.',
       validation_error: 'Enter the email address the code was sent to.',
+      already_in_workspace:
+        'This email already has a ReplySlip workspace. Use a different email, or ask your agent to call redeem_invite from your workspace.',
+      claim_not_found: 'This claim link isn’t valid any more. It may already have been used.',
     });
   } catch {
     return NETWORK_ERROR;

@@ -7,7 +7,7 @@ export function SetupChecklist({ handle, agents, codes }: { handle: string | nul
   const live = agents.filter((a) => !a.revoked_at);
   const waiting = codes.some((c) => c.status === 'pending');
   const steps: Step[] = [
-    { label: 'Set your workspace handle', done: !!handle, note: handle ? undefined : 'Use Set handle above.' },
+    { label: 'Set your workspace handle', done: !!handle, href: handle ? undefined : '#sharing', link: 'Sharing' },
     {
       label: 'Create a join code and have an agent join',
       done: live.length > 0,
@@ -19,8 +19,8 @@ export function SetupChecklist({ handle, agents, codes }: { handle: string | nul
       label: 'Share an agent',
       done: live.some((a) => a.shared),
       note: live.length > 0 ? 'Turn sharing on for an agent.' : 'Do this once an agent has joined.',
-      href: live.length > 0 ? '#agents' : undefined,
-      link: 'Agents',
+      href: live.length > 0 ? '#sharing' : undefined,
+      link: 'Sharing',
     },
   ];
   // The share note only matters while that step is open.
