@@ -49,14 +49,23 @@ const NEVER_REDIRECTED = [
   '/docs/api.md',
   '/docs/getting-started.md',
   '/valetto-seo/robots',
+  '/docs',
+  '/docs/api',
+  // Unknown paths and future routes are never redirected by default.
+  '/foo',
+  '/foo/bar',
+  '/nonexistent',
+  '/compare',
+  '/compare/new-slug',
+  '/how-it-works/extra',
 ];
 
-const OLD_SITE_PAGES = ['/how-it-works', '/compare/agent-relay', '/compare/harnessrouter', '/sharing', '/agents', '/nonexistent'];
+const OLD_SITE_PAGES = ['/how-it-works', '/compare/agent-relay', '/compare/harnessrouter', '/sharing', '/agents'];
 
 describe('replyslip.com redirects', () => {
   for (const host of ['replyslip.com', 'www.replyslip.com']) {
     it(`${host}: site pages go to the valetto.tech homepage`, async () => {
-      for (const path of ['/', '/privacy', '/terms', '/early-access', ...OLD_SITE_PAGES]) {
+      for (const path of ['/', '/privacy', '/terms', ...OLD_SITE_PAGES]) {
         expect(await redirectFor(host, path), path).toBe('https://valetto.tech/');
       }
     });
@@ -68,6 +77,8 @@ describe('replyslip.com redirects', () => {
 
     it(`${host}: API, MCP, token, app and file paths pass through`, async () => {
       for (const path of NEVER_REDIRECTED) expect(await redirectFor(host, path), path).toBeNull();
+      // ReplySlip has no /early-access page; only valetto.tech serves one.
+      expect(await redirectFor(host, '/early-access')).toBeNull();
     });
   }
 });
@@ -99,6 +110,8 @@ describe('valetto.tech redirects', () => {
     expect(await redirectFor('www.valetto.tech', '/how-it-works')).toBe('https://valetto.tech/');
     expect(await redirectFor('www.valetto.tech', '/')).toBe('https://valetto.tech/');
     expect(await redirectFor('www.valetto.tech', '/privacy')).toBe('https://valetto.tech/privacy');
+    // Unknown paths only get the existing www -> apex hop, never the homepage redirect.
+    expect(await redirectFor('www.valetto.tech', '/foo')).toBe('https://valetto.tech/foo');
   });
 });
 
