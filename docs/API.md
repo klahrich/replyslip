@@ -193,7 +193,7 @@ Session cookie. A bearer `rsk_` key is `403` `human_required`. There is no MCP t
 { "kind": "personal", "label": "Initech", "email": "optional", "offers": null, "daily_cap": 20, "max_uses": null, "expires_at": null }
 ```
 
-`kind` is required: `personal`, `public`, or `agent` (see Agent invite links). `offers` omitted or `null` means every offer on the agent, including offers added later (`all_offers`). `email` is for `personal` links only. A `personal` link always has `max_uses` 1. `expires_at` is an ISO time within a year, or `null` for no expiry. `201` `{ "invite", "token", "url" }`. `url` is `/i#<token>` on `CUSTOMER_ORIGIN` when the deployment sets it (and `APP_ORIGIN` lists it), otherwise on the first `APP_ORIGIN` entry, otherwise on the request's origin. `409` `public_link_exists` when the agent already has an active public link; reset it instead. `400` `agent_not_shared`. `404` `offer_not_found`. `429` `too_many_invites` past 200 unused links.
+`kind` is required: `personal`, `public`, or `agent` (see Agent invite links). `offers` omitted or `null` means every offer on the agent, including offers added later (`all_offers`). `email` is for `personal` links only. A `personal` link always has `max_uses` 1. `expires_at` is an ISO time within a year, or `null` for no expiry. `201` `{ "invite", "token", "url" }`. `409` `public_link_exists` when the agent already has an active public link; reset it instead. `400` `agent_not_shared`. `404` `offer_not_found`. `429` `too_many_invites` past 200 unused links.
 
 ### GET `/api/v1/agents/:id/invites`
 
@@ -205,7 +205,7 @@ Session cookie, human only. Any of `label`, `offers`, `daily_cap`, `max_uses`, `
 
 ### POST `/api/v1/agents/:id/invites/:inviteId/rotate`
 
-Session cookie, human only. Public links only (`400` `not_public_link`). The old link stops working at once, and existing customers keep their access. `200` `{ "invite", "token", "url" }`, with `url` on the same origin as create.
+Session cookie, human only. Public links only (`400` `not_public_link`). The old link stops working at once, and existing customers keep their access. `200` `{ "invite", "token", "url" }`.
 
 ### POST `/api/v1/agents/:id/invites/:inviteId/revoke`
 
@@ -235,7 +235,7 @@ Session cookie. A bearer `rsk_` key is `403` `human_required`. There is no MCP t
 { "kind": "agent", "offers": ["draft"], "daily_cap": 20, "max_uses": 1, "expires_in_days": 30, "label": "Initech", "approve_on_redeem": false }
 ```
 
-`offers` is required. Defaults: `daily_cap` 50, `max_uses` 1 (up to 1000), `expires_in_days` 30 (1–90), `approve_on_redeem` false. `201` `{ "invite", "token", "url", "agent_prompt" }`. `url` and `agent_prompt` use the first `APP_ORIGIN` entry (or the request's origin when it is unset), never `CUSTOMER_ORIGIN`. `400` `agent_not_shared` when sharing is off. `404` `offer_not_found`. `429` `too_many_invites` past 50 active invites on the agent. The guest-workspace cap is checked at redeem, not here.
+`offers` is required. Defaults: `daily_cap` 50, `max_uses` 1 (up to 1000), `expires_in_days` 30 (1–90), `approve_on_redeem` false. `201` `{ "invite", "token", "url", "agent_prompt" }`. `400` `agent_not_shared` when sharing is off. `404` `offer_not_found`. `429` `too_many_invites` past 50 active invites on the agent. The guest-workspace cap is checked at redeem, not here.
 
 ### GET `/api/v1/invites/preview`
 
@@ -582,7 +582,7 @@ Each day and the totals have `signups`, `workspaces`, `agents_registered`, `acti
 
 ## Public docs
 
-These are markdown or plain text, not JSON. Absolute links use the request's origin when it exactly equals an `APP_ORIGIN` entry, otherwise the first entry. With `APP_ORIGIN` unset they use the request host.
+These are markdown or plain text, not JSON. Absolute links use the first `APP_ORIGIN` entry, or the request host when `APP_ORIGIN` is unset.
 
 | Path | Content-Type | Body |
 | --- | --- | --- |

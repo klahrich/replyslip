@@ -25,16 +25,76 @@ export function clientIp(req: Request): string {
   return 'unknown';
 }
 
+/** A misconfigured APP_ORIGIN. Thrown on the first read so it can't silently never match. */
+export class OriginConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OriginConfigError';
+  }
+}
+
+/** Entry must already be exactly `new URL(entry).origin`: lowercase scheme://host[:port], no path, no default port. */
+function assertCanonicalOrigin(name: string, entry: string): string {
+  let origin: string;
+  try {
+    origin = new URL(entry).origin;
+  } catch {
+    origin = 'null';
+  }
+  if (origin === 'null') {
+    throw new OriginConfigError(`${name} entry "${entry}" is not an origin. Use scheme://host[:port], e.g. https://replyslip.com.`);
+  }
+  if (origin !== entry) {
+    throw new OriginConfigError(
+      `${name} entry "${entry}" is not in canonical form; write it as "${origin}" (lowercase host, no path, no default port).`,
+    );
+  }
+  return entry;
+}
+
+function trimEntry(entry: string): string {
+  return entry.trim().replace(/\/+$/, '');
+}
+
+/** Production deployment: VERCEL_ENV=production, or NODE_ENV=production off Vercel (previews also run NODE_ENV=production). */
+export function isProductionDeployment(): boolean {
+  const vercel = process.env.VERCEL_ENV;
+  if (vercel) return vercel === 'production';
+  return process.env.NODE_ENV === 'production';
+}
+
+let warnedUnsetInProduction = false;
+
+/** Lets tests see the once-only warnings again. */
+export function resetOriginWarningsForTests(): void {
+  warnedUnsetInProduction = false;
+}
+
 /**
- * APP_ORIGIN as a list: comma-separated, each entry trimmed with its trailing slash removed, empties dropped.
- * Empty when APP_ORIGIN is unset or blank.
+ * APP_ORIGIN as a list: comma-separated, each entry trimmed with its trailing slash removed; empty entries and a
+ * literal `null` (so `Origin: null` can never match) are dropped. Every other entry must already be a canonical
+ * origin, or this throws OriginConfigError. Empty when APP_ORIGIN is unset or blank; in production that logs one
+ * loud warning, because the Origin check then trusts the request's own Host.
  */
 export function configuredOrigins(raw: string | undefined = process.env.APP_ORIGIN): string[] {
-  if (!raw) return [];
-  return raw
+  const entries = (raw ?? '')
     .split(',')
-    .map((entry) => entry.trim().replace(/\/+$/, ''))
-    .filter((entry) => entry.length > 0);
+    .map(trimEntry)
+    .filter((entry) => entry.length > 0 && entry !== 'null')
+    .map((entry) => assertCanonicalOrigin('APP_ORIGIN', entry));
+  if (entries.length === 0 && isProductionDeployment() && !warnedUnsetInProduction) {
+    warnedUnsetInProduction = true;
+    console.warn(
+      '[replyslip] WARNING: APP_ORIGIN is not set in production. The Origin check trusts the request Host and links use ' +
+        'the request origin. Set APP_ORIGIN to the public origin(s), e.g. https://replyslip.com.',
+    );
+  }
+  return entries;
+}
+
+/** Throws OriginConfigError when APP_ORIGIN is malformed. Called at server start. */
+export function validateOriginConfig(): void {
+  configuredOrigins();
 }
 
 /** The first APP_ORIGIN entry, or null when APP_ORIGIN is unset. */
@@ -43,53 +103,12 @@ export function canonicalOrigin(): string | null {
 }
 
 /**
- * Origin for absolute URLs that are shared or stored (agent invite links, register/redeem MCP and docs URLs,
- * links in emails): the first APP_ORIGIN entry, or the request's own origin when APP_ORIGIN is unset.
+ * Origin for every absolute URL the app hands out or serves (agent invite links, register/redeem MCP and docs
+ * URLs, llms.txt, skill.md, docs/*.md, links in emails): the first APP_ORIGIN entry, or the request's own origin
+ * when APP_ORIGIN is unset.
  */
 export function publicOrigin(req: Request): string {
   return canonicalOrigin() ?? requestOrigin(req);
-}
-
-/**
- * Origin for URLs rendered into a response for the current page (llms.txt, skill.md, docs/*.md): the request's
- * own origin when it exactly equals an APP_ORIGIN entry, otherwise the first entry, so an unlisted Host or
- * X-Forwarded-Host is never echoed. The request's own origin when APP_ORIGIN is unset.
- */
-export function servedOrigin(req: Request): string {
-  const own = requestOrigin(req);
-  const configured = configuredOrigins();
-  if (configured.length === 0) return own;
-  return configured.includes(own) ? own : configured[0]!;
-}
-
-/** CUSTOMER_ORIGIN, trimmed with its trailing slash removed, or null when unset or blank. */
-export function configuredCustomerOrigin(raw: string | undefined = process.env.CUSTOMER_ORIGIN): string | null {
-  const value = raw?.trim().replace(/\/+$/, '');
-  return value ? value : null;
-}
-
-const warnedCustomerOrigins = new Set<string>();
-
-/**
- * Origin for customer-facing Valetto URLs (customer invite links, /i#rsl_...): CUSTOMER_ORIGIN when set, else
- * publicOrigin. When APP_ORIGIN is set and does not list CUSTOMER_ORIGIN, that is a misconfiguration (the link's
- * page could not POST back): warn once per value and use publicOrigin instead of failing the request.
- */
-export function customerOrigin(req: Request): string {
-  const customer = configuredCustomerOrigin();
-  if (!customer) return publicOrigin(req);
-  const configured = configuredOrigins();
-  if (configured.length > 0 && !configured.includes(customer)) {
-    const key = `${customer}\n${configured.join(',')}`;
-    if (!warnedCustomerOrigins.has(key)) {
-      warnedCustomerOrigins.add(key);
-      console.warn(
-        `[replyslip] CUSTOMER_ORIGIN ${customer} is not in APP_ORIGIN; customer links use ${configured[0]} instead.`,
-      );
-    }
-    return configured[0]!;
-  }
-  return customer;
 }
 
 /** Origins a cookie-authenticated POST may come from: every APP_ORIGIN entry, or the request's own origin. */

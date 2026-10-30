@@ -91,16 +91,16 @@ describe('agent docs', () => {
   });
 });
 
-describe('served docs use the request origin only when APP_ORIGIN lists it', () => {
+describe('served docs stay on the canonical origin', () => {
   const saved = process.env.APP_ORIGIN;
   afterEach(() => {
     if (saved === undefined) delete process.env.APP_ORIGIN;
     else process.env.APP_ORIGIN = saved;
   });
 
-  function on(host: string, path: string, extra: Record<string, string> = {}) {
+  function on(host: string, path: string) {
     return new Request(`https://${host}${path}`, {
-      headers: { 'x-forwarded-host': host, 'x-forwarded-proto': 'https', ...extra },
+      headers: { 'x-forwarded-host': host, 'x-forwarded-proto': 'https' },
     });
   }
 
@@ -112,19 +112,13 @@ describe('served docs use the request origin only when APP_ORIGIN lists it', () 
   ] as const;
 
   for (const [name, route, path] of routes) {
-    it(`${name}: listed host is echoed, unlisted host gets the canonical origin`, async () => {
+    it(`${name}: uses the first APP_ORIGIN entry on any host, listed or not`, async () => {
       process.env.APP_ORIGIN = 'https://replyslip.com,https://www.replyslip.com,https://valetto.tech';
-      const listed = await (await route(on('valetto.tech', path))).text();
-      expect(listed).toContain('https://valetto.tech/');
-      expect(listed).not.toContain('https://replyslip.com/skill.md');
-
-      const unlisted = await (await route(on('evil.example', path))).text();
-      expect(unlisted).not.toContain('evil.example');
-      expect(unlisted).toContain('https://replyslip.com/');
-
-      const spoofed = await (await route(on('replyslip-git-x.vercel.app', path, { host: 'valetto.tech' }))).text();
-      expect(spoofed).not.toContain('vercel.app');
-      expect(spoofed).toContain('https://replyslip.com/');
+      for (const host of ['valetto.tech', 'www.replyslip.com', 'evil.example']) {
+        const body = await (await route(on(host, path))).text();
+        expect(body, host).toContain('https://replyslip.com/');
+        expect(body, host).not.toContain(`https://${host}/`);
+      }
     });
   }
 });

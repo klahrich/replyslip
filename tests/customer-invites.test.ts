@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import postgres from 'postgres';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { GET as listAgentsRoute } from '@/app/api/v1/agents/route';
 import { GET as getAccess, PUT as putAccess } from '@/app/api/v1/agents/[id]/customer-access/route';
 import { GET as listInvitesRoute, POST as postInvite } from '@/app/api/v1/agents/[id]/invites/route';
@@ -872,54 +872,11 @@ describe('customer links: Origin check on accept', () => {
   });
 });
 
-describe('customer links: absolute URLs use CUSTOMER_ORIGIN or the canonical origin', () => {
-  const saved = { app: process.env.APP_ORIGIN, customer: process.env.CUSTOMER_ORIGIN };
+describe('customer links: absolute URLs use the canonical origin', () => {
+  const saved = process.env.APP_ORIGIN;
   afterEach(() => {
-    if (saved.app === undefined) delete process.env.APP_ORIGIN;
-    else process.env.APP_ORIGIN = saved.app;
-    if (saved.customer === undefined) delete process.env.CUSTOMER_ORIGIN;
-    else process.env.CUSTOMER_ORIGIN = saved.customer;
-    vi.restoreAllMocks();
-  });
-
-  async function rotate(o: Owner, inviteId: string) {
-    const res = await call(rotateRoute, `http://localhost/api/v1/agents/${o.agentId}/invites/${inviteId}/rotate`, {
-      method: 'POST',
-      cookie: o.cookie,
-      params: { id: o.agentId, inviteId },
-    });
-    expect(res.status).toBe(200);
-    return res.data as { token: string; url: string };
-  }
-
-  it('CUSTOMER_ORIGIN in the APP_ORIGIN list: create and rotate use it', async () => {
-    process.env.APP_ORIGIN = 'https://app.example.test,https://valetto.example.test';
-    process.env.CUSTOMER_ORIGIN = 'https://valetto.example.test/';
-    const o = await owner();
-    const { url, token, invite } = await createLink(o, { kind: 'public' });
-    expect(url).toBe(`https://valetto.example.test/i#${token}`);
-    const rotated = await rotate(o, invite.id);
-    expect(rotated.url).toBe(`https://valetto.example.test/i#${rotated.token}`);
-  });
-
-  it('CUSTOMER_ORIGIN not in the APP_ORIGIN list: warns and uses the canonical origin', async () => {
-    process.env.APP_ORIGIN = 'https://app.example.test,https://www.app.example.test';
-    process.env.CUSTOMER_ORIGIN = 'https://misconfigured-customer.example.test';
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const o = await owner();
-    const { url, token, invite } = await createLink(o, { kind: 'public' });
-    expect(url).toBe(`https://app.example.test/i#${token}`);
-    const rotated = await rotate(o, invite.id);
-    expect(rotated.url).toBe(`https://app.example.test/i#${rotated.token}`);
-    expect(warn.mock.calls.filter((c) => String(c[0]).includes('CUSTOMER_ORIGIN'))).toHaveLength(1);
-  });
-
-  it('CUSTOMER_ORIGIN unset: falls back to the canonical origin', async () => {
-    process.env.APP_ORIGIN = 'https://app.example.test,https://valetto.example.test';
-    delete process.env.CUSTOMER_ORIGIN;
-    const o = await owner();
-    const { url, token } = await createLink(o, { kind: 'personal' });
-    expect(url).toBe(`https://app.example.test/i#${token}`);
+    if (saved === undefined) delete process.env.APP_ORIGIN;
+    else process.env.APP_ORIGIN = saved;
   });
 
   it('uses the first APP_ORIGIN entry, not the request host', async () => {
@@ -930,9 +887,8 @@ describe('customer links: absolute URLs use CUSTOMER_ORIGIN or the canonical ori
     expect(url).toContain(token);
   });
 
-  it('uses the request origin when APP_ORIGIN and CUSTOMER_ORIGIN are unset', async () => {
+  it('uses the request origin when APP_ORIGIN is unset', async () => {
     delete process.env.APP_ORIGIN;
-    delete process.env.CUSTOMER_ORIGIN;
     const o = await owner();
     const { url } = await createLink(o, { kind: 'personal' });
     expect(url.startsWith('http://localhost/')).toBe(true);

@@ -95,28 +95,6 @@ afterEach(() => {
   delete process.env.VALETTO_AGENT_GUESTS;
 });
 
-describe('agent invite links ignore CUSTOMER_ORIGIN', () => {
-  afterEach(() => {
-    delete process.env.APP_ORIGIN;
-    delete process.env.CUSTOMER_ORIGIN;
-  });
-
-  it('agent invite url, prompt, and redeem URLs use the canonical origin', async () => {
-    process.env.APP_ORIGIN = 'https://app.example.test,https://valetto.example.test';
-    process.env.CUSTOMER_ORIGIN = 'https://valetto.example.test';
-    const o = await owner();
-    const made = await createInvite(o);
-    expect(made.url).toBe(`https://app.example.test/i#${made.token}`);
-    expect(made.agent_prompt).toContain('https://app.example.test/skill.md');
-    expect(made.agent_prompt).not.toContain('valetto.example.test');
-    const redeemed = await redeemNew(made.token);
-    expect(redeemed.status).toBe(201);
-    expect(redeemed.data.mcp.url).toBe('https://app.example.test/api/mcp');
-    expect(redeemed.data.docs.skill).toBe('https://app.example.test/skill.md');
-    expect(redeemed.data.workspace.claim_url.startsWith('https://app.example.test/claim#')).toBe(true);
-  });
-});
-
 describe('invite links', () => {
   it('creates an invite from the dashboard, pending by default, and returns the link and prompt once', async () => {
     const o = await owner();

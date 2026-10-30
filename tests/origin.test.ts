@@ -4,25 +4,21 @@ import {
   allowedOrigins,
   assertSameOrigin,
   canonicalOrigin,
-  configuredCustomerOrigin,
   configuredOrigins,
-  customerOrigin,
   publicOrigin,
-  servedOrigin,
+  OriginConfigError,
+  resetOriginWarningsForTests,
+  validateOriginConfig,
 } from '@/lib/origin';
 
-const saved = { app: process.env.APP_ORIGIN, customer: process.env.CUSTOMER_ORIGIN };
+const saved = process.env.APP_ORIGIN;
 afterEach(() => {
-  if (saved.app === undefined) delete process.env.APP_ORIGIN;
-  else process.env.APP_ORIGIN = saved.app;
-  if (saved.customer === undefined) delete process.env.CUSTOMER_ORIGIN;
-  else process.env.CUSTOMER_ORIGIN = saved.customer;
+  if (saved === undefined) delete process.env.APP_ORIGIN;
+  else process.env.APP_ORIGIN = saved;
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  resetOriginWarningsForTests();
 });
-
-function hosted(host: string, extra: Record<string, string> = {}): Request {
-  return req({ 'x-forwarded-host': host, 'x-forwarded-proto': 'https', ...extra }, `https://${host}/llms.txt`);
-}
 
 function req(headers: Record<string, string> = {}, url = 'http://localhost/api/v1/c/links/x/accept'): Request {
   return new Request(url, { method: 'POST', headers });
@@ -133,75 +129,89 @@ describe('assertSameOrigin', () => {
   });
 });
 
-describe('servedOrigin (per-request docs)', () => {
-  const LIST = 'https://replyslip.com,https://www.replyslip.com,https://valetto.tech';
-
-  it('uses the request origin when it is listed', () => {
-    process.env.APP_ORIGIN = LIST;
-    expect(servedOrigin(hosted('www.replyslip.com'))).toBe('https://www.replyslip.com');
-    expect(servedOrigin(hosted('valetto.tech'))).toBe('https://valetto.tech');
-    expect(servedOrigin(hosted('replyslip.com'))).toBe('https://replyslip.com');
+describe('origin config validation', () => {
+  it('drops a literal null entry, so Origin: null never passes', () => {
+    expect(configuredOrigins('null, https://replyslip.com ,null')).toEqual(['https://replyslip.com']);
+    process.env.APP_ORIGIN = 'null,https://replyslip.com';
+    expect(badOrigin(req({ origin: 'null' }))).toBe('bad_origin');
+    process.env.APP_ORIGIN = 'null';
+    expect(configuredOrigins()).toEqual([]);
+    expect(badOrigin(req({ origin: 'null' }))).toBe('bad_origin');
   });
 
-  it('uses the canonical first entry for an unlisted or spoofed host', () => {
-    process.env.APP_ORIGIN = LIST;
-    expect(servedOrigin(hosted('evil.example'))).toBe('https://replyslip.com');
-    expect(servedOrigin(hosted('replyslip-abc.vercel.app'))).toBe('https://replyslip.com');
-    expect(servedOrigin(req({ host: 'valetto.tech' }, 'http://valetto.tech/llms.txt'))).toBe('https://replyslip.com');
-    expect(servedOrigin(req({ host: 'replyslip.com', 'x-forwarded-host': 'evil.example' }))).toBe('https://replyslip.com');
+  for (const [label, entry] of [
+    ['uppercase host', 'https://ReplySlip.com'],
+    ['default port', 'https://replyslip.com:443'],
+    ['a path', 'https://replyslip.com/app'],
+    ['missing scheme', 'replyslip.com'],
+    ['host:port without scheme', 'localhost:3000'],
+    ['a query', 'https://replyslip.com?x=1'],
+    ['garbage', 'not a url'],
+  ] as const) {
+    it(`APP_ORIGIN with ${label} fails with a clear error`, () => {
+      expect(() => configuredOrigins(`https://ok.example,${entry}`)).toThrow(OriginConfigError);
+      expect(() => configuredOrigins(entry)).toThrow(/APP_ORIGIN entry/);
+      process.env.APP_ORIGIN = entry;
+      expect(() => validateOriginConfig()).toThrow(OriginConfigError);
+    });
+  }
+
+  it('names the canonical form in the error', () => {
+    expect(() => configuredOrigins('https://ReplySlip.com:443')).toThrow('write it as "https://replyslip.com"');
   });
 
-  it('uses the request origin when APP_ORIGIN is unset', () => {
-    delete process.env.APP_ORIGIN;
-    expect(servedOrigin(hosted('preview.example'))).toBe('https://preview.example');
+  it('accepts canonical origins, including a non-default port and http', () => {
+    expect(configuredOrigins('https://replyslip.com,http://localhost:3000,https://valetto.tech/')).toEqual([
+      'https://replyslip.com',
+      'http://localhost:3000',
+      'https://valetto.tech',
+    ]);
+    process.env.APP_ORIGIN = 'https://valetto.tech, https://www.valetto.tech/,https://replyslip.com';
+    expect(() => validateOriginConfig()).not.toThrow();
   });
 });
 
-describe('customerOrigin', () => {
-  it('parses CUSTOMER_ORIGIN: trimmed, trailing slash stripped, blank is unset', () => {
-    expect(configuredCustomerOrigin(' https://valetto.tech/ ')).toBe('https://valetto.tech');
-    expect(configuredCustomerOrigin('  ')).toBeNull();
-    expect(configuredCustomerOrigin(undefined)).toBeNull();
-  });
+describe('APP_ORIGIN unset in production', () => {
+  function unsetWarnings(warn: { mock: { calls: unknown[][] } }) {
+    return warn.mock.calls.filter((c) => String(c[0]).includes('APP_ORIGIN is not set in production'));
+  }
 
-  it('unset: falls back to the canonical origin, then the request origin', () => {
-    delete process.env.CUSTOMER_ORIGIN;
-    process.env.APP_ORIGIN = 'https://replyslip.com,https://valetto.tech';
-    expect(customerOrigin(hosted('valetto.tech'))).toBe('https://replyslip.com');
+  it('warns once when NODE_ENV is production, and still works', () => {
     delete process.env.APP_ORIGIN;
-    expect(customerOrigin(hosted('preview.example'))).toBe('https://preview.example');
-  });
-
-  it('set and in the APP_ORIGIN list: used as is', () => {
-    process.env.APP_ORIGIN = 'https://replyslip.com, https://valetto.tech';
-    process.env.CUSTOMER_ORIGIN = ' https://valetto.tech/ ';
+    vi.stubEnv('NODE_ENV', 'production');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(customerOrigin(hosted('replyslip.com'))).toBe('https://valetto.tech');
-    expect(warn).not.toHaveBeenCalled();
+    expect(publicOrigin(req())).toBe('http://localhost');
+    expect(badOrigin(req({ origin: 'http://localhost' }))).toBeNull();
+    configuredOrigins();
+    expect(unsetWarnings(warn)).toHaveLength(1);
   });
 
-  it('set and APP_ORIGIN unset: used as is', () => {
+  it('warns once when VERCEL_ENV is production', () => {
+    process.env.APP_ORIGIN = ' , ';
+    vi.stubEnv('VERCEL_ENV', 'production');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    configuredOrigins();
+    configuredOrigins();
+    expect(unsetWarnings(warn)).toHaveLength(1);
+  });
+
+  it('does not warn outside production or when set', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     delete process.env.APP_ORIGIN;
-    process.env.CUSTOMER_ORIGIN = 'https://valetto.tech';
-    expect(customerOrigin(hosted('preview.example'))).toBe('https://valetto.tech');
-  });
-
-  it('set but not in the list: warns once and falls back to canonical without throwing', () => {
-    process.env.APP_ORIGIN = 'https://replyslip.com,https://www.replyslip.com';
-    process.env.CUSTOMER_ORIGIN = 'https://unlisted-customer.example';
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(customerOrigin(hosted('www.replyslip.com'))).toBe('https://replyslip.com');
-    expect(customerOrigin(hosted('www.replyslip.com'))).toBe('https://replyslip.com');
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]?.[0])).toContain('CUSTOMER_ORIGIN');
-  });
-
-  it('is not an extra allowed origin for the Origin check', () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    configuredOrigins();
     process.env.APP_ORIGIN = 'https://replyslip.com';
-    process.env.CUSTOMER_ORIGIN = 'https://valetto.tech';
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(badOrigin(req({ origin: 'https://valetto.tech' }))).toBe('bad_origin');
+    vi.stubEnv('VERCEL_ENV', 'production');
+    configuredOrigins();
+    expect(unsetWarnings(warn)).toHaveLength(0);
+  });
+
+  it('does not warn on a Vercel preview, which also runs NODE_ENV=production', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     delete process.env.APP_ORIGIN;
-    expect(badOrigin(req({ origin: 'https://valetto.tech' }))).toBe('bad_origin');
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    configuredOrigins();
+    expect(unsetWarnings(warn)).toHaveLength(0);
   });
 });

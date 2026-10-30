@@ -12,7 +12,7 @@ import {
 import { createCustomerInvite, customerLinkUrl, getCustomerAccess, listCustomerInvites } from '@/lib/customer-invites';
 import { handle, json, parseBody, readJson, requireUuid } from '@/lib/http';
 import { assertAgentGuestsEnabled, createInvite, invitePrompt, inviteUrl, listInvites } from '@/lib/invites';
-import { customerOrigin, publicOrigin } from '@/lib/origin';
+import { publicOrigin } from '@/lib/origin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,8 +62,8 @@ export function POST(req: Request, context: { params: Promise<{ id: string }> })
     const { id } = await context.params;
     const agentId = requireUuid(id, 'agent');
     const body = parseBody(bodySchema, await readJson(req));
+    const origin = publicOrigin(req);
     if (body.kind === 'agent') {
-      const origin = publicOrigin(req);
       assertAgentGuestsEnabled();
       const { invite, token } = await createInvite(
         user.workspace.id,
@@ -89,6 +89,6 @@ export function POST(req: Request, context: { params: Promise<{ id: string }> })
       maxUses: body.max_uses,
       expiresAt: body.expires_at,
     });
-    return json({ invite, token, url: customerLinkUrl(customerOrigin(req), token) }, 201);
+    return json({ invite, token, url: customerLinkUrl(origin, token) }, 201);
   });
 }
