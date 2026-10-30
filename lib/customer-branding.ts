@@ -145,22 +145,63 @@ const CONFUSABLES: Record<string, string> = {
   '0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', $: 's', '|': 'l', '!': 'l',
   // Latin look-alikes
   i: 'l', ı: 'l', ł: 'l', ŀ: 'l', ƚ: 'l', ɩ: 'l', ʋ: 'v', ʌ: 'v', ŧ: 't', ø: 'o', đ: 'd',
+  // Small capitals (no case mapping, and NFKC leaves them alone)
+  ᴀ: 'a', ʙ: 'b', ᴄ: 'c', ᴅ: 'd', ᴇ: 'e', ꜰ: 'f', ɢ: 'g', ʜ: 'h', ɪ: 'l', ᴊ: 'j', ᴋ: 'k', ʟ: 'l', ᴍ: 'm',
+  ɴ: 'n', ᴏ: 'o', ᴘ: 'p', ʀ: 'r', ꜱ: 's', ᴛ: 't', ᴜ: 'u', ᴠ: 'v', ᴡ: 'w', ʏ: 'y', ᴢ: 'z',
+  // Armenian (lowercased first, so capitals such as Օ arrive here as օ)
+  օ: 'o', ս: 'u', ո: 'n', ռ: 'n', հ: 'h', ց: 'g', զ: 'q', ա: 'w', լ: 'l', ւ: 'l', ք: 'p',
 };
 
-/** NFKC, lowercase, combining marks stripped, look-alikes folded, everything but letters dropped. */
-export function confusableFold(value: string): string {
-  const base = value.normalize('NFKC').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+/** NFKC, lowercase, combining marks stripped, look-alikes folded. Spacing and punctuation are kept. */
+function foldChars(value: string): string {
+  const base = value
+    .replace(/\p{Cf}/gu, '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
   let out = '';
   for (const ch of base) out += CONFUSABLES[ch] ?? ch;
-  return out.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '');
+  return out.normalize('NFKC');
+}
+
+/** foldChars with everything but letters and digits dropped. */
+export function confusableFold(value: string): string {
+  return foldChars(value).replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+/**
+ * The folded words of a name. Whitespace separates words; punctuation inside a word is dropped
+ * ("Va-letto", "v.a.l.e.t.t.o" are one word). A run of single-letter words is joined into one
+ * ("v a l e t t o"), so spaced-out spellings are caught while real word boundaries
+ * ("Valet Toronto", "Chevalet Tobacco") are kept.
+ */
+export function foldedWords(value: string): string[] {
+  const words = foldChars(value)
+    .split(/[\s\p{Z}]+/u)
+    .map((word) => word.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean);
+  const out: string[] = [];
+  let run = '';
+  for (const word of words) {
+    if ([...word].length === 1) {
+      run += word;
+      continue;
+    }
+    if (run) out.push(run);
+    run = '';
+    out.push(word);
+  }
+  if (run) out.push(run);
+  return out;
 }
 
 // "valetto" after the same fold (i and l fold together, so the check is done on the folded copy).
 const RESERVED_FOLDED = confusableFold('valetto');
 
-/** True when a name spells "Valetto" through spacing, punctuation, format characters, or look-alikes. */
+/** True when any word of the name contains "Valetto", spelled with look-alikes, punctuation, or spaced letters. */
 export function looksLikeValetto(value: string): boolean {
-  return confusableFold(value).includes(RESERVED_FOLDED);
+  return foldedWords(value).some((word) => word.includes(RESERVED_FOLDED));
 }
 
 export function normalizeDisplayName(value: unknown): string | null {
