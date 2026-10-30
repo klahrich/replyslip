@@ -2,13 +2,13 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { MarkIcon } from '@/components/site/Mark';
 
-export const EARLY_ACCESS = '/valetto/early-access';
+export const EARLY_ACCESS = '/early-access';
 
 /** The Valetto subpages' top bar: the mark back to /valetto and one link on the right. */
 export function ValettoTop({ children }: { children?: ReactNode }) {
   return (
     <header className="top">
-      <Link className="mark" href="/valetto" aria-label="Valetto home">
+      <Link className="mark" href="/" aria-label="Valetto home">
         <MarkIcon />
         Valetto
       </Link>
@@ -29,10 +29,10 @@ export function ValettoFoot() {
         , Montréal
       </p>
       <p className="foot-legal">
-        <Link className="link" href="/valetto/privacy">
+        <Link className="link" href="/privacy">
           Privacy
         </Link>
-        <Link className="link" href="/valetto/terms">
+        <Link className="link" href="/terms">
           Terms
         </Link>
       </p>

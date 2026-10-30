@@ -11,14 +11,14 @@ import '../landing-bg.css';
 import '../landing-stripes.css';
 import '@/components/site/valetto/valetto.css';
 import { GlowBg } from '../GlowBg';
+import { valettoMeta } from '@/components/site/valetto/seo';
 
-// Preview of the Valetto pivot. Kept out of search until the brand moves to valetto.tech.
-export const metadata: Metadata = {
-  title: { absolute: 'Valetto: share your bot with customers, one job at a time' },
-  description:
-    'Give each customer a private link to the jobs your Grok Bot does for them. Daily caps, one-click revoke, and a record of every request.',
-  robots: { index: false, follow: false },
-};
+// Served at valetto.tech/ (rewritten from /valetto in next.config.ts).
+export const metadata: Metadata = valettoMeta(
+  '/',
+  'Valetto: share your bot with customers, one job at a time',
+  'Give each customer a private link to the jobs your Grok Bot does for them. Daily caps, one-click revoke, and a record of every request.',
+);
 
 
 /** Splits a line into words that snap in one after another (the n-th word gets --i: from + n). */
