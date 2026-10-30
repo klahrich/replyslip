@@ -6,7 +6,7 @@ import { webhookAuthSchema } from '@/lib/delivery';
 import { HttpError } from '@/lib/errors';
 import { bearerToken, handle, json, parseBody, readJson } from '@/lib/http';
 import { assertAgentGuestsEnabled, redeemInvite } from '@/lib/invites';
-import { clientIp, requestOrigin } from '@/lib/origin';
+import { clientIp, publicOrigin } from '@/lib/origin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -55,7 +55,7 @@ export function POST(req: Request) {
       rateKey,
     });
     if (result.kind !== 'new') throw new HttpError(500, 'internal_error', 'Something went wrong.');
-    const origin = requestOrigin(req);
+    const origin = publicOrigin(req);
     return json(
       {
         agent: serializeAgent(result.agent),

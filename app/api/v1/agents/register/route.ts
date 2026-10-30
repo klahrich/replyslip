@@ -4,7 +4,7 @@ import { webhookAuthSchema } from '@/lib/delivery';
 import { HttpError } from '@/lib/errors';
 import { bearerToken, handle, json, parseBody, readJson } from '@/lib/http';
 import { MCP_HEADER_PLACEHOLDER, registrationNextSteps } from '@/lib/agent-docs';
-import { requestOrigin } from '@/lib/origin';
+import { publicOrigin } from '@/lib/origin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,7 +27,7 @@ export function POST(req: Request) {
       throw new HttpError(401, 'invalid_join_code', 'Send the join code as a Bearer token.');
     }
     const body = parseBody(bodySchema, await readJson(req));
-    const origin = requestOrigin(req);
+    const origin = publicOrigin(req);
     const { agent, apiKey } = await registerAgentWithJoinCode({
       token,
       name: body.name,

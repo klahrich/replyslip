@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { requireUser } from '@/lib/auth';
 import { acceptCustomerInvite } from '@/lib/customer-invites';
 import { handleCustomer, json, parseBody, readJson } from '@/lib/http';
-import { assertSameOrigin, requestOrigin } from '@/lib/origin';
+import { assertSameOrigin, publicOrigin } from '@/lib/origin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +19,7 @@ export function POST(req: Request, context: { params: Promise<{ token: string }>
     const result = await acceptCustomerInvite(
       { id: user.id, email: user.email, workspaceId: user.workspace.id },
       token,
-      requestOrigin(req),
+      publicOrigin(req),
     );
     return json(result);
   });

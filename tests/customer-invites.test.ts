@@ -856,4 +856,41 @@ describe('customer links: Origin check on accept', () => {
     expect(await shares(o)).toHaveLength(0);
     expect((await accept(token, customer, { origin: 'https://app.example.test' })).status).toBe(200);
   });
+
+  it('with an APP_ORIGIN list, accepts any entry and rejects the rest', async () => {
+    process.env.APP_ORIGIN = ' https://app.example.test/ , https://www.app.example.test,,https://valetto.example.test ';
+    const o = await owner();
+    const { token } = await createLink(o, { kind: 'personal' });
+    const customer = await signIn(emailAddress('list'));
+    for (const origin of ['http://localhost', 'https://evil.example', 'https://sub.valetto.example.test', 'https://valetto.example.test/']) {
+      const res = await accept(token, customer, { origin, 'x-forwarded-host': 'evil.example' });
+      expect(res.status, origin).toBe(403);
+      expect(res.data.error.code).toBe('bad_origin');
+    }
+    expect(await shares(o)).toHaveLength(0);
+    expect((await accept(token, customer, { origin: 'https://valetto.example.test' })).status).toBe(200);
+  });
+});
+
+describe('customer links: absolute URLs use the canonical origin', () => {
+  const saved = process.env.APP_ORIGIN;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.APP_ORIGIN;
+    else process.env.APP_ORIGIN = saved;
+  });
+
+  it('uses the first APP_ORIGIN entry, not the request host', async () => {
+    process.env.APP_ORIGIN = 'https://app.example.test/, https://valetto.example.test';
+    const o = await owner();
+    const { url, token } = await createLink(o, { kind: 'personal' });
+    expect(url.startsWith('https://app.example.test/')).toBe(true);
+    expect(url).toContain(token);
+  });
+
+  it('uses the request origin when APP_ORIGIN is unset', async () => {
+    delete process.env.APP_ORIGIN;
+    const o = await owner();
+    const { url } = await createLink(o, { kind: 'personal' });
+    expect(url.startsWith('http://localhost/')).toBe(true);
+  });
 });
