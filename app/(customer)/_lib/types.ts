@@ -90,7 +90,7 @@ export type Job = {
   result_fields: ResultField[];
 };
 
-export type ApprovedShare = { status: 'approved'; daily_cap: number; used_today: number; resets_at: string };
+export type ApprovedShare = { status: 'approved'; daily_cap: number; used_today: number; resets_at: string | null };
 export type PendingShare = { status: 'pending'; requested_at: string };
 export type RevokedShare = { status: 'revoked' };
 
@@ -136,7 +136,7 @@ export type CustomerRequest = {
   status: RequestStatus;
   input: InputObject | null;
   input_display: DisplayRow[];
-  notes: string;
+  notes: string | null;
   question: string | null;
   answers: Answer[];
   result: unknown;

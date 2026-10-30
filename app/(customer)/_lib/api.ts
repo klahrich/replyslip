@@ -4,8 +4,8 @@
  *
  * Live today (PR #94): sign-in (/api/v1/auth/*), R1 open a link, R2 accept it. Same-origin fetch with the
  * session cookie.
- * Sample data: R3–R8 aren't on the server yet. They answer from api-mock.ts in the same shapes, after a real
- * session check. When a route ships, set its flag in LIVE to true; its fetch code below is already written.
+ * R3–R8 are live (PR #102). The sample layer in api-mock.ts still answers when VALETTO_MOCK=1 in dev, or for a
+ * route whose LIVE flag is set back to false.
  *
  * `VALETTO_MOCK=1 npm run dev` sends every call, sign-in included, to api-mock.ts for design work and the
  * screenshot script. That switch is compiled out of production builds.
@@ -28,7 +28,7 @@ import type {
 } from './types';
 
 /** Which of R3–R8 the server has shipped. false = answer from sample data. */
-const LIVE = { R3: false, R4: false, R5: false, R6: false, R7: false, R8: false } as const;
+const LIVE = { R3: true, R4: true, R5: true, R6: true, R7: true, R8: true } as const;
 
 /** Inlined at build time (next.config.ts `env`). Never true in a production build. */
 export const MOCK = process.env.NODE_ENV !== 'production' && process.env.VALETTO_MOCK === '1';

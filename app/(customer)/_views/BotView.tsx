@@ -110,7 +110,8 @@ export function BotView({ agentId }: { agentId: string }) {
   );
 }
 
-function resetText(iso: string): string {
+function resetText(iso: string | null): string {
+  if (!iso) return '';
   const d = new Date(iso);
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
