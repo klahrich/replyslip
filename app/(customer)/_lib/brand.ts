@@ -32,11 +32,9 @@ export function readableOn(bg: string): '#000000' | '#FFFFFF' {
 function okOnWhite(hex: string): boolean {
   return contrast(hex, '#FFFFFF') >= 4.5;
 }
-/** "black" / "white" / "#000000" / "#FFFFFF" → hex, or null if missing or unknown. */
-function onPrimaryHex(v: Branding['on_primary']): '#000000' | '#FFFFFF' | null {
-  if (v === 'black' || v === '#000000') return '#000000';
-  if (v === 'white' || v === '#FFFFFF') return '#FFFFFF';
-  return null;
+/** 17.3: exactly "#000000" or "#FFFFFF"; any other value (missing, lowercase, a name) is ignored. */
+function onPrimaryHex(v: unknown): '#000000' | '#FFFFFF' | null {
+  return v === '#000000' || v === '#FFFFFF' ? v : null;
 }
 /** Text color for "brand-colored" words when the main color fails on white (13.4: fills and borders only). */
 const NEUTRAL_TEXT = '#18181B';

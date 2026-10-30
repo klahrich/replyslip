@@ -1,394 +1,232 @@
 /**
- * Customer page API (spec section 15). Every function returns exactly the R1–R8 response shapes from
- * types.ts and throws ApiError with the spec's error codes.
+ * Customer page API client (spec section 15, with sections 16 and 17). Every function returns the R1–R8
+ * response shapes from types.ts and throws ApiError with the server's error code and message.
  *
- * MOCK. Today this answers from mock-data.ts in the browser. To go live, replace the bodies in this one
- * file with `fetch` calls to /api/v1/c/... and /api/v1/auth/... (credentials: 'same-origin',
- * Content-Type: application/json on POSTs); no page or component changes are needed.
+ * Live today (PR #94): sign-in (/api/v1/auth/*), R1 open a link, R2 accept it. Same-origin fetch with the
+ * session cookie.
+ * Sample data: R3–R8 aren't on the server yet. They answer from api-mock.ts in the same shapes, after a real
+ * session check. When a route ships, set its flag in LIVE to true; its fetch code below is already written.
  *
- * Mock-only demo switches, read from the page URL:
- *   ?share=pending | revoked   force the share status on /c/<agent_id> pages
- *   ?cap=reached               today's request limit is used up
- *   ?mock=field_errors         the next submit returns invalid_input with details.fields
- *   ?accept=queue_full | plan_limit   R2 returns 429 pending_queue_full / 403 plan_limit (section 17.6)
- * Link tokens: acme-jewellers, northline-windows, fernwood-furniture, expired, used-up; anything else is 404.
+ * `VALETTO_MOCK=1 npm run dev` sends every call, sign-in included, to api-mock.ts for design work and the
+ * screenshot script. That switch is compiled out of production builds.
  */
 import { ApiError } from './types';
 import type {
-  TextField,
   AcceptResponse,
-  Answer,
+  ApiErrorBody,
   BotResponse,
   BotsResponse,
   CreateRequestBody,
   CustomerRequest,
-  DisplayRow,
-  InputField,
-  InputObject,
-  Job,
+  FailCode,
   LinkResponse,
   Me,
-  RequestListResponse,
-  RequestListRow,
-  RequestResponse,
   RequestListFilter,
+  RequestListResponse,
+  RequestResponse,
   RequestStatus,
-  ResultDisplayRow,
 } from './types';
-import { MOCK_BOTS, MOCK_EMAIL, MOCK_REQUESTS, type MockBot, type MockRequestFixture } from './mock-data';
-import { checkInput, displayValue, isChoice, labelFor, optionsFor, orderedFields, rangeMessage } from './schema';
 
-/* ---------------- mock plumbing ---------------- */
+/** Which of R3–R8 the server has shipped. false = answer from sample data. */
+const LIVE = { R3: false, R4: false, R5: false, R6: false, R7: false, R8: false } as const;
 
-type Created = MockRequestFixture & { createdMs: number; client_request_id?: string };
-type MockState = {
-  signedIn: boolean;
-  email: string;
-  accepted: Record<string, 'approved' | 'pending'>;
-  created: Created[];
-  answered: Record<string, { answers: Answer[]; atMs: number }>;
-};
+/** Inlined at build time (next.config.ts `env`). Never true in a production build. */
+export const MOCK = process.env.NODE_ENV !== 'production' && process.env.VALETTO_MOCK === '1';
+const mock = () => import('./api-mock');
 
-const KEY = 'vt-mock-state';
-const blank = (): MockState => ({ signedIn: false, email: MOCK_EMAIL, accepted: {}, created: [], answered: {} });
+/** Fired on window when a signed-in route answers 401; SessionGate swaps the page for a sign-in notice. */
+export const UNAUTHORIZED_EVENT = 'valetto:unauthorized';
 
-function load(): MockState {
-  if (typeof window === 'undefined') return blank();
+/* ---------------- transport ---------------- */
+
+const NETWORK: ApiErrorBody = { code: 'network_error', message: "We couldn't reach the server. Check your connection and try again." };
+const UNKNOWN: ApiErrorBody = { code: 'internal_error', message: 'Something went wrong. Try again.' };
+
+/** Last body per URL for the routes that send ETag (R4, R6, R7; spec 15.9): a 304 reuses it. */
+const etagCache = new Map<string, { etag: string; body: unknown }>();
+
+type CallOptions = { method?: 'GET' | 'POST'; body?: unknown; conditional?: boolean };
+
+async function call<T>(path: string, { method = 'GET', body, conditional = false }: CallOptions = {}): Promise<{ data: T; status: number }> {
+  const headers: Record<string, string> = { accept: 'application/json' };
+  // Every POST is JSON: the server's CSRF guard rejects anything else with 415 (spec 15.1).
+  if (method === 'POST') headers['content-type'] = 'application/json';
+  const cached = conditional ? etagCache.get(path) : undefined;
+  if (cached) headers['if-none-match'] = cached.etag;
+
+  let res: Response;
   try {
-    return { ...blank(), ...JSON.parse(sessionStorage.getItem(KEY) ?? '{}') };
+    res = await fetch(path, {
+      method,
+      headers,
+      body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
   } catch {
-    return blank();
+    throw new ApiError(0, NETWORK);
   }
-}
-function save(s: MockState) {
-  sessionStorage.setItem(KEY, JSON.stringify(s));
-}
-function param(name: string): string | null {
-  return typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get(name);
-}
-const wait = (ms = 350) => new Promise((r) => setTimeout(r, ms));
-const fail = (status: number, code: string, message: string, details?: ApiError['details']): never => {
-  throw new ApiError(status, { code, message, details });
-};
-const iso = (ms: number) => new Date(ms).toISOString();
+  if (res.status === 304 && cached) return { data: cached.body as T, status: 200 };
 
-function botById(agentId: string): MockBot {
-  return MOCK_BOTS.find((b) => b.agent_id === agentId) ?? fail(404, 'not_found', "We couldn't find that page.");
-}
-function jobFor(bot: MockBot, offer: string): Job | undefined {
-  return bot.jobs.find((j) => j.name === offer);
-}
-
-function shareStatus(bot: MockBot, s: MockState): 'approved' | 'pending' | 'revoked' {
-  const forced = param('share');
-  if (forced === 'pending' || forced === 'revoked' || forced === 'approved') return forced;
-  return s.accepted[bot.agent_id] ?? 'approved';
-}
-
-/* ---------------- server-side builders the real API owns ---------------- */
-
-function inputDisplay(job: Job | undefined, input: InputObject | null): DisplayRow[] {
-  if (!job?.input_schema || !input) return [];
-  return orderedFields(job.input_schema)
-    .filter(([k]) => input[k] !== undefined)
-    .map(([k, f]) => ({ key: k, label: labelFor(k, f), value: displayValue(f, input[k]) }));
-}
-
-function resultDisplay(job: Job | undefined, result: unknown): ResultDisplayRow[] {
-  const row = (key: string, label: string, v: unknown): ResultDisplayRow => {
-    if (typeof v === 'number') return { key, label, kind: 'number', value: v.toLocaleString('en-CA') };
-    if (typeof v === 'boolean') return { key, label, kind: 'boolean', value: v ? 'Yes' : 'No' };
-    if (typeof v === 'string') return { key, label, kind: 'text', value: v };
-    if (Array.isArray(v) && v.every((x) => ['string', 'number', 'boolean'].includes(typeof x)))
-      return { key, label, kind: 'list', value: v.join(', ') };
-    return { key, label, kind: 'json', value: JSON.stringify(v, null, 2) };
-  };
-  if (result === null || result === undefined) return [];
-  if (typeof result !== 'object' || Array.isArray(result)) return [row('_value', 'Result', result)];
-  const obj = result as Record<string, unknown>;
-  const known = job?.result_fields ?? [];
-  const keys = [...known.map((f) => f.key).filter((k) => k in obj), ...Object.keys(obj).filter((k) => !known.some((f) => f.key === k))];
-  return keys.map((k) => row(k, known.find((f) => f.key === k)?.label ?? labelFor(k), obj[k]));
-}
-
-/** Mock bots ask a follow-up question for these jobs (render_ring only when there's an engraving). */
-function questionFor(c: MockRequestFixture): string | null {
-  if (c.offer === 'measuring_visit') return 'Is there parking for a van on your street?';
-  if (c.offer === 'render_ring' && c.input?.engraving) return 'Do you want the engraving in script or block letters?';
-  return null;
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    // The link routes (R1, R2) are meant for signed-out visitors and handle their own errors.
+    if (res.status === 401 && path.startsWith('/api/v1/c/') && !path.startsWith('/api/v1/c/links/')) {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    }
+    throw new ApiError(res.status, errorBody(json, res.status));
+  }
+  if (json === null) throw new ApiError(res.status, UNKNOWN);
+  const etag = conditional ? res.headers.get('etag') : null;
+  if (etag) etagCache.set(path, { etag, body: json });
+  return { data: json as T, status: res.status };
 }
 
 /**
- * What a newly sent mock request looks like now. Steps are 8 s each.
- * Auto:         open → (needs_info → answer → open) → done
- * Review first: in_review → open → (awaiting_release [question held] → needs_info → answer → open) → awaiting_release → done
- * Section 17.8: a bot question waits for the owner's release like an answer does, so it's hidden during awaiting_release.
+ * The envelope is `{ error: { code, message, details? } }`. The auth rate limit puts `retry_after_seconds`
+ * next to `message` instead of in `details`; it's folded into details so callers read one place.
  */
-function liveState(bot: MockBot, c: Created, s: MockState, now: number): Partial<MockRequestFixture> & { status: RequestStatus } {
-  const STEP = 8000;
-  const t = now - c.createdMs;
-  const answered = s.answered[c.id];
-  const result = mockResult(c);
-  const review = bot.review_mode === 'review_first';
-  const question = questionFor(c);
-  const start = review ? STEP : 0; // in_review first
-  if (review && t < STEP) return { status: 'in_review' };
-  if (question && !answered) {
-    if (t < start + STEP) return { status: 'open' };
-    if (review && t < start + 2 * STEP) return { status: 'awaiting_release', held_question: question };
-    return { status: 'needs_info', question };
-  }
-  const since = answered ? now - answered.atMs : t - start;
-  if (since < STEP) return { status: 'open' };
-  if (review && since < 2 * STEP) return { status: 'awaiting_release' };
-  return { status: 'done', result };
-}
-
-function mockResult(c: MockRequestFixture): Record<string, unknown> {
-  const i = c.input ?? {};
-  switch (c.offer) {
-    case 'render_ring':
-      return {
-        preview_url: 'https://example.com/previews/ring-new.webp',
-        price_cad: Math.round(900 + Number(i.carat ?? 1) * 1800 + (i.metal === 'platinum' ? 600 : 0)),
-        ready_in_weeks: i.rush ? 2 : 5,
-        message: 'Preview attached. Reply here if you want changes.',
-      };
-    case 'order_status':
-      return { status: 'In the workshop', ready_date: 'Nov 6, 2026', pickup: true };
-    case 'window_quote':
-      return {
-        price_cad: Math.round(Number(i.count ?? 1) * Number(i.width_cm ?? 100) * Number(i.height_cm ?? 100) * 0.075),
-        install_weeks: 4,
-        includes: i.removal ? ['Removal', 'Install', 'Trim'] : ['Install', 'Trim'],
-        message: 'Price is for standard white frames.',
-      };
-    case 'measuring_visit':
-      return { visit_date: 'Saturday, Nov 7', arrival_window: '9 to 11 am', message: 'The crew will call 30 minutes before.' };
-    case 'delivery_status':
-      return { status: 'At our warehouse', eta: 'Monday, Nov 2', tracking_url: 'https://example.com/track/' + String(i.order_number ?? '') };
-    case 'change_delivery_date':
-      return { confirmed_date: String(i.new_date ?? ''), time_window: 'Morning', message: 'Done. We emailed you the new date.' };
-    default:
-      return { message: 'Thanks. We will look into it and reply here.' };
-  }
-}
-
-function toRequest(fx: MockRequestFixture, s: MockState, now = Date.now()): CustomerRequest {
-  const bot = botById(fx.agent_id);
-  const job = jobFor(bot, fx.offer);
-  let r: MockRequestFixture = { ...fx };
-  const created = s.created.find((c) => c.id === fx.id);
-  if (created) r = { ...r, ...liveState(bot, created, s, now), updated_at: iso(now) };
-  const answered = s.answered[fx.id];
-  if (answered && !created) {
-    // A fixture that was waiting on a question: open after the answer, then done.
-    const done = now - answered.atMs > 8000;
-    r = { ...r, status: done ? 'done' : 'open', question: null, result: done ? mockResult(fx) : null, updated_at: iso(now) };
-  }
-  const status = r.status;
-  const showResult = status === 'done';
+function errorBody(json: unknown, status: number): ApiErrorBody {
+  const err = (json as { error?: Record<string, unknown> } | null)?.error;
+  if (!err || typeof err !== 'object') return { ...UNKNOWN, code: status === 404 ? 'not_found' : UNKNOWN.code };
+  const details = (err.details && typeof err.details === 'object' ? err.details : {}) as NonNullable<ApiErrorBody['details']>;
+  if (typeof err.retry_after_seconds === 'number' && details.retry_after_seconds === undefined) details.retry_after_seconds = err.retry_after_seconds;
   return {
-    id: r.id,
-    bot: { agent_id: r.agent_id },
-    offer: r.offer,
-    title: job?.title ?? r.offer,
-    status,
-    input: r.input,
-    input_display: inputDisplay(job, r.input),
-    notes: r.notes,
-    // Only a released question is visible (17.8); held_question never leaves the server.
-    question: status === 'needs_info' ? (r.question ?? null) : null,
-    answers: [...(r.answers ?? []), ...(answered?.answers ?? [])],
-    result: showResult ? (r.result ?? null) : null,
-    result_display: showResult ? resultDisplay(job, r.result) : [],
-    fail_code: status === 'failed' ? (r.fail_code ?? 'bot_failed') : null,
-    fail_message: status === 'failed' ? (r.fail_message ?? null) : null,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-    completed_at: status === 'done' || status === 'failed' ? r.updated_at : null,
+    code: typeof err.code === 'string' ? err.code : UNKNOWN.code,
+    message: typeof err.message === 'string' && err.message ? err.message : UNKNOWN.message,
+    details,
   };
 }
 
-function allRequests(s: MockState): MockRequestFixture[] {
-  return [...s.created, ...MOCK_REQUESTS];
+const enc = encodeURIComponent;
+
+/** Sample routes still need a real session, so signed-out visitors see the same 401 the live routes give. */
+let session: Promise<unknown> | null = null;
+async function sample() {
+  const m = await mock();
+  if (MOCK) return m;
+  session ??= call<Me>('/api/v1/auth/me').catch((e: unknown) => {
+    session = null;
+    if (e instanceof ApiError && e.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    throw e;
+  });
+  await session;
+  return m;
 }
 
-function demoFieldError(f: InputField): string {
-  if (f.type === 'integer' || f.type === 'number') return rangeMessage(f.minimum, f.maximum);
-  if (f.type === 'array') return `Pick up to ${f.maxItems ?? 1}.`;
-  if (f.type === 'boolean') return 'Must be yes or no.';
-  if (isChoice(f)) return `Choose one of: ${optionsFor(f).map((o) => o.label).join(', ')}.`;
-  const t = f as TextField;
-  return t.pattern ? "Doesn't match the expected format." : `Use ${t.maxLength} characters or fewer.`;
+/* ---------------- response normalizing (the one place older or partial shapes are absorbed) ---------------- */
+
+const STATUSES: readonly RequestStatus[] = ['in_review', 'open', 'needs_info', 'awaiting_release', 'done', 'failed'];
+const FAIL_CODES: readonly FailCode[] = ['declined_by_owner', 'bot_failed', 'expired'];
+
+function asStatus(v: unknown): RequestStatus {
+  // A status this page doesn't know yet reads as "working on it" rather than breaking the page.
+  return STATUSES.includes(v as RequestStatus) ? (v as RequestStatus) : 'open';
 }
 
-function requireSession(s: MockState) {
-  // The mock treats /c pages as signed in so they can be opened directly.
-  void s;
+type WireRequest = Omit<CustomerRequest, 'status' | 'fail_code' | 'fail_message'> & {
+  status: string;
+  fail_code?: string | null;
+  fail_message?: unknown;
+  /** Pre-17.5 field. Read only to map `declined_by_owner`. */
+  fail_reason?: string | null;
+};
+
+function normalizeRequest(r: WireRequest): CustomerRequest {
+  const status = asStatus(r.status);
+  const code = r.fail_code ?? r.fail_reason ?? null;
+  const failed = status === 'failed';
+  return {
+    ...r,
+    status,
+    // 17.8: a question held for release is never shown, even if a server sends one.
+    question: status === 'needs_info' ? (r.question ?? null) : null,
+    answers: r.answers ?? [],
+    input_display: r.input_display ?? [],
+    result_display: status === 'done' ? (r.result_display ?? []) : [],
+    fail_code: failed ? (FAIL_CODES.includes(code as FailCode) ? (code as FailCode) : 'bot_failed') : null,
+    // Untrusted bot text: kept as a string and rendered as plain text only.
+    fail_message: failed && typeof r.fail_message === 'string' && r.fail_message.trim() ? r.fail_message : null,
+  };
 }
 
 /* ---------------- auth (existing /api/v1/auth routes) ---------------- */
 
 /** `POST /api/v1/auth/request-code` */
 export async function requestCode(email: string): Promise<{ ok: true; message: string }> {
-  await wait();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'validation_error', 'Enter a valid email address.', { fields: { email: 'Enter a valid email address.' } });
-  const s = load();
-  s.email = email.trim().toLowerCase();
-  save(s);
-  return { ok: true, message: 'If that email can receive mail, we sent a sign-in code. It expires in 10 minutes.' };
+  if (MOCK) return (await mock()).requestCode(email);
+  return (await call<{ ok: true; message: string }>('/api/v1/auth/request-code', { method: 'POST', body: { email } })).data;
 }
 
-/** `POST /api/v1/auth/verify-code`. In the mock any 6 digits work except 000000. */
+/** `POST /api/v1/auth/verify-code`. Sets the session cookie; a new email gets its own customer workspace. */
 export async function verifyCode(email: string, code: string): Promise<Me> {
-  await wait();
-  if (!/^\d{6}$/.test(code) || code === '000000') fail(400, 'invalid_code', "That code didn't work. Check it and try again.");
-  const s = load();
-  s.signedIn = true;
-  s.email = email.trim().toLowerCase();
-  save(s);
-  return { user: { id: '5e0c7a1b-9d2f-4e3a-8b6c-7d1e2f3a4b5c', email: s.email } };
+  if (MOCK) return (await mock()).verifyCode(email, code);
+  return (await call<Me>('/api/v1/auth/verify-code', { method: 'POST', body: { email, code } })).data;
 }
 
 /** `GET /api/v1/auth/me` */
 export async function getMe(): Promise<Me> {
-  await wait(120);
-  return { user: { id: '5e0c7a1b-9d2f-4e3a-8b6c-7d1e2f3a4b5c', email: load().email } };
+  if (MOCK) return (await mock()).getMe();
+  return (await call<Me>('/api/v1/auth/me')).data;
 }
 
 /** `POST /api/v1/auth/logout` */
 export async function signOut(): Promise<void> {
-  await wait(150);
-  sessionStorage.removeItem(KEY);
+  if (MOCK) return (await mock()).signOut();
+  etagCache.clear();
+  session = null;
+  await call('/api/v1/auth/logout', { method: 'POST' });
 }
 
 /* ---------------- R1–R8 ---------------- */
 
 /** R1 `GET /api/v1/c/links/:token` */
 export async function getLink(token: string): Promise<LinkResponse> {
-  await wait();
-  if (token === 'expired') fail(410, 'invite_expired', 'This link has expired.');
-  if (token === 'used-up') fail(410, 'invite_used_up', 'This link has been used the maximum number of times.');
-  const bot = MOCK_BOTS.find((b) => b.token === token) ?? fail(404, 'invite_not_found', "This link doesn't work.");
-  const s = load();
-  const forced = param('share');
-  const status = s.signedIn ? (forced === 'revoked' ? 'revoked' : (s.accepted[bot.agent_id] ?? null)) : undefined;
-  const next = !s.signedIn ? 'sign_in' : status === 'approved' ? 'open_bot' : status === 'pending' ? 'wait' : status === 'revoked' ? 'blocked' : 'accept';
-  return {
-    link: { kind: bot.link_kind, email_bound: bot.link_kind === 'personal', expires_at: null },
-    bot: { agent_id: bot.agent_id, branding: bot.branding },
-    access_mode: bot.link_kind === 'personal' ? 'open_link' : bot.access_mode,
-    viewer: s.signedIn ? { signed_in: true, share_status: status ?? null } : { signed_in: false },
-    next,
-  };
+  if (MOCK) return (await mock()).getLink(token);
+  const { data } = await call<LinkResponse>(`/api/v1/c/links/${enc(token)}`);
+  if (!LIVE.R4) {
+    const share = data.viewer.signed_in ? data.viewer.share_status : null;
+    (await mock()).rememberLiveBot({ ...data.bot, access_mode: data.access_mode, ...(share ? { share_status: share } : {}) });
+  }
+  return data;
 }
 
 /** R2 `POST /api/v1/c/links/:token/accept` */
 export async function acceptLink(token: string): Promise<AcceptResponse> {
-  await wait();
-  const bot = MOCK_BOTS.find((b) => b.token === token) ?? fail(404, 'invite_not_found', "This link doesn't work.");
-  if (param('share') === 'revoked') fail(403, 'share_revoked', `${bot.branding.display_name} didn't approve this request.`);
-  const s = load();
-  // Section 17.6: only R2 returns these, and only for a customer without a share yet. The text hides the reason.
-  if (!s.accepted[bot.agent_id] && param('accept') === 'queue_full')
-    fail(429, 'pending_queue_full', "This business isn't accepting new customers right now. Try again later.");
-  if (!s.accepted[bot.agent_id] && param('accept') === 'plan_limit') fail(403, 'plan_limit', "This business can't add new customers right now.");
-  const status = s.accepted[bot.agent_id] ?? (bot.access_mode === 'approve_each' && bot.link_kind === 'public' ? 'pending' : 'approved');
-  s.accepted[bot.agent_id] = status;
-  save(s);
-  return { share: { status, requested_at: iso(Date.now()) }, bot: { agent_id: bot.agent_id }, next: status === 'approved' ? 'open_bot' : 'wait' };
+  if (MOCK) return (await mock()).acceptLink(token);
+  const { data } = await call<AcceptResponse>(`/api/v1/c/links/${enc(token)}/accept`, { method: 'POST', body: {} });
+  if (!LIVE.R4) (await mock()).rememberLiveBot({ agent_id: data.bot.agent_id, share_status: data.share.status });
+  return data;
 }
 
 /** R3 `GET /api/v1/c/bots` */
 export async function listBots(): Promise<BotsResponse> {
-  await wait();
-  const s = load();
-  return {
-    bots: MOCK_BOTS.map((b) => ({
-      agent_id: b.agent_id,
-      branding: b.branding,
-      share_status: shareStatus(b, s),
-      open_requests: allRequests(s)
-        .filter((r) => r.agent_id === b.agent_id)
-        .map((r) => toRequest(r, s))
-        .filter((r) => r.status !== 'done' && r.status !== 'failed').length,
-    })),
-  };
+  if (MOCK || !LIVE.R3) return (await sample()).listBots();
+  const { data } = await call<BotsResponse>('/api/v1/c/bots');
+  return { bots: data.bots ?? [] };
 }
 
 /** R4 `GET /api/v1/c/bots/:agent_id` */
 export async function getBot(agentId: string): Promise<BotResponse> {
-  await wait();
-  const s = load();
-  requireSession(s);
-  const bot = botById(agentId);
-  const status = shareStatus(bot, s);
-  const base = { bot: { agent_id: bot.agent_id, branding: bot.branding }, access: status, review_mode: bot.review_mode };
-  // Section 17.1: pending gets the full job list so the page can show it disabled.
-  if (status === 'pending') return { ...base, share: { status, requested_at: '2026-10-29T11:08:00.000Z' }, jobs: bot.jobs };
-  if (status === 'revoked') return { ...base, share: { status }, jobs: [] };
-  const sentToday = s.created.filter((c) => c.agent_id === agentId).length;
-  const used = param('cap') === 'reached' ? bot.daily_cap : Math.min(bot.daily_cap, bot.used_today + sentToday);
-  return { ...base, share: { status, daily_cap: bot.daily_cap, used_today: used, resets_at: '2026-10-30T04:00:00.000Z' }, jobs: bot.jobs };
+  if (MOCK || !LIVE.R4) return (await sample()).getBot(agentId);
+  const { data } = await call<BotResponse & { access?: BotResponse['access']; review_mode?: BotResponse['review_mode'] }>(
+    `/api/v1/c/bots/${enc(agentId)}`,
+    { conditional: true },
+  );
+  return {
+    ...data,
+    // 17.1 adds `access`; it mirrors share.status, which 15.5 already had.
+    access: data.access ?? data.share.status,
+    review_mode: data.review_mode === 'review_first' ? 'review_first' : 'auto',
+    jobs: data.jobs ?? [],
+  };
 }
 
-/** R5 `POST /api/v1/c/bots/:agent_id/requests`. Resolves with the HTTP status (201 new, 200 retry). */
+/** R5 `POST /api/v1/c/bots/:agent_id/requests`. Resolves with the HTTP status (201 new, 200 retry of the same client_request_id). */
 export async function createRequest(agentId: string, body: CreateRequestBody): Promise<RequestResponse & { http_status: 200 | 201 }> {
-  await wait(500);
-  const s = load();
-  const bot = botById(agentId);
-  const status = shareStatus(bot, s);
-  if (status === 'pending') fail(403, 'pending_approval', `${bot.branding.display_name} hasn't approved you yet.`);
-  if (status === 'revoked') fail(403, 'share_revoked', `You no longer have access to ${bot.branding.display_name}.`);
-  const job = jobFor(bot, body.offer) ?? fail(404, 'offer_not_found', "This job isn't available.");
-
-  const retry = body.client_request_id && s.created.find((c) => c.client_request_id === body.client_request_id);
-  if (retry) return { request: toRequest(retry, s), http_status: 200 };
-
-  const notes = body.notes?.trim() ?? '';
-  if (job.input_schema) {
-    if (!body.input) fail(400, 'input_required', 'Fill in the form first.', { input_schema: job.input_schema });
-    if (param('mock') === 'field_errors') {
-      // A server-side rejection shaped like spec 15.6, for the field-error demo.
-      const fields: Record<string, string> = {};
-      for (const [k, f] of orderedFields(job.input_schema).slice(0, 3)) fields[k] = demoFieldError(f);
-      fields._form = 'Remove unknown field "color".';
-      const first = job.input_schema['x-order'][0];
-      fail(400, 'invalid_input', 'Some fields need fixing.', {
-        fields,
-        validation_errors: [{ instancePath: '/' + first, keyword: 'enum', message: 'must be equal to one of the allowed values', params: {} }],
-      });
-    }
-    const fields = checkInput(job.input_schema, body.input as InputObject);
-    if (Object.keys(fields).length) fail(400, 'invalid_input', 'Some fields need fixing.', { fields, validation_errors: [] });
-    if (!job.notes_enabled && notes) fail(400, 'validation_error', 'Notes are turned off for this job.', { fields: { notes: 'Notes are turned off for this job.' } });
-  } else {
-    if (body.input) fail(400, 'input_not_allowed', "This job doesn't take a form.");
-    if (!notes) fail(400, 'validation_error', 'Tell us what you need.', { fields: { notes: 'Required.' } });
-  }
-  if (notes.length > job.notes_max) fail(400, 'validation_error', 'Notes are too long.', { fields: { notes: `Use ${job.notes_max.toLocaleString('en-CA')} characters or fewer.` } });
-
-  const sentToday = s.created.filter((c) => c.agent_id === agentId).length;
-  if (param('cap') === 'reached' || bot.used_today + sentToday >= bot.daily_cap)
-    fail(429, 'rate_limited', "You've sent the most requests allowed today.", { retry_after_seconds: 3600, daily_cap: bot.daily_cap });
-
-  const now = Date.now();
-  const c: Created = {
-    id: crypto.randomUUID(),
-    agent_id: agentId,
-    offer: job.name,
-    status: 'open',
-    input: body.input ?? null,
-    notes,
-    created_at: iso(now),
-    updated_at: iso(now),
-    createdMs: now,
-    client_request_id: body.client_request_id,
-  };
-  s.created.unshift(c);
-  save(s);
-  return { request: toRequest(c, s, now), http_status: 201 };
+  if (MOCK || !LIVE.R5) return (await sample()).createRequest(agentId, body);
+  const { data, status } = await call<{ request: WireRequest }>(`/api/v1/c/bots/${enc(agentId)}/requests`, { method: 'POST', body });
+  return { request: normalizeRequest(data.request), http_status: status === 201 ? 201 : 200 };
 }
 
 /** R6 `GET /api/v1/c/bots/:agent_id/requests` */
@@ -396,59 +234,26 @@ export async function listRequests(
   agentId: string,
   opts: { status?: RequestListFilter; limit?: number; cursor?: string | null } = {},
 ): Promise<RequestListResponse> {
-  await wait();
-  const s = load();
-  botById(agentId);
-  const limit = Math.min(50, Math.max(1, opts.limit ?? 20));
-  let start = 0;
-  if (opts.cursor) {
-    start = Number(atob(opts.cursor));
-    if (!Number.isInteger(start)) fail(400, 'bad_cursor', "That page of results isn't available.");
-  }
-  const rows: RequestListRow[] = allRequests(s)
-    .filter((r) => r.agent_id === agentId)
-    .map((r) => toRequest(r, s))
-    .filter((r) => !opts.status || r.status === opts.status)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .map((r) => ({
-      id: r.id,
-      offer: r.offer,
-      title: r.title,
-      status: r.status,
-      summary: (r.input ? r.title : r.notes || r.title).slice(0, 120),
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-    }));
-  const page = rows.slice(start, start + limit);
-  const nextStart = start + limit;
-  return { requests: page, next_cursor: nextStart < rows.length ? btoa(String(nextStart)) : null, etag: `W/"${rows.length}-${page[0]?.updated_at ?? ''}"` };
+  if (MOCK || !LIVE.R6) return (await sample()).listRequests(agentId, opts);
+  const q = new URLSearchParams();
+  if (opts.status) q.set('status', opts.status);
+  if (opts.limit) q.set('limit', String(opts.limit));
+  if (opts.cursor) q.set('cursor', opts.cursor);
+  const qs = q.toString();
+  const { data } = await call<RequestListResponse>(`/api/v1/c/bots/${enc(agentId)}/requests${qs ? `?${qs}` : ''}`, { conditional: true });
+  return { ...data, requests: (data.requests ?? []).map((r) => ({ ...r, status: asStatus(r.status) })), next_cursor: data.next_cursor ?? null };
 }
 
 /** R7 `GET /api/v1/c/requests/:task_id` */
 export async function getRequest(taskId: string): Promise<RequestResponse> {
-  await wait(250);
-  const s = load();
-  const fx = allRequests(s).find((r) => r.id === taskId) ?? fail(404, 'not_found', "We couldn't find that request.");
-  return { request: toRequest(fx, s) };
+  if (MOCK || !LIVE.R7) return (await sample()).getRequest(taskId);
+  const { data } = await call<{ request: WireRequest }>(`/api/v1/c/requests/${enc(taskId)}`, { conditional: true });
+  return { request: normalizeRequest(data.request) };
 }
 
 /** R8 `POST /api/v1/c/requests/:task_id/answer` */
 export async function answerRequest(taskId: string, answer: string): Promise<RequestResponse> {
-  await wait(450);
-  const s = load();
-  const fx = allRequests(s).find((r) => r.id === taskId) ?? fail(404, 'not_found', "We couldn't find that request.");
-  if (param('share') === 'revoked') fail(403, 'share_revoked', "You can read this request but can't answer it anymore.");
-  const current = toRequest(fx, s);
-  if (current.status !== 'needs_info' || !current.question) fail(409, 'task_not_waiting', 'This request is no longer waiting for an answer.');
-  const text = answer.trim();
-  if (!text || text.length > 2000)
-    fail(400, 'validation_error', 'Check your answer.', { fields: { answer: text ? 'Use 2,000 characters or fewer.' : 'Required.' } });
-  const now = Date.now();
-  const prev = s.answered[taskId]?.answers ?? [];
-  s.answered[taskId] = {
-    atMs: now,
-    answers: [...prev, { question: current.question as string, answer: text, asked_at: current.updated_at, answered_at: iso(now) }],
-  };
-  save(s);
-  return { request: { ...toRequest(fx, s, now), status: 'open', question: null } };
+  if (MOCK || !LIVE.R8) return (await sample()).answerRequest(taskId, answer);
+  const { data } = await call<{ request: WireRequest }>(`/api/v1/c/requests/${enc(taskId)}/answer`, { method: 'POST', body: { answer } });
+  return { request: normalizeRequest(data.request) };
 }

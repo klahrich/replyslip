@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ArrowLeft, Link2Off, Loader2, Mail } from 'lucide-react';
 import { acceptLink, getLink, requestCode, verifyCode } from '../_lib/api';
 import { brandStyle } from '../_lib/brand';
@@ -12,7 +12,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '../_ui/input-otp';
 import { Label } from '../_ui/label';
 import { LogoTile, PlainFrame, ValettoFooter } from '../_components/Frame';
 import { Notice } from '../_components/Notice';
-import { Loading } from './common';
+import { Loading, useEmail } from './common';
 
 type Step = 'email' | 'code';
 
@@ -21,7 +21,41 @@ const linkErrors: Record<string, { title: string; body: string }> = {
   invite_expired: { title: 'This link has expired', body: 'Ask the business that sent it for a new one.' },
   invite_used_up: { title: 'This link has already been used', body: 'Ask the business that sent it for a new one.' },
   rate_limited: { title: 'Too many tries', body: 'Wait a few minutes, then open the link again.' },
+  network_error: { title: "We couldn't load this link", body: 'Check your connection, then open the link again.' },
+  internal_error: { title: "We couldn't load this link", body: 'Something went wrong on our side. Try again in a minute.' },
 };
+
+const onHash = (cb: () => void) => {
+  window.addEventListener('hashchange', cb);
+  return () => window.removeEventListener('hashchange', cb);
+};
+const hashToken = () => decodeURIComponent(window.location.hash.slice(1));
+
+/** Reads the token from the URL fragment (/c/link#rsl_…), which browsers never send to the server. */
+export function LinkFromHash() {
+  const token = useSyncExternalStore(onHash, hashToken, () => null);
+  if (token === null) return <Loading />;
+  if (!token.startsWith('rsl_')) return <DeadLink code="invite_not_found" />;
+  // Keyed so a second link pasted into the same tab starts fresh.
+  return <LinkView key={token} token={token} />;
+}
+
+function DeadLink({ code }: { code: string }) {
+  const c = linkErrors[code] ?? linkErrors.invite_not_found;
+  return (
+    <PlainFrame>
+      <Notice icon={<Link2Off />} title={c.title}>
+        <p>{c.body}</p>
+      </Notice>
+    </PlainFrame>
+  );
+}
+
+function retryText(e: unknown): string {
+  const s = e instanceof ApiError ? Number(e.details?.retry_after_seconds) : NaN;
+  const mins = Number.isFinite(s) && s > 0 ? Math.ceil(s / 60) : 0;
+  return mins ? `Too many tries. Wait ${mins} minute${mins === 1 ? '' : 's'}, then try again.` : 'Too many tries. Wait a few minutes, then try again.';
+}
 
 const mistake = (name: string) => `If you think this is a mistake, contact ${name} directly.`;
 
@@ -47,16 +81,7 @@ export function LinkView({ token }: { token: string }) {
     );
   }, [token, router]);
 
-  if (dead) {
-    const c = linkErrors[dead] ?? linkErrors.invite_not_found;
-    return (
-      <PlainFrame>
-        <Notice icon={<Link2Off />} title={c.title}>
-          <p>{c.body}</p>
-        </Notice>
-      </PlainFrame>
-    );
-  }
+  if (dead) return <DeadLink code={dead} />;
   if (!link) return <Loading />;
 
   const name = link.bot.branding.display_name;
@@ -68,11 +93,14 @@ export function LinkView({ token }: { token: string }) {
       router.push(`/c/${r.bot.agent_id}`);
     } catch (e) {
       const code = e instanceof ApiError ? e.code : '';
-      if (code === 'share_revoked') setBlocked({ title: `${name} didn't approve this request.`, body: mistake(name) });
+      if (code === 'invite_expired' || code === 'invite_used_up' || code === 'invite_not_found') setDead(code);
+      else if (code === 'share_revoked') setBlocked({ title: `${name} didn't approve this request.`, body: mistake(name) });
       // Section 17.6: show the server's wording; it deliberately doesn't say why.
       else if (code === 'pending_queue_full') setBlocked({ title: (e instanceof Error && e.message) || "This business isn't accepting new customers right now. Try again later." });
       else if (code === 'plan_limit') setBlocked({ title: (e instanceof Error && e.message) || "This business can't add new customers right now." });
       else if (code === 'invite_email_mismatch') setBlocked({ title: 'This invite was sent to a different email. Sign in with that email, or ask for a new invite.' });
+      else if (code === 'workspace_required') setError('Your account needs a moment to finish setting up. Reload the page and try again.');
+      else if (code === 'rate_limited') setError(retryText(e));
       else setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
       setBusy(false);
     }
@@ -87,7 +115,7 @@ export function LinkView({ token }: { token: string }) {
       await requestCode(email.trim());
       setStep('code');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
+      setError(e instanceof ApiError && e.code === 'rate_limited' ? retryText(e) : e instanceof Error ? e.message : 'Something went wrong. Try again.');
     } finally {
       setBusy(false);
     }
@@ -121,6 +149,19 @@ export function LinkView({ token }: { token: string }) {
               <h1 className="text-[22px] leading-snug font-semibold tracking-tight">{blocked.title}</h1>
               {blocked.body && <p className="mt-2 text-[15px] text-muted-foreground">{blocked.body}</p>}
             </>
+          ) : link.next === 'accept' ? (
+            // Already signed in (R1 next: "accept"): one tap, no code.
+            <SignedInAccept
+              name={name}
+              asks={asks}
+              busy={busy}
+              error={error}
+              onAccept={() => {
+                setError(null);
+                setBusy(true);
+                void accept();
+              }}
+            />
           ) : step === 'email' ? (
             <form onSubmit={sendCode} noValidate>
               <h1 className="text-[22px] leading-snug font-semibold tracking-tight">
@@ -223,6 +264,33 @@ export function LinkView({ token }: { token: string }) {
         </section>
       </main>
       <ValettoFooter />
+    </div>
+  );
+}
+
+function SignedInAccept({ name, asks, busy, error, onAccept }: { name: string; asks: boolean; busy: boolean; error: string | null; onAccept: () => void }) {
+  const email = useEmail();
+  return (
+    <div>
+      <h1 className="text-[22px] leading-snug font-semibold tracking-tight">{asks ? `Ask ${name} for access` : `Start sending requests to ${name}`}</h1>
+      <p className="mt-2 text-[15px] text-muted-foreground">
+        {email ? (
+          <>
+            You&apos;re signed in as <span className="font-medium break-words text-foreground">{email}</span>. {name} will see your email.
+          </>
+        ) : (
+          `${name} will see your email.`
+        )}
+      </p>
+      {error && (
+        <p className="mt-3 text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+      <Button type="button" disabled={busy} onClick={onAccept} className="mt-6 h-12 w-full rounded-xl text-base font-semibold">
+        {busy && <Loader2 className="animate-spin" />} {asks ? 'Ask for access' : 'Continue'}
+      </Button>
+      {asks && <p className="mt-4 text-center text-sm text-muted-foreground">{name} approves each new customer.</p>}
     </div>
   );
 }

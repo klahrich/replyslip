@@ -1,6 +1,6 @@
 /**
- * Fixtures for the mock customer API (api.ts). Three sample brands, their jobs, and past requests.
- * Delete this file when api.ts switches to real fetch calls.
+ * Fixtures for the sample customer API (api-mock.ts). Three sample brands, their jobs, and past requests.
+ * Delete this file once R3–R8 are live and the full mock is no longer needed.
  */
 import type { AccessMode, Branding, FailCode, InputObject, Job, RequestStatus, ReviewMode } from './types';
 
@@ -44,7 +44,7 @@ const CA_POSTAL = '^[A-Za-z]\\d[A-Za-z] ?\\d[A-Za-z]\\d$';
 export const MOCK_BOTS: MockBot[] = [
   {
     agent_id: ACME_ID,
-    token: 'acme-jewellers',
+    token: 'rsl_mock_acme',
     link_kind: 'public',
     access_mode: 'open_link',
     review_mode: 'review_first',
@@ -60,7 +60,7 @@ export const MOCK_BOTS: MockBot[] = [
       accent_color: '#C9962E',
       accent_foreground: '#000000',
       primary_on_white_ok: true,
-      on_primary: 'white',
+      on_primary: '#FFFFFF',
       show_footer: true,
     },
     jobs: [
@@ -141,7 +141,7 @@ export const MOCK_BOTS: MockBot[] = [
   },
   {
     agent_id: NORTHLINE_ID,
-    token: 'northline-windows',
+    token: 'rsl_mock_northline',
     link_kind: 'public',
     access_mode: 'approve_each',
     review_mode: 'auto',
@@ -239,7 +239,7 @@ export const MOCK_BOTS: MockBot[] = [
   },
   {
     agent_id: FERNWOOD_ID,
-    token: 'fernwood-furniture',
+    token: 'rsl_mock_fernwood',
     link_kind: 'personal',
     access_mode: 'open_link',
     review_mode: 'auto',

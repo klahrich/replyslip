@@ -112,10 +112,12 @@ export function JobForm({
       }
       // Move focus to the first field the server flagged (FormControl marks it aria-invalid).
       requestAnimationFrame(() => document.querySelector<HTMLElement>('.vt-root form [aria-invalid="true"]')?.focus());
-      if (e.code === 'pending_approval') {
+      // 17.1 calls it pending_approval; 15.5 called it share_pending.
+      if (e.code === 'pending_approval' || e.code === 'share_pending') {
         setFormError({ title: `Waiting for approval from ${businessName}`, body: 'You can send this once they approve you.' });
         onPending?.();
       } else if (e.code === 'share_revoked') setFormError({ title: `You can't send new requests to ${businessName}`, body: e.message });
+      else if (e.code === 'plan_limit') setFormError({ title: `${businessName} can't take new requests right now`, body: e.message });
       else if (e.code === 'rate_limited') setFormError({ title: "You've reached today's limit", body: 'You can send more requests tomorrow. Your past requests are still here.' });
       else if (e.code === 'invalid_input' || e.code === 'validation_error')
         // `_form` / unknown-key errors are about the schema, not something the customer can fix by hand.

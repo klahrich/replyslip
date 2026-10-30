@@ -15,12 +15,12 @@ export type Branding = {
   accent_foreground: string | null;
   /** Section 17.3: the server's contrast verdicts. The page computes them itself only if they're missing. */
   primary_on_white_ok?: boolean;
-  /** Section 17.3 lists "#000000" | "#FFFFFF"; the "black" | "white" spelling is accepted too. */
+  /** Section 17.3: always uppercase hex. Anything else is ignored and the page computes its own. */
   on_primary?: OnPrimary;
   show_footer: true;
 };
 
-export type OnPrimary = '#000000' | '#FFFFFF' | 'black' | 'white';
+export type OnPrimary = '#000000' | '#FFFFFF';
 export type ReviewMode = 'auto' | 'review_first';
 
 export type AccessMode = 'open_link' | 'approve_each';
