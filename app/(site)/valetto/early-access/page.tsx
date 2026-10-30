@@ -7,12 +7,13 @@ import '../../landing-width.css';
 import '../../landing-bg.css';
 import '@/components/site/valetto/valetto.css';
 import { GlowBg } from '../../GlowBg';
+import { valettoMeta } from '@/components/site/valetto/seo';
 
-export const metadata: Metadata = {
-  title: { absolute: 'Ask for early access · Valetto' },
-  description: 'Tell us about your business and what your customers would ask your bot.',
-  robots: { index: false, follow: false },
-};
+export const metadata: Metadata = valettoMeta(
+  '/early-access',
+  'Ask for early access · Valetto',
+  'Tell us about your business and what your customers would ask your bot.',
+);
 
 export default function EarlyAccessPage() {
   return (
@@ -24,7 +25,7 @@ export default function EarlyAccessPage() {
       <ValettoTop>
         <ul>
           <li>
-            <Link href="/valetto">Back to Valetto</Link>
+            <Link href="/">Back to Valetto</Link>
           </li>
         </ul>
       </ValettoTop>
