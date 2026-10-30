@@ -85,7 +85,7 @@ export async function listAgents(workspaceId: string): Promise<AgentRow[]> {
   return getDb()
     .select()
     .from(agents)
-    .where(eq(agents.workspaceId, workspaceId))
+    .where(and(eq(agents.workspaceId, workspaceId), eq(agents.role, 'agent')))
     .orderBy(desc(agents.createdAt));
 }
 
@@ -117,7 +117,7 @@ export async function listTeammates(principal: AgentPrincipal): Promise<Teammate
       createdAt: agents.createdAt,
     })
     .from(agents)
-    .where(and(eq(agents.workspaceId, principal.workspaceId), isNull(agents.revokedAt)));
+    .where(and(eq(agents.workspaceId, principal.workspaceId), isNull(agents.revokedAt), eq(agents.role, 'agent')));
   const hasLocal = rows.some((row) => isLocalDelivery(row));
   const seen = hasLocal ? await workspaceWatcherLastSeen(principal.workspaceId) : null;
   return rows
@@ -144,8 +144,9 @@ export async function getAgent(workspaceId: string, agentId: string): Promise<Ag
   const [agent] = await getDb()
     .select()
     .from(agents)
-    .where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId)))
+    .where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId), eq(agents.role, 'agent')))
     .limit(1);
+  // The hidden customer sender agent is not manageable: no keys, delivery, or revoke through these routes.
   if (!agent) throw new HttpError(404, 'not_found', 'No agent was found.');
   return agent;
 }

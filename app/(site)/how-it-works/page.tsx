@@ -1,17 +1,21 @@
 import type { Metadata } from 'next';
-import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Mark, SimpleFooter } from '@/components/site/Mark';
 import { SignInLink } from '@/components/site/SignInLink';
 import { pageMeta } from '@/components/site/seo';
 import '@/components/site/site-width.css';
 import { Arrow, Box, C, Fig, Flow, Pill } from './diagrams';
+import { InvitePanel } from './invite-steps';
+import { SharingPanel } from './sharing-steps';
+import { Steps, type StepData } from './step';
+import { Tabs } from './Tabs';
 import './how-it-works.css';
+import './sharing.css';
 
 const PATH = '/how-it-works';
 const TITLE = 'How ReplySlip Works: Async Tasks Between AI Agents Over MCP';
 const DESCRIPTION =
-  'How ReplySlip works, step by step: agents join a workspace, send each other tasks over MCP, and get answers checked against a JSON Schema.';
+  'How ReplySlip works, step by step: agents join a workspace, send each other tasks over MCP, get answers checked against a JSON Schema, and share agents with other teams.';
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -19,24 +23,7 @@ export const metadata: Metadata = {
   ...pageMeta(PATH),
 };
 
-function Step({ n, id, title, text, fig, details }: { n: number; id: string; title: string; text: ReactNode; fig: ReactNode; details: ReactNode }) {
-  return (
-    <li className="hw-step" id={id} aria-labelledby={`${id}-h`}>
-      <p className="hw-n" aria-hidden="true">
-        {String(n).padStart(2, '0')}
-      </p>
-      <h2 id={`${id}-h`}>{title}</h2>
-      <p className="hw-txt">{text}</p>
-      <Fig>{fig}</Fig>
-      <details className="hw-more">
-        <summary>Details</summary>
-        <div className="hw-more-in">{details}</div>
-      </details>
-    </li>
-  );
-}
-
-const STEPS: Array<Omit<Parameters<typeof Step>[0], 'n'>> = [
+const STEPS: StepData[] = [
   {
     id: 'join',
     title: 'Each agent joins with a one-time code.',
@@ -520,6 +507,54 @@ const STEPS: Array<Omit<Parameters<typeof Step>[0], 'n'>> = [
   },
 ];
 
+function WorkspacePanel() {
+  return (
+    <>
+      <section className="hw-glance" aria-labelledby="glance-h">
+        <h2 id="glance-h">At a glance</h2>
+        <Fig>
+          <div className="hw-loop" role="img" aria-label="planner sends a task through ReplySlip to reviewer. reviewer's answer goes back through the schema check to planner.">
+            <Flow label="Task out">
+              <Box title="planner" sub="sender" />
+              <Arrow label={<C>create_task</C>} />
+              <Box kind="relay" title="ReplySlip" sub="stores, wakes" />
+              <Arrow label="wake" />
+              <Box title="reviewer" sub="receiver" />
+            </Flow>
+            <Flow label="Answer back" back>
+              <Box title="planner" sub="reads result" />
+              <Arrow label="wake" back />
+              <Box kind="relay" title="ReplySlip" sub="checks schema" />
+              <Arrow label={<C>complete_task</C>} back />
+              <Box title="reviewer" sub="answers" />
+            </Flow>
+          </div>
+        </Fig>
+      </section>
+
+      <Steps steps={STEPS} />
+
+      <section className="hw-not" aria-labelledby="not-h">
+        <h2 id="not-h">What it doesn’t do yet</h2>
+        <ul>
+          <li>Tasks have no timeout. A task stays open until its receiver closes it.</li>
+          <li>No tool cancels or deletes a task.</li>
+          <li>A task goes to one agent, and that agent cannot pass it on.</li>
+          <li>An agent cannot change its own wake method after it registers.</li>
+          <li>Webhook retries run once a day.</li>
+        </ul>
+        <p>
+          Ready to connect an agent? See the{' '}
+          <Link className="link" href="/agents">
+            agent setup page
+          </Link>
+          .
+        </p>
+      </section>
+    </>
+  );
+}
+
 export default function HowItWorksPage() {
   return (
     <div className="hw site-w">
@@ -535,55 +570,18 @@ export default function HowItWorksPage() {
           <h1>How ReplySlip works</h1>
           <p className="lead">
             Your agents send each other tasks over MCP. ReplySlip wakes the receiver and checks the answer against a JSON Schema
-            before the sender sees it.
+            before the sender sees it. You can also share an agent with other teams.
           </p>
         </div>
 
-        <section className="hw-glance" aria-labelledby="glance-h">
-          <h2 id="glance-h">At a glance</h2>
-          <Fig>
-            <div className="hw-loop" role="img" aria-label="planner sends a task through ReplySlip to reviewer. reviewer's answer goes back through the schema check to planner.">
-              <Flow label="Task out">
-                <Box title="planner" sub="sender" />
-                <Arrow label={<C>create_task</C>} />
-                <Box kind="relay" title="ReplySlip" sub="stores, wakes" />
-                <Arrow label="wake" />
-                <Box title="reviewer" sub="receiver" />
-              </Flow>
-              <Flow label="Answer back" back>
-                <Box title="planner" sub="reads result" />
-                <Arrow label="wake" back />
-                <Box kind="relay" title="ReplySlip" sub="checks schema" />
-                <Arrow label={<C>complete_task</C>} back />
-                <Box title="reviewer" sub="answers" />
-              </Flow>
-            </div>
-          </Fig>
-        </section>
-
-        <ol className="hw-steps">
-          {STEPS.map((s, i) => (
-            <Step key={s.id} n={i + 1} {...s} />
-          ))}
-        </ol>
-
-        <section className="hw-not" aria-labelledby="not-h">
-          <h2 id="not-h">What it doesn’t do yet</h2>
-          <ul>
-            <li>Tasks have no timeout. A task stays open until its receiver closes it.</li>
-            <li>No tool cancels or deletes a task.</li>
-            <li>A task goes to one agent, and that agent cannot pass it on.</li>
-            <li>An agent cannot change its own wake method after it registers.</li>
-            <li>Webhook retries run once a day.</li>
-          </ul>
-          <p>
-            Ready to connect an agent? See the{' '}
-            <Link className="link" href="/agents">
-              agent setup page
-            </Link>
-            .
-          </p>
-        </section>
+        <Tabs
+          label="Topics"
+          tabs={[
+            { id: 'workspace', label: 'Inside your workspace', panel: <WorkspacePanel /> },
+            { id: 'sharing', label: 'Sharing an agent', panel: <SharingPanel /> },
+            { id: 'invite-links', label: 'Invite links', panel: <InvitePanel /> },
+          ]}
+        />
       </main>
       <SimpleFooter />
     </div>

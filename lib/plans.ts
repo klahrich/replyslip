@@ -20,8 +20,14 @@ export function usePlanLimitsForTests(caps: PlanCaps | null): void {
   testCaps = caps;
 }
 
-/** Pending and approved guest workspaces per shared agent. Unlimited workspaces skip this. */
-export const FREE_GUEST_WORKSPACES = 3;
+/**
+ * Guests (customers) per shared agent on the free plan. Counts approved shares plus pending
+ * invite_guest and agent-invite shares; a pending customer request counts only toward
+ * MAX_PENDING_PER_BOT. Unlimited workspaces skip this.
+ */
+export const FREE_CUSTOMERS_PER_BOT = 250;
+/** Old name, kept so existing imports and the plan_limit `guest_workspaces` wording stay stable. */
+export const FREE_GUEST_WORKSPACES = FREE_CUSTOMERS_PER_BOT;
 
 let testGuestMax: number | null = null;
 
@@ -54,7 +60,7 @@ export function planLimitMessage(limit: PlanLimitBody['limit'], max: number, res
   const shown = max.toLocaleString('en-US');
   if (limit === 'agents') return `Free plan limit: ${shown} ${max === 1 ? 'agent' : 'agents'}.`;
   if (limit === 'guest_workspaces') {
-    return `Free plan limit: ${shown} guest ${max === 1 ? 'workspace' : 'workspaces'} per shared agent.`;
+    return `Free plan limit: ${shown} ${max === 1 ? 'customer' : 'customers'} per shared agent.`;
   }
   const day = (resetsAt ?? utcMonthWindow().next).toISOString().slice(0, 10);
   return `Free plan limit: ${shown} ${max === 1 ? 'task' : 'tasks'} per month. Resets ${day}.`;

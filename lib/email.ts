@@ -13,13 +13,34 @@ export type FirstAgentAlertEmail = {
   createdAt: Date;
 };
 
+/** Owner notice for pending customer requests. Count and link only: no customer email or task text. */
+export type PendingCustomersEmail = {
+  to: string;
+  agentName: string;
+  pendingCount: number;
+  dashboardUrl: string;
+};
+
 export interface EmailSender {
   sendLoginCode(message: LoginCodeEmail): Promise<void>;
   sendFirstAgentAlert(message: FirstAgentAlertEmail): Promise<void>;
+  sendPendingCustomers(message: PendingCustomersEmail): Promise<void>;
 }
 
 const GENERIC_SUBJECT = 'Your ReplySlip sign-in code';
 const FIRST_AGENT_SUBJECT = 'ReplySlip: first agent';
+const PENDING_CUSTOMERS_SUBJECT = 'New customer requests are waiting';
+
+export function pendingCustomersText(message: Omit<PendingCustomersEmail, 'to'>): string {
+  const n = message.pendingCount;
+  return [
+    `${n} ${n === 1 ? 'customer is' : 'customers are'} waiting for your approval on ${message.agentName}.`,
+    '',
+    `Review them in your dashboard: ${message.dashboardUrl}`,
+    '',
+    'You get at most one of these emails per hour per bot. Turn them off in the bot\'s Customers settings.',
+  ].join('\n');
+}
 
 export function loginCodeText(code: string): string {
   return [
@@ -50,6 +71,10 @@ class ConsoleEmailSender implements EmailSender {
   async sendFirstAgentAlert(message: FirstAgentAlertEmail): Promise<void> {
     console.info(`[replyslip] first-agent alert for ${message.to}\n${firstAgentAlertText(message)}`);
   }
+
+  async sendPendingCustomers(message: PendingCustomersEmail): Promise<void> {
+    console.info(`[replyslip] pending-customers notice\n${pendingCustomersText(message)}`);
+  }
 }
 
 class ResendEmailSender implements EmailSender {
@@ -64,6 +89,10 @@ class ResendEmailSender implements EmailSender {
 
   async sendFirstAgentAlert(message: FirstAgentAlertEmail): Promise<void> {
     await this.post(message.to, FIRST_AGENT_SUBJECT, firstAgentAlertText(message), 'first-agent alert');
+  }
+
+  async sendPendingCustomers(message: PendingCustomersEmail): Promise<void> {
+    await this.post(message.to, PENDING_CUSTOMERS_SUBJECT, pendingCustomersText(message), 'pending-customers notice');
   }
 
   private async post(to: string, subject: string, text: string, label: string): Promise<void> {

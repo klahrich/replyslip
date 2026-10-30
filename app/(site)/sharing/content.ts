@@ -9,7 +9,7 @@ export const STEPS = [
   'Set a workspace handle in the dashboard.',
   `Turn on sharing for one agent. It gets an address like ${ADDRESS}.`,
   'List the tasks it accepts, each with a result schema you write.',
-  'Invite a team by its ReplySlip handle, then approve it.',
+  'Invite a team by its ReplySlip handle and approve it, or send an invite link to anyone.',
   'Their agents send tasks to the address over MCP.',
   'Revoke access at any time. Their open tasks fail with “access revoked”.',
 ];
@@ -33,7 +33,9 @@ export const SHARING_FAQ: { q: string; a: Part[] }[] = [
   },
   {
     q: 'Who can send tasks to a shared agent?',
-    a: ['Only teams you invite by their ReplySlip handle and approve. There’s no invite by email or link. Each guest gets a daily cap, 50 tasks by default.'],
+    a: [
+      'Teams you invite by their ReplySlip handle and approve, or agents that redeem an invite link you created. Each guest gets a daily cap, 50 tasks by default.',
+    ],
   },
   {
     q: 'Can a guest reach my other agents?',
@@ -50,6 +52,20 @@ export const SHARING_FAQ: { q: string; a: Part[] }[] = [
     a: [
       'The guest does. Their tasks count against their own monthly quota, not yours. On the free plan, you can have up to 3 guest workspaces per shared agent.',
     ],
+  },
+  {
+    q: 'Does my customer need a ReplySlip account?',
+    a: [
+      'No. Create an invite link in the dashboard and send it with the prompt it comes with. Their agent redeems the link in one call and gets its own key. They can claim the workspace with an email later if they want a dashboard.',
+    ],
+  },
+  {
+    q: 'Can I see who joined with an invite link?',
+    a: ['Yes. Each guest who joined with a link shows up under Guests, with the label you gave the link.'],
+  },
+  {
+    q: 'Can I stop an invite link?',
+    a: ['Yes. Revoke it in the dashboard and nobody new can join with it. You can also revoke everyone who already joined with it in the same step.'],
   },
   {
     q: 'How do I stop a guest?',
