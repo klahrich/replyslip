@@ -10,8 +10,9 @@ const REPLYSLIP_HOST = [{ type: 'host' as const, value: '(www\\.)?replyslip\\.co
 const PASS_THROUGH = '(?!api(?:/|$)|mcp(?:/|$)|_next/|i(?:/|$)|c(?:/|$)|sign-in(?:/|$)|\\.well-known/|assets/|[^/]*\\.[^/]+$)';
 // replyslip.com is retired. Only these named ReplySlip marketing pages (app/(site)) redirect to the valetto.tech
 // homepage; everything else, including any future route, passes through. Not listed on purpose: /claim, /i, /sign-in
-// (token and auth pages), /valetto (rules below), /dashboard, /docs/*, /api, /mcp and files.
-const REPLYSLIP_MARKETING_PAGES = ['/how-it-works', '/compare/agent-relay', '/compare/harnessrouter', '/sharing', '/agents'];
+// (token and auth pages), /agents (owner setup page linked from the dashboard), /valetto (rules below), /dashboard,
+// /docs/*, /api, /mcp and files.
+const REPLYSLIP_MARKETING_PAGES = ['/how-it-works', '/compare/agent-relay', '/compare/harnessrouter', '/sharing'];
 // replyslip.com also sends its home and legal pages; valetto.tech serves its own /, /privacy and /terms.
 const REPLYSLIP_ONLY_PAGES = ['/', '/privacy', '/terms'];
 const toValettoHome = (source: string, has: typeof VALETTO_HOST) => ({ source, has, destination: 'https://valetto.tech/', statusCode: 301 as const });

@@ -36,6 +36,8 @@ const NEVER_REDIRECTED = [
   '/claim',
   '/dashboard',
   '/dashboard/settings',
+  // Owner setup page linked from the dashboard footer (app/dashboard/layout.tsx).
+  '/agents',
   '/.well-known/mcp-registry-auth',
   '/assets/og.png',
   '/skill.md',
@@ -60,7 +62,7 @@ const NEVER_REDIRECTED = [
   '/how-it-works/extra',
 ];
 
-const OLD_SITE_PAGES = ['/how-it-works', '/compare/agent-relay', '/compare/harnessrouter', '/sharing', '/agents'];
+const OLD_SITE_PAGES = ['/how-it-works', '/compare/agent-relay', '/compare/harnessrouter', '/sharing'];
 
 describe('replyslip.com redirects', () => {
   for (const host of ['replyslip.com', 'www.replyslip.com']) {
@@ -112,6 +114,7 @@ describe('valetto.tech redirects', () => {
     expect(await redirectFor('www.valetto.tech', '/privacy')).toBe('https://valetto.tech/privacy');
     // Unknown paths only get the existing www -> apex hop, never the homepage redirect.
     expect(await redirectFor('www.valetto.tech', '/foo')).toBe('https://valetto.tech/foo');
+    expect(await redirectFor('www.valetto.tech', '/agents')).toBe('https://valetto.tech/agents');
   });
 });
 
