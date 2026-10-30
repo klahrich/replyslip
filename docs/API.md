@@ -52,7 +52,7 @@ Response `200` when a code may have been sent. The body is the same whether or n
 
 The response also sets `Retry-After` to that number of seconds. `retry_after_seconds` is how long until the oldest counted request leaves the window.
 
-A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in 10 minutes. A newer code invalidates older unused codes for that email. Limits: 5 requests per email and 100 per IP per 15 minutes. Mail is sent with Resend when `RESEND_API_KEY` and `EMAIL_FROM` are set; otherwise the code is written to the server log.
+A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in 10 minutes. A newer code invalidates older unused codes for that email. Limits: 5 requests per email and 100 per IP per 15 minutes. Mail is sent with Resend when `RESEND_API_KEY` and `EMAIL_FROM` are set; otherwise the code is written to the server log, except in production, where the request fails.
 
 ### POST `/api/v1/auth/verify-code`
 
@@ -557,6 +557,18 @@ Tool results are JSON text. Failures set the MCP tool error flag and return `{ "
 `list_agents` returns `{ "agents": [{ "id", "name", "description", "delivery", "shared", "created_at", "you" }] }` for the caller's workspace only, sorted by name, without revoked agents. `delivery` is `webhook`, `local`, or `none`; local agents add `watcher_online`. It never returns keys, webhook URLs or hosts, panes, headers, or emails, and it does not count against any plan limit. `whoami` adds `workspace_handle`, `shared`, `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and same-workspace `ask` return the flat `plan_limit` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. `guest_workspaces` is the same flat object when a free shared agent is already at 250 guests. `send_message`, `complete_task`, and `fail_task` do not count. `get_agent_card` returns `{ "card": { "address", "name", "description", "offers" } }` for an approved grant; `offers` lists only the offers in that grant, each with `name`, `description`, `result_schema`, `input_schema`, `notes_enabled`, and `notes_max`. `upsert_offer` without `input_schema` keeps the stored form; `null` clears it and the result adds `warning`. A guest `create_task` with an offer outside the grant, whether it exists on the agent or not, returns the same `404` `offer_not_found` with the same message. Owner tools manage the handle, the shared flag, offers, and grants. `invite_guest` cannot approve. A signed-in human approves in the dashboard.
 
 See https://<host>/docs/getting-started.md for arguments and the task rules.
+
+## Valetto
+
+Not an agent API. The Valetto early-access form posts here. Nothing is stored except rate-limit counters.
+
+### POST `/api/valetto/early-access`
+
+`Content-Type: application/json`. Body: `name` (1 to 100 chars), `email` (up to 254 chars, `name@domain.tld`), `business` (1 to 120), `website` (optional, up to 200, a domain or http(s) URL), `industry` (`retail`, `services`, `manufacturing`, `professional`, `other`), `teamSize` (`solo`, `2-10`, `11-50`, `50+`), `usesGrokBot` (`yes`, `not_yet`), `customerJobs` (1 to 1000, line breaks allowed), `heardFrom` (optional, up to 200). Strings are trimmed. An empty or `null` optional field is `null`. Single-line fields reject control characters. Unknown keys are ignored.
+
+`200` is exactly `{ "ok": true }`. The request is emailed as plain text to karim@valetto.tech with the submitter's address as Reply-To, never as From, through the same sender as sign-in codes. The same address again within 24 hours (case-insensitive) gets the same `200` and sends nothing. If the send fails, the route is `500` and a retry can send.
+
+`400` `{ "ok": false, "errors": { "<field>": "<message>" } }` has one message per bad field. A body that is not a JSON object is `400` without `errors`, and a non-JSON Content-Type is `415`. Each IP gets 10 requests per 60 minutes, valid or not; then `429` with `Retry-After`. A present `Origin` must exactly equal one of the comma-separated `APP_ORIGIN` entries (or the request's own origin when `APP_ORIGIN` is unset), and `Sec-Fetch-Site: cross-site` is refused; both are `403` `bad_origin`. Responses set `Cache-Control: no-store`.
 
 ## Admin
 

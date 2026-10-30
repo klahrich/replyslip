@@ -460,6 +460,7 @@ describe('first-agent alert', () => {
         throw new Error('smtp down');
       },
       async sendPendingCustomers() {},
+      async sendEarlyAccessNotice() {},
     });
     try {
       alerts.length = 0;

@@ -30,6 +30,14 @@ import { FREE_GUEST_WORKSPACES, PLAN_LIMITS } from './plans';
 import { absoluteUrl } from './origin';
 import { TOOL_DOCS } from './mcp-tools';
 import { GUEST_WAKE_NOTICE, WAKE_NOTICE } from './wake-notice';
+import {
+  EARLY_ACCESS_EMAIL_WINDOW_MS,
+  EARLY_ACCESS_IP_LIMIT,
+  INDUSTRIES,
+  TEAM_SIZES,
+  USES_GROK_BOT,
+  VALETTO_EARLY_ACCESS_TO,
+} from './valetto-constants';
 
 export const DOC_PATHS = {
   llms: '/llms.txt',
@@ -44,6 +52,8 @@ export const DOC_PATHS = {
 const watcherOnlineSeconds = Math.round(WATCHER_ONLINE_MS / 1000);
 const minutes = Math.round(LOGIN_CODE_TTL_MS / 60000);
 const joinHours = Math.round(JOIN_CODE_DEFAULT_TTL_MS / 3600000);
+const earlyAccessEmailHours = Math.round(EARLY_ACCESS_EMAIL_WINDOW_MS / 3600000);
+const earlyAccessIpMinutes = Math.round(EARLY_ACCESS_IP_LIMIT.windowMs / 60000);
 const requestWindowMinutes = Math.round(RATE_LIMITS.requestCode.windowMs / 60000);
 
 function toolSection(): string {
@@ -725,7 +735,7 @@ Response \`200\` when a code may have been sent. The body is the same whether or
 
 The response also sets \`Retry-After\` to that number of seconds. \`retry_after_seconds\` is how long until the oldest counted request leaves the window.
 
-A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in ${minutes} minutes. A newer code invalidates older unused codes for that email. Limits: ${RATE_LIMITS.requestCode.email} requests per email and ${RATE_LIMITS.requestCode.ip} per IP per ${requestWindowMinutes} minutes. Mail is sent with Resend when \`RESEND_API_KEY\` and \`EMAIL_FROM\` are set; otherwise the code is written to the server log.
+A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in ${minutes} minutes. A newer code invalidates older unused codes for that email. Limits: ${RATE_LIMITS.requestCode.email} requests per email and ${RATE_LIMITS.requestCode.ip} per IP per ${requestWindowMinutes} minutes. Mail is sent with Resend when \`RESEND_API_KEY\` and \`EMAIL_FROM\` are set; otherwise the code is written to the server log, except in production, where the request fails.
 
 ### POST ${line('/api/v1/auth/verify-code')}
 
@@ -1230,6 +1240,18 @@ Tool results are JSON text. Failures set the MCP tool error flag and return \`{ 
 \`list_agents\` returns \`{ "agents": [{ "id", "name", "description", "delivery", "shared", "created_at", "you" }] }\` for the caller's workspace only, sorted by name, without revoked agents. \`delivery\` is \`webhook\`, \`local\`, or \`none\`; local agents add \`watcher_online\`. It never returns keys, webhook URLs or hosts, panes, headers, or emails, and it does not count against any plan limit. \`whoami\` adds \`workspace_handle\`, \`shared\`, \`plan\`, \`usage\` (\`agents\`, \`tasks_this_month\`), and \`limits\` (\`agents\`, \`tasks_per_month\`). \`create_task\` and same-workspace \`ask\` return the flat \`plan_limit\` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. \`guest_workspaces\` is the same flat object when a free shared agent is already at ${FREE_GUEST_WORKSPACES} guests. \`send_message\`, \`complete_task\`, and \`fail_task\` do not count. \`get_agent_card\` returns \`{ "card": { "address", "name", "description", "offers" } }\` for an approved grant; \`offers\` lists only the offers in that grant, each with \`name\`, \`description\`, \`result_schema\`, \`input_schema\`, \`notes_enabled\`, and \`notes_max\`. \`upsert_offer\` without \`input_schema\` keeps the stored form; \`null\` clears it and the result adds \`warning\`. A guest \`create_task\` with an offer outside the grant, whether it exists on the agent or not, returns the same \`404\` \`offer_not_found\` with the same message. Owner tools manage the handle, the shared flag, offers, and grants. \`invite_guest\` cannot approve. A signed-in human approves in the dashboard.
 
 See ${root}/docs/getting-started.md for arguments and the task rules.
+
+## Valetto
+
+Not an agent API. The Valetto early-access form posts here. Nothing is stored except rate-limit counters.
+
+### POST ${line('/api/valetto/early-access')}
+
+\`Content-Type: application/json\`. Body: \`name\` (1 to 100 chars), \`email\` (up to 254 chars, \`name@domain.tld\`), \`business\` (1 to 120), \`website\` (optional, up to 200, a domain or http(s) URL), \`industry\` (\`${INDUSTRIES.join('`, `')}\`), \`teamSize\` (\`${TEAM_SIZES.join('`, `')}\`), \`usesGrokBot\` (\`${USES_GROK_BOT.join('`, `')}\`), \`customerJobs\` (1 to 1000, line breaks allowed), \`heardFrom\` (optional, up to 200). Strings are trimmed. An empty or \`null\` optional field is \`null\`. Single-line fields reject control characters. Unknown keys are ignored.
+
+\`200\` is exactly \`{ "ok": true }\`. The request is emailed as plain text to ${VALETTO_EARLY_ACCESS_TO} with the submitter's address as Reply-To, never as From, through the same sender as sign-in codes. The same address again within ${earlyAccessEmailHours} hours (case-insensitive) gets the same \`200\` and sends nothing. If the send fails, the route is \`500\` and a retry can send.
+
+\`400\` \`{ "ok": false, "errors": { "<field>": "<message>" } }\` has one message per bad field. A body that is not a JSON object is \`400\` without \`errors\`, and a non-JSON Content-Type is \`415\`. Each IP gets ${EARLY_ACCESS_IP_LIMIT.limit} requests per ${earlyAccessIpMinutes} minutes, valid or not; then \`429\` with \`Retry-After\`. A present \`Origin\` must exactly equal one of the comma-separated \`APP_ORIGIN\` entries (or the request's own origin when \`APP_ORIGIN\` is unset), and \`Sec-Fetch-Site: cross-site\` is refused; both are \`403\` \`bad_origin\`. Responses set \`Cache-Control: no-store\`.
 
 ## Admin
 
