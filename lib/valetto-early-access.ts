@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { getDb, type Db } from '@/db';
 import { sha256 } from './crypto';
-import { getEmailSender } from './email';
+import { getEmailSender, isStrictEmailAddress } from './email';
 import { HttpError } from './errors';
 import { clientIp } from './origin';
 import { consumeKeyedRateLimit } from './rate-limit';
@@ -17,7 +17,6 @@ import {
 const IP_KIND = 'valetto_early_access_ip';
 const EMAIL_KIND = 'valetto_early_access_email';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const WEBSITE_RE = /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i;
 const CONTROL_SINGLE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]/;
 // Multi-line text may keep tabs and line breaks.
@@ -58,6 +57,7 @@ type TextRule = {
   missing: string;
   tooLong: string;
   pattern?: RegExp;
+  valid?: (text: string) => boolean;
   invalid?: string;
 };
 
@@ -68,7 +68,7 @@ const TEXT_RULES = {
     max: 254,
     missing: 'Enter your email.',
     tooLong: "That email doesn't look right.",
-    pattern: EMAIL_RE,
+    valid: isStrictEmailAddress,
     invalid: "That email doesn't look right.",
   },
   business: {
@@ -135,7 +135,7 @@ export function validateEarlyAccess(input: unknown): EarlyAccessValidation {
       errors[field] = rule.invalid ?? 'Remove the special characters.';
       continue;
     }
-    if (rule.pattern && !rule.pattern.test(text)) {
+    if ((rule.pattern && !rule.pattern.test(text)) || (rule.valid && !rule.valid(text))) {
       errors[field] = rule.invalid ?? rule.missing;
       continue;
     }

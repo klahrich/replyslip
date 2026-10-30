@@ -735,7 +735,7 @@ Response \`200\` when a code may have been sent. The body is the same whether or
 
 The response also sets \`Retry-After\` to that number of seconds. \`retry_after_seconds\` is how long until the oldest counted request leaves the window.
 
-A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in ${minutes} minutes. A newer code invalidates older unused codes for that email. Limits: ${RATE_LIMITS.requestCode.email} requests per email and ${RATE_LIMITS.requestCode.ip} per IP per ${requestWindowMinutes} minutes. Mail is sent with Resend when \`RESEND_API_KEY\` and \`EMAIL_FROM\` are set; otherwise the code is written to the server log.
+A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in ${minutes} minutes. A newer code invalidates older unused codes for that email. Limits: ${RATE_LIMITS.requestCode.email} requests per email and ${RATE_LIMITS.requestCode.ip} per IP per ${requestWindowMinutes} minutes. Mail is sent with Resend when \`RESEND_API_KEY\` and \`EMAIL_FROM\` are set; otherwise the code is written to the server log, except in production, where the request fails.
 
 ### POST ${line('/api/v1/auth/verify-code')}
 

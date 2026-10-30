@@ -1,11 +1,20 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getDb } from '@/db';
 import { rateEvents } from '@/db/schema';
 import { POST as earlyAccess } from '@/app/api/valetto/early-access/route';
-import { earlyAccessNoticeText, earlyAccessSubject, setEmailSenderForTests } from '@/lib/email';
+import {
+  RESEND_TIMEOUT_MS,
+  earlyAccessNoticeText,
+  earlyAccessSubject,
+  getEmailSender,
+  isStrictEmailAddress,
+  setEmailSenderForTests,
+  setResendTimeoutForTests,
+} from '@/lib/email';
+import { validateEarlyAccess } from '@/lib/valetto-early-access';
 import { EARLY_ACCESS_IP_LIMIT, VALETTO_EARLY_ACCESS_TO } from '@/lib/valetto-constants';
 import { call, emailAddress } from './helpers';
-import { earlyAccessNotices } from './inbox';
+import { earlyAccessNotices, installInbox } from './inbox';
 
 const URL = 'http://localhost/api/valetto/early-access';
 let ipCounter = 0;
@@ -276,5 +285,183 @@ describe('early-access notice email', () => {
     expect(text).not.toMatch(/^Injected:/m);
     expect(text).toContain('Website: none');
     expect(text).toContain('<script>alert(1)</script>\nSecond line');
+  });
+});
+
+describe('strict reply-to address', () => {
+  const rejected = [
+    'a,b@example.com',
+    'a;b@example.com',
+    '<a@example.com>',
+    'Maya <a@example.com>',
+    '"a"@example.com',
+    'a b@example.com',
+    'a\tb@example.com',
+    'a@b@example.com',
+    'aexample.com',
+    'm\u00e1ya@example.com',
+    'maya@ex\u00e1mple.com',
+    'maya\u202e@example.com',
+    'maya@example.com\u2066',
+    'ma\u200bya@example.com',
+    'maya@exa\ufeffmple.com',
+    '.maya@example.com',
+    'maya.@example.com',
+    'ma..ya@example.com',
+    '@example.com',
+    'maya@',
+    'maya@localhost',
+    'maya@-example.com',
+    'maya@example-.com',
+    'maya@example..com',
+    'maya@example.c',
+    'maya@example.123',
+    `${'a'.repeat(65)}@example.com`,
+  ];
+
+  it.each(rejected)('rejects %j', (address) => {
+    expect(isStrictEmailAddress(address)).toBe(false);
+    const result = validateEarlyAccess(validBody({ email: address }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.email).toBe("That email doesn't look right.");
+  });
+
+  it('accepts ordinary addresses', () => {
+    for (const address of ['maya@example.com', 'Maya.Chen+tag@acme-jewellers.co.uk', "o'neil_1@sub.example.io"]) {
+      expect(isStrictEmailAddress(address), address).toBe(true);
+      expect(validateEarlyAccess(validBody({ email: address })).ok, address).toBe(true);
+    }
+  });
+
+  it('the route refuses a header-like address and sends nothing', async () => {
+    const res = await post(validBody({ email: 'maya@example.com, boss@example.com' }));
+    expect(res.status).toBe(400);
+    expect(earlyAccessNotices).toHaveLength(0);
+  });
+});
+
+describe('subject strips bidi and zero-width characters', () => {
+  it('removes them before trimming to one line', () => {
+    const subject = earlyAccessSubject({ business: '\u202eAcme\u200b \u2066Jewel\u200dlers\u2069\ufeff\u061c\u200e' });
+    expect(subject).toBe('Valetto early access: Acme Jewellers');
+    expect(subject).not.toMatch(/[\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/);
+  });
+});
+
+describe('Resend sender', () => {
+  const notice = {
+    to: VALETTO_EARLY_ACCESS_TO,
+    replyTo: 'maya@example.com',
+    name: 'Maya',
+    business: '\u202eAcme',
+    website: null,
+    industry: 'retail',
+    teamSize: 'solo',
+    usesGrokBot: 'yes',
+    customerJobs: 'Track orders',
+    heardFrom: null,
+    createdAt: new Date('2026-10-29T12:00:00Z'),
+  } as const;
+
+  function useResend(): void {
+    setEmailSenderForTests(null);
+    vi.stubEnv('RESEND_API_KEY', 'test-key');
+    vi.stubEnv('EMAIL_FROM', 'ReplySlip <noreply@example.com>');
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    setResendTimeoutForTests(null);
+    installInbox();
+  });
+
+  it('sends reply_to as a one-element list with a 10s timeout signal', async () => {
+    useResend();
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await getEmailSender().sendEarlyAccessNotice(notice);
+    expect(RESEND_TIMEOUT_MS).toBe(10_000);
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://api.resend.com/emails');
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    const body = JSON.parse(String(init.body));
+    expect(body.reply_to).toEqual(['maya@example.com']);
+    expect(body.to).toEqual(['karim@valetto.tech']);
+    expect(body.subject).toBe('Valetto early access: Acme');
+  });
+
+  it('refuses a reply-to that is not one plain address, without calling Resend', async () => {
+    useResend();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      getEmailSender().sendEarlyAccessNotice({ ...notice, replyTo: 'maya@example.com, boss@example.com' }),
+    ).rejects.toThrow(/reply-to/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a hung Resend call times out, the route returns 500, and the lock and limit are released', async () => {
+    useResend();
+    setResendTimeoutForTests(30);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal(
+      'fetch',
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+        }),
+    );
+    const email = emailAddress('hung');
+    const started = Date.now();
+    const failed = await post(validBody({ email }));
+    expect(failed.status).toBe(500);
+    expect(Date.now() - started).toBeLessThan(5_000);
+
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 200 }));
+    expect((await post(validBody({ email }))).status).toBe(200);
+  });
+});
+
+describe('RESEND_API_KEY unset', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    installInbox();
+  });
+
+  it('in production, the notice fails and the route returns 500, then a configured retry can send', async () => {
+    setEmailSenderForTests(null);
+    vi.stubEnv('RESEND_API_KEY', '');
+    vi.stubEnv('VERCEL_ENV', 'production');
+    process.env.APP_ORIGIN = 'https://replyslip.com';
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const email = emailAddress('nokey');
+    const res = await post(validBody({ email }));
+    expect(res.status).toBe(500);
+    expect(res.data.ok).toBeUndefined();
+    expect(info).not.toHaveBeenCalled();
+    await expect(getEmailSender().sendLoginCode({ to: 'maya@example.com', code: '123456' })).rejects.toThrow(
+      /RESEND_API_KEY/,
+    );
+
+    installInbox();
+    expect((await post(validBody({ email }))).status).toBe(200);
+    expect(earlyAccessNotices).toHaveLength(1);
+  });
+
+  it('outside production (including a Vercel preview), it logs to the console', async () => {
+    setEmailSenderForTests(null);
+    vi.stubEnv('RESEND_API_KEY', '');
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const res = await post(validBody());
+    expect(res.status).toBe(200);
+    expect(info.mock.calls.some(([line]) => String(line).includes('Valetto early-access notice for karim@valetto.tech'))).toBe(true);
   });
 });
