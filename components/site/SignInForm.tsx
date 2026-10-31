@@ -103,7 +103,7 @@ export function SignInForm({ sent, claimToken }: { sent: boolean; claimToken?: s
           <h2>Claim it with your email</h2>
         ) : (
           <>
-            <h1>Sign in to ReplySlip</h1>
+            <h1>Sign in to Valetto</h1>
             <p className="lead">Enter your email and we’ll send you a 6-digit code. New here? The same code creates your workspace.</p>
           </>
         )}
@@ -124,7 +124,7 @@ export function SignInForm({ sent, claimToken }: { sent: boolean; claimToken?: s
             aria-invalid={error ? true : undefined}
             aria-describedby="si-email-msg"
           />
-          <label htmlFor="si-source">How did you hear about ReplySlip? (optional)</label>
+          <label htmlFor="si-source">How did you hear about Valetto? (optional)</label>
           <input
             id="si-source"
             name="source"

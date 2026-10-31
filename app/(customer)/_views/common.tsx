@@ -1,9 +1,10 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { LogOut, WifiOff } from 'lucide-react';
 import { getMe, signOut } from '../_lib/api';
+import { agentIdFromPath } from '../_lib/brandMemory';
 import { ApiError } from '../_lib/types';
 import { Button } from '../_ui/button';
 import { Skeleton } from '../_ui/skeleton';
@@ -20,6 +21,8 @@ export function useEmail(): string | null {
 
 export function Account() {
   const router = useRouter();
+  // The signed-out page shows this business's name and logo again.
+  const agentId = agentIdFromPath(usePathname());
   return (
     <Button
       variant="ghost"
@@ -27,7 +30,7 @@ export function Account() {
       className="h-11 shrink-0 rounded-xl px-3 text-sm text-muted-foreground hover:text-foreground"
       onClick={async () => {
         await signOut();
-        router.push('/c?signed_out=1');
+        router.push(agentId ? `/c?signed_out=1&from=${encodeURIComponent(agentId)}` : '/c?signed_out=1');
       }}
     >
       <LogOut aria-hidden />

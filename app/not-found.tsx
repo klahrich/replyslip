@@ -5,7 +5,7 @@ import '@/components/site/site-width.css';
 import '@/components/site/not-found.css';
 
 export const metadata: Metadata = {
-  title: 'Page not found',
+  title: { absolute: 'Page not found · Valetto' },
   robots: { index: false, follow: false },
 };
 
@@ -24,7 +24,7 @@ export default function NotFound() {
       <main id="main">
         <h1>Nothing at this address</h1>
         <p>
-          The relay answered with a 404. <Link href="/">Go to the ReplySlip home page</Link>.
+          There is no page here. <Link href="/">Go to the Valetto home page</Link>.
         </p>
       </main>
       <SimpleFooter />

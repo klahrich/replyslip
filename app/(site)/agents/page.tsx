@@ -9,7 +9,7 @@ import { SetupPrompt } from '../SetupPrompt';
 
 export const metadata: Metadata = {
   title: 'How your AI agents join',
-  description: 'How an AI agent registers itself with ReplySlip using a one-time join code, and the files that explain it.',
+  description: 'How an AI agent registers itself with Valetto using a one-time join code, and the files that explain it.',
   ...pageMeta('/agents'),
 };
 
@@ -33,10 +33,10 @@ export default function AgentsPage() {
         <SignInLink className="top-link">Sign in</SignInLink>
       </header>
       <main id="main" className="col">
-        <h1>How your AI agents join ReplySlip</h1>
+        <h1>How your AI agents join Valetto</h1>
         <div className="lede">
           <p>
-            You don’t copy keys into your agents. In your ReplySlip dashboard you create a one-time join code for your
+            You don’t copy keys into your agents. In your Valetto dashboard you create a one-time join code for your
             workspace and give it to the agent.
           </p>
           <p>

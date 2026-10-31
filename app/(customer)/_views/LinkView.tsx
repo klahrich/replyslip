@@ -5,11 +5,10 @@ import Link from 'next/link';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Link2Off, Loader2, Mail } from 'lucide-react';
 import { acceptLink, getLink } from '../_lib/api';
-import { brandStyle } from '../_lib/brand';
-import { ApiError, type LinkResponse } from '../_lib/types';
+import { ApiError, type Branding, type LinkResponse } from '../_lib/types';
 import { Button } from '../_ui/button';
 import { EmailSignIn, SignInCard, retryText } from '../_components/EmailSignIn';
-import { LogoTile, PlainFrame, ValettoFooter } from '../_components/Frame';
+import { CenteredFrame } from '../_components/Frame';
 import { Notice } from '../_components/Notice';
 import { Loading, useEmail } from './common';
 
@@ -43,15 +42,16 @@ export function LinkFromHash() {
   return <LinkView key={token} token={token} />;
 }
 
-function DeadLink({ code }: { code: string }) {
+/** `branding` is known when the link loaded and only failed on accept; a link that fails to load (R1 404/410) has none. */
+function DeadLink({ code, branding = null }: { code: string; branding?: Branding | null }) {
   const c = linkErrors[code] ?? linkErrors.invite_not_found;
-  if (code === 'invite_used_up') return <UsedUpLink title={c.title} />;
+  if (code === 'invite_used_up') return <UsedUpLink title={c.title} branding={branding} />;
   return (
-    <PlainFrame>
+    <CenteredFrame branding={branding}>
       <Notice icon={<Link2Off />} title={c.title}>
         <p>{c.body}</p>
       </Notice>
-    </PlainFrame>
+    </CenteredFrame>
   );
 }
 
@@ -59,25 +59,26 @@ function DeadLink({ code }: { code: string }) {
  * Personal links work once. Someone who already joined with one gets back in with an email code and lands on
  * their businesses list (/c); someone still signed in just gets a way there.
  */
-function UsedUpLink({ title }: { title: string }) {
+function UsedUpLink({ title, branding }: { title: string; branding: Branding | null }) {
+  const business = branding?.display_name ?? 'this business';
   const router = useRouter();
   const email = useEmail();
   const [signingIn, setSigningIn] = useState(false);
   if (signingIn) {
     return (
-      <PlainFrame>
+      <CenteredFrame branding={branding}>
         <SignInCard>
           <EmailSignIn
             title="Sign in with your email"
-            intro="Enter the email you used with this business. We'll send you a 6-digit code."
+            intro={`Enter the email you used with ${business}. We'll send you a 6-digit code.`}
             onSignedIn={() => router.push('/c')}
           />
         </SignInCard>
-      </PlainFrame>
+      </CenteredFrame>
     );
   }
   return (
-    <PlainFrame>
+    <CenteredFrame branding={branding}>
       <Notice
         icon={<Link2Off />}
         title={title}
@@ -95,9 +96,9 @@ function UsedUpLink({ title }: { title: string }) {
       >
         <p>{email
             ? `You're signed in as ${email}. Your businesses and requests are on your list.`
-            : "If you've already joined, sign in with your email to get back to your requests. Otherwise, ask the business for a new link."}</p>
+            : `If you've already joined, sign in with your email to get back to your requests. Otherwise, ask ${branding ? business : 'the business'} for a new link.`}</p>
       </Notice>
-    </PlainFrame>
+    </CenteredFrame>
   );
 }
 
@@ -124,7 +125,7 @@ export function LinkView({ token }: { token: string }) {
     );
   }, [token, router]);
 
-  if (dead) return <DeadLink code={dead} />;
+  if (dead) return <DeadLink code={dead} branding={link?.bot.branding} />;
   if (!link) return <Loading />;
 
   const name = link.bot.branding.display_name;
@@ -158,46 +159,37 @@ export function LinkView({ token }: { token: string }) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col" style={brandStyle(link.bot.branding)}>
-      <div aria-hidden className="h-1 w-full bg-primary" />
-      <main className="mx-auto flex w-full max-w-[440px] flex-1 flex-col px-4 pt-12 pb-6 sm:pt-20">
-        <div className="flex flex-col items-center text-center">
-          <LogoTile branding={link.bot.branding} size={72} />
-          <p className="mt-4 text-[15px] font-medium text-muted-foreground">{name}</p>
-        </div>
-
-        <section className="mt-6 rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8">
-          {blocked ? (
-            <>
-              <h1 className="text-[22px] leading-snug font-semibold tracking-tight">{blocked.title}</h1>
-              {blocked.body && <p className="mt-2 text-[15px] text-muted-foreground">{blocked.body}</p>}
-            </>
-          ) : link.next === 'accept' ? (
-            // Already signed in (R1 next: "accept"): one tap, no code.
-            <SignedInAccept
-              name={name}
-              asks={asks}
-              busy={busy}
-              error={error}
-              onAccept={() => {
-                setError(null);
-                setBusy(true);
-                void accept();
-              }}
-            />
-          ) : (
-            <EmailSignIn
-              title={asks ? `Sign in to ask ${name} for access` : `Sign in to send a request to ${name}`}
-              intro="We'll email you a 6-digit code. No password needed."
-              emailNote={`${name} will see your email.`}
-              footer={asks ? `${name} approves each new customer.` : undefined}
-              onSignedIn={signedIn}
-            />
-          )}
-        </section>
-      </main>
-      <ValettoFooter />
-    </div>
+    <CenteredFrame branding={link.bot.branding}>
+      <section className="rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8">
+        {blocked ? (
+          <>
+            <h1 className="text-[22px] leading-snug font-semibold tracking-tight">{blocked.title}</h1>
+            {blocked.body && <p className="mt-2 text-[15px] text-muted-foreground">{blocked.body}</p>}
+          </>
+        ) : link.next === 'accept' ? (
+          // Already signed in (R1 next: "accept"): one tap, no code.
+          <SignedInAccept
+            name={name}
+            asks={asks}
+            busy={busy}
+            error={error}
+            onAccept={() => {
+              setError(null);
+              setBusy(true);
+              void accept();
+            }}
+          />
+        ) : (
+          <EmailSignIn
+            title={asks ? `Sign in to ask ${name} for access` : `Sign in to send a request to ${name}`}
+            intro="We'll email you a 6-digit code. No password needed."
+            emailNote={`${name} will see your email.`}
+            footer={asks ? `${name} approves each new customer.` : undefined}
+            onSignedIn={signedIn}
+          />
+        )}
+      </section>
+    </CenteredFrame>
   );
 }
 

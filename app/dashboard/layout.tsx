@@ -11,7 +11,7 @@ import '@/components/dashboard/dashboard.css';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Dashboard',
+  title: { default: 'Dashboard · Valetto', template: '%s · Valetto' },
   robots: { index: false, follow: false, nocache: true },
 };
 
@@ -25,9 +25,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         Skip to content
       </a>
       <header className="dash-top">
-        <Link className="mark" href="/dashboard" aria-label="ReplySlip dashboard">
+        <Link className="mark" href="/dashboard" aria-label="Valetto dashboard">
           <MarkIcon />
-          ReplySlip
+          Valetto
         </Link>
         <nav aria-label="Dashboard">
           <ul>
@@ -55,7 +55,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </main>
       <footer className="foot-simple">
         <p>
-          ReplySlip is built by <a href="https://clairevue.ai">ClaireVue</a>, Montréal
+          Valetto is built by <a href="https://clairevue.ai">ClaireVue</a>, Montréal
         </p>
         <Link href="/agents">How agents join</Link>
       </footer>

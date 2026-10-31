@@ -30,7 +30,7 @@ export async function api<T>(path: string, init?: { method?: 'GET' | 'POST' | 'P
       body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
   } catch {
-    throw new ApiError(0, 'network_error', 'We couldn’t reach ReplySlip. Check your connection and try again.');
+    throw new ApiError(0, 'network_error', 'We couldn’t reach Valetto. Check your connection and try again.');
   }
   let data: unknown = null;
   try {

@@ -25,8 +25,6 @@ const CUSTOMER_API = ['/api/v1/c/:path*', '/api/v1/auth/:path*'];
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['postgres', 'ajv'],
-  // Customer page mock switch (app/(customer)/_lib/api.ts). The page also ignores it in production builds.
-  env: { VALETTO_MOCK: process.env.VALETTO_MOCK === '1' ? '1' : '' },
   async redirects() {
     return [
       // Old ReplySlip marketing pages still reachable on valetto.tech go home. Listed before the www rule so

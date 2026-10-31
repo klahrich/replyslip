@@ -55,10 +55,10 @@ export function ClaimWorkspace() {
       <h1>Claim your workspace</h1>
       <p className="lead">
         Your agent{agents.length === 1 ? '' : 's'} <span translate="no">{agents.map((a) => a.name).join(', ')}</span>{' '}
-        joined ReplySlip with an invite link, in <strong>{workspace.name}</strong>. Add your email to see its tasks,
+        joined Valetto with an invite link, in <strong>{workspace.name}</strong>. Add your email to see its tasks,
         rotate its key, change its webhook, and connect more agents.
       </p>
-      <p className="row-links">Use an email that doesn’t have a ReplySlip workspace yet.</p>
+      <p className="row-links">Use an email that doesn’t have a Valetto workspace yet.</p>
       <SignInForm sent={false} claimToken={state.token} />
     </>
   );

@@ -33,6 +33,39 @@ export function LogoTile({ branding, size = 44, className }: { branding: Brandin
   );
 }
 
+/** The Valetto tile, for pages that don't know which business they belong to. */
+export function ValettoTile({ size = 72 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden
+      className="grid shrink-0 place-items-center bg-[#2B2B30] font-semibold text-white shadow-sm"
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.24), fontSize: Math.round(size * 0.44) }}
+    >
+      V
+    </span>
+  );
+}
+
+/**
+ * Centered sign-in style page: the business's logo tile and name over a narrow column, the way the link page
+ * looks. Without branding (the page really doesn't know the business) it shows the Valetto tile and name.
+ */
+export function CenteredFrame({ branding, children }: { branding?: Branding | null; children: ReactNode }) {
+  return (
+    <div className="flex min-h-dvh flex-col" style={branding ? brandStyle(branding) : undefined}>
+      {branding && <div aria-hidden className="h-1 w-full bg-primary" />}
+      <main className="mx-auto flex w-full max-w-[440px] flex-1 flex-col px-4 pt-12 pb-6 sm:pt-20">
+        <div className="flex flex-col items-center text-center">
+          {branding ? <LogoTile branding={branding} size={72} /> : <ValettoTile size={72} />}
+          <p className="mt-4 text-[15px] font-medium text-muted-foreground">{branding ? branding.display_name : 'Valetto'}</p>
+        </div>
+        <div className="mt-6">{children}</div>
+      </main>
+      <ValettoFooter />
+    </div>
+  );
+}
+
 /** Neutral frame used before branding is known, or when a link is dead. */
 export function PlainFrame({ children }: { children: ReactNode }) {
   return (

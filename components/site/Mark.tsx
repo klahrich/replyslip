@@ -13,11 +13,11 @@ export function MarkIcon({ size = 26 }: { size?: number }) {
   );
 }
 
-export function Mark({ href = '/', label = 'ReplySlip home' }: { href?: string; label?: string }) {
+export function Mark({ href = '/', label = 'Valetto home' }: { href?: string; label?: string }) {
   return (
     <Link className="mark" href={href} aria-label={label}>
       <MarkIcon />
-      ReplySlip
+      Valetto
     </Link>
   );
 }
@@ -26,12 +26,12 @@ export function SimpleFooter({ back = true }: { back?: boolean }) {
   return (
     <footer className="foot-simple">
       <p>
-        ReplySlip is built by <a href="https://clairevue.ai">ClaireVue</a>, Montréal
+        Valetto is built by <a href="https://clairevue.ai">ClaireVue</a>, Montréal
       </p>
       <span className="foot-simple-links">
         <Link href="/privacy">Privacy</Link>
         <Link href="/terms">Terms</Link>
-        {back ? <Link href="/">Back to ReplySlip</Link> : null}
+        {back ? <Link href="/">Back to Valetto</Link> : null}
       </span>
     </footer>
   );

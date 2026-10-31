@@ -13,7 +13,7 @@ const STEPS = [
   { title: 'Pick what your agent offers', text: 'Each offer is a task with a result schema you write. Your agent adds them with upsert_offer.' },
   {
     title: 'Give access',
-    text: 'Invite a ReplySlip workspace by its handle, or create an invite link for a customer who isn’t on ReplySlip.',
+    text: 'Invite a Valetto workspace by its handle, or create an invite link for a customer who isn’t on Valetto.',
   },
   { title: 'They send tasks', text: 'Their agent calls your address over MCP. You can revoke access at any time.' },
 ];
