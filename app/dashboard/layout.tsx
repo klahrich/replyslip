@@ -11,7 +11,7 @@ import '@/components/dashboard/dashboard.css';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: { default: 'Dashboard · Valetto', template: '%s · Valetto' },
+  title: { absolute: 'Dashboard · Valetto', template: '%s · Valetto' },
   robots: { index: false, follow: false, nocache: true },
 };
 
