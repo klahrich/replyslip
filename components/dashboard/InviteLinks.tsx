@@ -30,7 +30,7 @@ function customerMessage(made: NewInvite, agentName: string): string {
   return [
     hello,
     '',
-    `You can now connect your AI agent to our ${agentName}. No ReplySlip account needed.`,
+    `You can now connect your AI agent to our ${agentName}. No Valetto account needed.`,
     'Paste this into your agent:',
     '',
     ...made.agent_prompt.split('\n').map((line) => `  ${line}`),
@@ -191,7 +191,7 @@ function AgentInviteLinks({
     <section className="dash-invites" aria-labelledby={headingId}>
       <h4 id={headingId}>Agent invite links</h4>
       <p className="dash-muted">
-        For customers who aren’t on ReplySlip. Their agent redeems the link and gets its own key. It shows up under
+        For customers who aren’t on Valetto. Their agent redeems the link and gets its own key. It shows up under
         Guests.
       </p>
 
@@ -231,7 +231,7 @@ function AgentInviteLinks({
             revoke it below.
           </p>
           <ol className="dash-invite-next dash-muted">
-            <li>Their agent redeems the link and gets its own ReplySlip key.</li>
+            <li>Their agent redeems the link and gets its own Valetto key.</li>
             <li>
               It shows up under Guests,{' '}
               {made.invite.approve_on_redeem ? 'already approved.' : 'waiting for your approval.'}

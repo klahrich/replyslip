@@ -6,15 +6,18 @@ import { useCallback, useEffect, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { listBots } from '../_lib/api';
 import { brandStyle } from '../_lib/brand';
+import { useRememberedBranding } from '../_lib/brandMemory';
 import type { BotsResponse } from '../_lib/types';
 import { EmailSignIn, SignInCard } from '../_components/EmailSignIn';
-import { LogoTile, PlainFrame } from '../_components/Frame';
+import { CenteredFrame, LogoTile, PlainFrame } from '../_components/Frame';
 import { ConnectError, Loading, loadFailure } from './common';
 
 const shareLabel = { approved: '', pending: 'Waiting for approval', revoked: 'Access turned off' } as const;
 
-export function BotsView({ signedOut }: { signedOut: boolean }) {
+export function BotsView({ signedOut, from = null }: { signedOut: boolean; from?: string | null }) {
   const router = useRouter();
+  /** The business they signed out from, if this tab saw it. */
+  const fromBranding = useRememberedBranding(signedOut ? from : null);
   const [data, setData] = useState<BotsResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const load = useCallback(async () => {
@@ -33,15 +36,15 @@ export function BotsView({ signedOut }: { signedOut: boolean }) {
 
   if (signedOut) {
     return (
-      <PlainFrame>
+      <CenteredFrame branding={fromBranding}>
         <SignInCard>
           <EmailSignIn
             title="You're signed out"
-            intro="To come back, enter the email you used with this business. We'll send you a 6-digit code."
+            intro={`To come back, enter the email you used with ${fromBranding?.display_name ?? 'this business'}. We'll send you a 6-digit code.`}
             onSignedIn={() => router.replace('/c')}
           />
         </SignInCard>
-      </PlainFrame>
+      </CenteredFrame>
     );
   }
   if (failed)

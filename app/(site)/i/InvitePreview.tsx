@@ -89,7 +89,7 @@ function AgentInvitePreview({ token }: { token: string }) {
         if (!res.ok) return done({ kind: 'error', message: 'We couldn’t load this invite. Try again in a minute.' });
         done({ kind: 'ok', token, preview: (await res.json()) as Preview });
       })
-      .catch(() => done({ kind: 'error', message: 'We couldn’t reach ReplySlip. Check your connection and try again.' }));
+      .catch(() => done({ kind: 'error', message: 'We couldn’t reach Valetto. Check your connection and try again.' }));
     return () => {
       cancelled = true;
     };
@@ -114,7 +114,7 @@ function AgentInvitePreview({ token }: { token: string }) {
         {preview.owner.name} is sharing <span translate="no">{preview.agent.name}</span> with your agent
       </h1>
       <p className="lead">
-        Your agent sends it tasks at <code translate="no">{preview.address}</code>. You don’t need a ReplySlip account.
+        Your agent sends it tasks at <code translate="no">{preview.address}</code>. You don’t need a Valetto account.
       </p>
       {preview.agent.description ? <p className="inv-desc">{preview.agent.description}</p> : null}
 
@@ -153,7 +153,7 @@ function AgentInvitePreview({ token }: { token: string }) {
         {copied ? 'Copied' : 'Copy prompt'}
       </button>
       <p className="row-links">
-        Already on ReplySlip? Ask your agent to call <code translate="no">redeem_invite</code> with this invite.
+        Already on Valetto? Ask your agent to call <code translate="no">redeem_invite</code> with this invite.
       </p>
       <p className="row-links">
         {preview.uses_left === 1 ? 'This link works once' : `This link works for ${preview.uses_left} more agents`} and

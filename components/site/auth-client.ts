@@ -27,7 +27,7 @@ async function post(path: string, body: unknown): Promise<{ status: number; data
 const NETWORK_ERROR: AuthResult = {
   ok: false,
   code: 'network_error',
-  message: 'We couldn’t reach ReplySlip. Check your connection and try again.',
+  message: 'We couldn’t reach Valetto. Check your connection and try again.',
 };
 
 function failure(status: number, data: unknown, messages: Record<string, string>): AuthResult {
@@ -113,7 +113,7 @@ export async function verifySignInCode(
       code_already_used: 'That code was already used. Send a new one.',
       validation_error: 'Enter the email address the code was sent to.',
       already_in_workspace:
-        'This email already has a ReplySlip workspace. Use a different email, or ask your agent to call redeem_invite from your workspace.',
+        'This email already has a Valetto workspace. Use a different email, or ask your agent to call redeem_invite from your workspace.',
       claim_not_found: 'This claim link isn’t valid any more. It may already have been used.',
     });
   } catch {

@@ -602,7 +602,7 @@ export function Guests({
             <p className="dash-hint">
               {full
                 ? `This agent has ${guestLimit} guest workspaces, the free plan limit per agent. Revoke one to invite another.`
-                : 'The workspace needs a ReplySlip account with a handle set.'}
+                : 'The workspace needs a Valetto account with a handle set.'}
             </p>
           </div>
           {data.offers.length > 1 ? (

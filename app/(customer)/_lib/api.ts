@@ -5,6 +5,7 @@
  * Sign-in (/api/v1/auth/*) and R1–R8 (/api/v1/c/*): same-origin fetch with the session cookie.
  * A failed fetch (offline, DNS, CORS) throws ApiError status 0 with code `network_error`.
  */
+import { rememberBranding } from './brandMemory';
 import { ApiError } from './types';
 import type {
   AcceptResponse,
@@ -153,6 +154,7 @@ export async function signOut(): Promise<void> {
 /** R1 `GET /api/v1/c/links/:token` */
 export async function getLink(token: string): Promise<LinkResponse> {
   const { data } = await call<LinkResponse>(`/api/v1/c/links/${enc(token)}`);
+  rememberBranding(data.bot.agent_id, data.bot.branding);
   return data;
 }
 
@@ -174,6 +176,7 @@ export async function getBot(agentId: string): Promise<BotResponse> {
     `/api/v1/c/bots/${enc(agentId)}`,
     { conditional: true },
   );
+  rememberBranding(agentId, data.bot.branding);
   return {
     ...data,
     // 17.1 adds `access`; it mirrors share.status, which 15.5 already had.

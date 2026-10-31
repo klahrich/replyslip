@@ -21,7 +21,7 @@ function deliveryLabel(a: Agent): string {
     const target = a.delivery.target ?? a.delivery.pane;
     return `Local${driver ? ` · ${driver}` : ''}${target ? ` · ${target}` : ''}`;
   }
-  return 'Checks ReplySlip for new tasks (nothing sent)';
+  return 'Checks Valetto for new tasks (nothing sent)';
 }
 
 /** Last wake outcome per agent, from GET /api/v1/agents. Shows nothing until a wake has been attempted. */

@@ -8,7 +8,7 @@ import '@/components/site/site-width.css';
 import '@/components/site/signin.css';
 
 export const metadata: Metadata = {
-  title: 'Sign in',
+  title: { absolute: 'Sign in · Valetto' },
   robots: { index: false, follow: false },
   ...pageMeta('/sign-in'),
 };

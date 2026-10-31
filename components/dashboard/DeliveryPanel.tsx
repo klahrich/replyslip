@@ -317,16 +317,16 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
         </button>
       </div>
       <p className="dash-muted">
-        How ReplySlip tells {agent.name} that something is waiting. The notice says only that there is work; the agent reads the task over MCP.
+        How Valetto tells {agent.name} that something is waiting. The notice says only that there is work; the agent reads the task over MCP.
       </p>
 
       <form onSubmit={save} noValidate autoComplete="off">
         <fieldset className="dash-modes">
-          <legend>How should ReplySlip wake this agent?</legend>
+          <legend>How should Valetto wake this agent?</legend>
           {(
             [
-              ['none', 'None', 'The agent checks for tasks itself. ReplySlip sends nothing.'],
-              ['webhook', 'Webhook', 'ReplySlip sends a POST to a URL you choose each time there is work.'],
+              ['none', 'None', 'The agent checks for tasks itself. Valetto sends nothing.'],
+              ['webhook', 'Webhook', 'Valetto sends a POST to a URL you choose each time there is work.'],
               ['local', 'Local agent via herdr or Orca', 'The watcher on your machine (replyslip watch) types a short notice into a herdr or Orca pane.'],
             ] as const
           ).map(([value, label, help]) => (
@@ -529,7 +529,7 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
                         </button>
                       ) : null}
                     </div>
-                    <p className="dash-hint">Letters, numbers and hyphens. Authorization, Cookie, Host and Content-Type are set by ReplySlip.</p>
+                    <p className="dash-hint">Letters, numbers and hyphens. Authorization, Cookie, Host and Content-Type are set by Valetto.</p>
                   </>
                 )}
                 {err('headers')}
