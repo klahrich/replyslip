@@ -92,7 +92,15 @@ export function setFirstAgentAlertSchedulerForTests(next: FirstAgentScheduler | 
 
 /** Run a task after the response with the same scheduler (and test hook) as the first-agent alert. */
 export function runAfterResponse(task: () => Promise<void>): void {
-  scheduler(task);
+  // A throw after the response has no one to report to; log it so it is not an unhandled rejection.
+  scheduler(async () => {
+    try {
+      await task();
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      console.error(`[replyslip] after-response task failed: ${reason}`);
+    }
+  });
 }
 
 /** Queue alerts on a promise chain and reset it. `flushFirstAgentAlerts` waits for that chain. */

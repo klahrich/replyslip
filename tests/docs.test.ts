@@ -24,7 +24,7 @@ describe('agent docs', () => {
     expect(llmsBody).toContain('https://preview.example/skill.md');
     expect(llmsBody).toContain('Bearer <api_key>');
     expect(llmsBody).toContain('substitute it into the Authorization header');
-    expect(llmsBody.split('\n')[2]).toMatch(/^> ReplySlip/);
+    expect(llmsBody.split('\n')[2]).toMatch(/^> Valetto/);
 
     const skillRes = await skill(docsRequest('/skill.md'));
     expect(skillRes.status).toBe(200);

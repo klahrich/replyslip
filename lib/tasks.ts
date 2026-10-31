@@ -22,6 +22,8 @@ import { assertFreeTextFields, parseRecipient, resolveSharedTask } from './shari
 import { CROSS_WORKSPACE_TASK_NOTICE, HELD_FOR_REVIEW_NOTICE } from './wake-notice';
 import { deliverWebhookWake, enqueueWake, type WakeReason } from './wakes';
 import { claimReviewNotice, sendReviewNotice } from './review-notice';
+import { claimCustomerNotice, sendCustomerNotice } from './customer-notice';
+import { sendersFor } from './task-senders';
 
 const CLOSED = new Set(['done', 'failed']);
 /** Statuses where the owner gates the task (review_first). Nothing held is ever shown to the sending side. */
@@ -259,7 +261,7 @@ export async function createTask(
   const written = await getDb().transaction(async (tx) => {
     // The monthly cap is the sender's. A guest task is stored in the owner's workspace
     // so the shared agent's wakes and complete path stay the same, and from_workspace_id
-    // is what countTasksThisMonth charges.
+    // is what countChargedTasksThisMonth (lib/plans.ts) charges.
     await assertWithinLimit(caller.workspaceId, 'tasks', tx);
     let recipient: AgentRow;
     let resultSchema: Record<string, unknown>;
@@ -597,10 +599,17 @@ async function closeOrQuestion(
           reason: change.reason,
           taskId: updated.id,
         });
+    // Held answers never notify the customer; the owner's release does (lib/reviews.ts).
+    const customerNotice = hold ? null : await claimCustomerNotice(tx, task, updated);
     const names = await namesFor(tx, updated);
     const labels = await labelsFor(tx, [updated]);
-    return { payload: serializeTask(updated, names.from, names.to, caller.workspaceId, labels.get(updated.id)), wakeId };
+    return {
+      payload: serializeTask(updated, names.from, names.to, caller.workspaceId, labels.get(updated.id)),
+      wakeId,
+      customerNotice,
+    };
   });
+  sendCustomerNotice(written.customerNotice);
   await afterWake(written.wakeId);
   return written.payload;
 }
@@ -680,7 +689,15 @@ export async function listWorkspaceTasks(workspaceId: string, status: string | u
     getDb(),
     rows.map((row) => row.task),
   );
-  return rows.map((row) => serializeTask(row.task, row.fromName, row.toName, workspaceId, labels.get(row.task.id)));
+  const senders = await sendersFor(
+    getDb(),
+    rows.map((row) => row.task),
+    workspaceId,
+  );
+  return rows.map((row) => ({
+    ...serializeTask(row.task, row.fromName, row.toName, workspaceId, labels.get(row.task.id)),
+    sender: senders.get(row.task.id) ?? null,
+  }));
 }
 
 export async function getWorkspaceTask(workspaceId: string, taskId: string) {
@@ -697,8 +714,9 @@ export async function getWorkspaceTask(workspaceId: string, taskId: string) {
     [task.fromAgentId, names.from],
     [task.toAgentId, names.to],
   ]);
+  const senders = await sendersFor(db, [task], workspaceId);
   return {
-    task: serializeTask(task, names.from, names.to, workspaceId, labels.get(task.id)),
+    task: { ...serializeTask(task, names.from, names.to, workspaceId, labels.get(task.id)), sender: senders.get(task.id) ?? null },
     messages: thread.map((message) =>
       serializeMessage(message, nameById.get(message.fromAgentId) ?? 'unknown', nameById.get(message.toAgentId) ?? 'unknown'),
     ),

@@ -10,8 +10,11 @@ const MAX_CAP = 10_000;
 type Loaded = { shares: Share[]; offers: Offer[] };
 
 function who(s: Share): string {
-  // A customer who signed in from a link is known by email; the owner's label still wins.
-  if (s.source === 'customer') return s.label ?? s.customer_email ?? 'A customer';
+  // A customer who signed in from a link is known by email. The label is usually the link's label, so it is context only.
+  if (s.source === 'customer') {
+    if (s.customer_email) return s.label ? `${s.customer_email} (${s.label})` : s.customer_email;
+    return s.label ?? 'A customer';
+  }
   const at = s.guest_handle ? `@${s.guest_handle}` : null;
   if (s.label) return at ? `${s.label} (${at})` : s.label;
   return at ?? 'A workspace with no handle';

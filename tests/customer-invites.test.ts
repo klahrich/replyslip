@@ -18,7 +18,7 @@ import { GET as resolveLink } from '@/app/api/v1/c/links/[token]/route';
 import { POST as acceptLink } from '@/app/api/v1/c/links/[token]/accept/route';
 import { PATCH as patchWorkspace } from '@/app/api/v1/workspaces/current/route';
 import { getDb } from '@/db';
-import { agents, agentShares, customerInvites, workspaces } from '@/db/schema';
+import { agentBranding, agents, agentShares, customerInvites, workspaces } from '@/db/schema';
 import { MAX_PENDING_PER_BOT, PENDING_REQUEST_TTL_DAYS } from '@/lib/constants';
 import { sha256 } from '@/lib/crypto';
 import { cleanupExpiredCustomerRequests } from '@/lib/customer-invites';
@@ -217,6 +217,38 @@ describe('customer links: resolve and accept', () => {
     const used = await accept(token, other);
     expect(used.status).toBe(410);
     expect(used.data.error.code).toBe('invite_used_up');
+  });
+
+  it('a used-up link still says who sent it: public branding only, on resolve and on accept', async () => {
+    const o = await owner();
+    const { token } = await createLink(o, { kind: 'personal', label: 'Initech' });
+    expect((await accept(token, await signIn(emailAddress('first')))).status).toBe(200);
+    await getDb().insert(agentBranding).values({
+      agentId: o.agentId,
+      displayName: 'Acme Tables',
+      logoBlobPath: 'branding/acme.png',
+      logoUrl: 'https://blob.test/branding/acme.png',
+      logoWidth: 200,
+      logoHeight: 80,
+    });
+
+    const late = await signIn(emailAddress('late'));
+    for (const res of [await resolve(token), await resolve(token, late.cookie), await accept(token, late)]) {
+      expect(res.status).toBe(410);
+      expect(res.data.error.code).toBe('invite_used_up');
+      expect(Object.keys(res.data.error.details)).toEqual(['bot']);
+      expect(Object.keys(res.data.error.details.bot)).toEqual(['branding']);
+      expect(res.data.error.details.bot.branding).toMatchObject({
+        display_name: 'Acme Tables',
+        logo_url: 'https://blob.test/branding/acme.png',
+        logo_width: 200,
+        logo_height: 80,
+        show_footer: true,
+      });
+      for (const leak of [o.agentId, 'draft', 'review', 'Grok', o.handle, o.email, 'Initech']) {
+        expect(res.text).not.toContain(leak);
+      }
+    }
   });
 
   it('binds a personal link to its email', async () => {

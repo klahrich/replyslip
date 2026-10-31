@@ -3,6 +3,11 @@ import type { Metadata } from 'next';
 /** Valetto's production origin. Canonicals and og:url point here, also on previews and on replyslip.com. */
 export const VALETTO_URL = 'https://valetto.tech';
 
+/** Valetto's default share text: the root layout's title and description, and the valetto.tech home page. */
+export const VALETTO_TITLE = 'Valetto: share your bot with customers, one job at a time';
+export const VALETTO_DESCRIPTION =
+  'Give each customer a private link to the jobs your Grok Bot does for them. Daily caps, one-click revoke, and a record of every request.';
+
 /** The Valetto pages as served at the root of valetto.tech (next.config.ts rewrites them to /valetto/...). */
 export const VALETTO_PATHS = ['/', '/early-access', '/privacy', '/terms'] as const;
 

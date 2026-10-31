@@ -31,6 +31,23 @@ export type ReviewNeededEmail = {
   reviewUrl: string;
 };
 
+/** What changed on a customer's request. Never the question, result, or failure text itself. */
+export type CustomerUpdateKind = 'question' | 'result' | 'failure';
+
+/**
+ * Customer notice for one released question, result, or failure (or a decline). Title, business name and link
+ * only: the email never carries the bot's question, result, or failure text, so nothing held can leak into it.
+ */
+export type CustomerUpdateEmail = {
+  to: string;
+  kind: CustomerUpdateKind;
+  /** The business as the customer sees it (branding display name). */
+  businessName: string;
+  /** The request heading the customer sees: the offer's display title, else the request title. */
+  requestTitle: string;
+  requestUrl: string;
+};
+
 /** Valetto early-access request. Every field but `to` is submitter input; the body is plain text. */
 export type EarlyAccessNoticeEmail = {
   to: string;
@@ -53,12 +70,32 @@ export interface EmailSender {
   sendPendingCustomers(message: PendingCustomersEmail): Promise<void>;
   sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void>;
   sendReviewNeeded(message: ReviewNeededEmail): Promise<void>;
+  sendCustomerUpdate(message: CustomerUpdateEmail): Promise<void>;
 }
 
-const GENERIC_SUBJECT = 'Your ReplySlip sign-in code';
-const FIRST_AGENT_SUBJECT = 'ReplySlip: first agent';
-const PENDING_CUSTOMERS_SUBJECT = 'New customer requests are waiting';
-const REVIEW_NEEDED_SUBJECT = 'Requests are waiting for your review';
+/** Product name in every email: subjects, bodies and the From display name. */
+export const EMAIL_BRAND = 'Valetto';
+const SIGN_IN_SUBJECT = `Your ${EMAIL_BRAND} sign-in code`;
+const FIRST_AGENT_SUBJECT = `${EMAIL_BRAND}: first agent`;
+const PENDING_CUSTOMERS_SUBJECT = `${EMAIL_BRAND}: new customer requests are waiting`;
+const REVIEW_NEEDED_SUBJECT = `${EMAIL_BRAND}: requests are waiting for your review`;
+
+/** Sign-off on owner-facing and customer-facing notices. */
+const SIGN_OFF = `Sent by ${EMAIL_BRAND}.`;
+
+/**
+ * The From header: EMAIL_FROM's address with the display name EMAIL_FROM_NAME (default "Valetto"). EMAIL_FROM may be
+ * a bare address or `Name <address>`; its own display name is replaced so every email says Valetto. Switching to a
+ * valetto.tech address is an EMAIL_FROM change only. A value that is not one plain address is passed through as is.
+ */
+export function fromHeader(rawFrom: string, rawName: string | undefined = process.env.EMAIL_FROM_NAME): string {
+  const raw = rawFrom.trim();
+  const angle = /<([^<>]+)>\s*$/.exec(raw);
+  const address = (angle ? angle[1]! : raw).trim();
+  if (!isStrictEmailAddress(address)) return raw;
+  const name = singleLine((rawName ?? '').replace(/["\\<>]/g, ''), 80) || EMAIL_BRAND;
+  return /^[A-Za-z0-9 !#$%&'*+\-/=?^_`{|}~]+$/.test(name) ? `${name} <${address}>` : `"${name}" <${address}>`;
+}
 
 export function reviewNeededText(message: Omit<ReviewNeededEmail, 'to'>): string {
   const n = message.waitingCount;
@@ -70,6 +107,8 @@ export function reviewNeededText(message: Omit<ReviewNeededEmail, 'to'>): string
     'Your bot cannot see a new request until you approve it, and customers see no answer until you release it.',
     '',
     "You get at most one of these emails per hour per bot. Turn them off in the bot's review settings.",
+    '',
+    SIGN_OFF,
   ].join('\n');
 }
 
@@ -81,14 +120,48 @@ export function pendingCustomersText(message: Omit<PendingCustomersEmail, 'to'>)
     `Review them in your dashboard: ${message.dashboardUrl}`,
     '',
     'You get at most one of these emails per hour per bot. Turn them off in the bot\'s Customers settings.',
+    '',
+    SIGN_OFF,
   ].join('\n');
 }
 
 export function loginCodeText(code: string): string {
   return [
-    `Your ReplySlip sign-in code is ${code}.`,
+    `Your ${EMAIL_BRAND} sign-in code is ${code}.`,
     '',
     'It expires in 10 minutes. If you did not ask to sign in, you can ignore this email.',
+  ].join('\n');
+}
+
+function businessLabel(name: string): string {
+  return singleLine(name.replace(INVISIBLE, ''), 60);
+}
+
+function customerUpdateLine(message: Pick<CustomerUpdateEmail, 'kind' | 'businessName'>): string {
+  if (message.kind === 'question') return `${businessLabel(message.businessName)} has a question.`;
+  if (message.kind === 'result') return 'Your result is ready.';
+  return `${businessLabel(message.businessName)} closed this request without a result.`;
+}
+
+/** Subject: Valetto, the business, and what happened. No request text beyond the business name. */
+export function customerUpdateSubject(message: Pick<CustomerUpdateEmail, 'kind' | 'businessName'>): string {
+  const business = businessLabel(message.businessName);
+  if (message.kind === 'question') return `${EMAIL_BRAND}: ${business} has a question about your request`;
+  if (message.kind === 'result') return `${EMAIL_BRAND}: your result from ${business} is ready`;
+  return `${EMAIL_BRAND}: update on your request to ${business}`;
+}
+
+/** Title, business and link only. Never the question, result, or failure text. */
+export function customerUpdateText(message: Omit<CustomerUpdateEmail, 'to'>): string {
+  const title = singleLine(message.requestTitle.replace(INVISIBLE, ''), 120);
+  return [
+    `Your request "${title}" has an update: ${customerUpdateLine(message)}`,
+    '',
+    `Open your request: ${message.requestUrl}`,
+    '',
+    `You get this email because you sent this request with ${EMAIL_BRAND}. Sign in with this email address to see it.`,
+    '',
+    SIGN_OFF,
   ].join('\n');
 }
 
@@ -173,6 +246,11 @@ class ConsoleEmailSender implements EmailSender {
     console.info(`[replyslip] review-needed notice\n${reviewNeededText(message)}`);
   }
 
+  async sendCustomerUpdate(message: CustomerUpdateEmail): Promise<void> {
+    // No recipient address in the log.
+    console.info(`[replyslip] customer update notice\n${customerUpdateText(message)}`);
+  }
+
   async sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void> {
     console.info(`[replyslip] Valetto early-access notice for ${message.to}\n${earlyAccessNoticeText(message)}`);
   }
@@ -203,6 +281,10 @@ class UnconfiguredEmailSender implements EmailSender {
   async sendReviewNeeded(): Promise<void> {
     this.fail('review-needed notice');
   }
+
+  async sendCustomerUpdate(): Promise<void> {
+    this.fail('customer update notice');
+  }
 }
 
 export const RESEND_TIMEOUT_MS = 10_000;
@@ -220,7 +302,7 @@ class ResendEmailSender implements EmailSender {
   ) {}
 
   async sendLoginCode(message: LoginCodeEmail): Promise<void> {
-    await this.post(message.to, GENERIC_SUBJECT, loginCodeText(message.code), 'sign-in email');
+    await this.post(message.to, SIGN_IN_SUBJECT, loginCodeText(message.code), 'sign-in email');
   }
 
   async sendFirstAgentAlert(message: FirstAgentAlertEmail): Promise<void> {
@@ -233,6 +315,10 @@ class ResendEmailSender implements EmailSender {
 
   async sendReviewNeeded(message: ReviewNeededEmail): Promise<void> {
     await this.post(message.to, REVIEW_NEEDED_SUBJECT, reviewNeededText(message), 'review-needed notice');
+  }
+
+  async sendCustomerUpdate(message: CustomerUpdateEmail): Promise<void> {
+    await this.post(message.to, customerUpdateSubject(message), customerUpdateText(message), 'customer update notice');
   }
 
   async sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void> {
@@ -258,7 +344,7 @@ class ResendEmailSender implements EmailSender {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        from: this.from,
+        from: fromHeader(this.from),
         to: [to],
         subject,
         text,

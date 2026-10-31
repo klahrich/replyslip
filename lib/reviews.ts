@@ -17,6 +17,7 @@ import { getAgent } from './agents';
 import { OWNER_DECLINED_REASON, OWNER_NOTE_MAX, REVIEWS_LIST_MAX } from './constants';
 import { inputDisplay, resultDisplay } from './customer-api';
 import { consumeOrThrow } from './customer-invites';
+import { claimCustomerNotice, sendCustomerNotice } from './customer-notice';
 import { HttpError } from './errors';
 import { offerDisplayTitle } from './offer-title';
 import { heldCountFor } from './review-notice';
@@ -389,8 +390,12 @@ export async function actOnReview(owner: Owner, taskId: string, action: ReviewAc
     const wakeId = change.wake
       ? await enqueueWake(tx, { workspaceId: updated.workspaceId, agentId: change.wake.agentId, reason: change.wake.reason, taskId: updated.id })
       : null;
-    return { task: updated, wakeId };
+    // Release and Decline are what the customer sees: one email per change, after commit. Approve and Send back
+    // reopen the task, so they send none.
+    const customerNotice = await claimCustomerNotice(tx, task, updated);
+    return { task: updated, wakeId, customerNotice };
   });
+  sendCustomerNotice(written.customerNotice);
   await afterWake(written.wakeId);
   return { review: await serializeOne(db, written.task) };
 }

@@ -14,6 +14,7 @@ var JOIN_CODE_DEFAULT_TTL_MS = 24 * 60 * 60 * 1e3;
 var JOIN_CODE_MAX_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
 var JOIN_CODE_MIN_TTL_MS = 60 * 60 * 1e3;
 var PENDING_NOTIFY_INTERVAL_MS = 60 * 60 * 1e3;
+var CUSTOMER_UPDATE_EMAIL_LIMIT = { kind: "customerUpdateEmail", limit: 30, windowMs: 60 * 60 * 1e3 };
 var BRANDING_LOGO_MAX_BYTES = 512 * 1024;
 var RATE_LIMITS = {
   requestCode: { email: 5, ip: 100, windowMs: 15 * 60 * 1e3 },

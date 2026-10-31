@@ -161,7 +161,7 @@ describe('agent sharing', () => {
       description: 'CANARY-GUEST-TASK',
     });
     expect(created.isError).toBe(false);
-    expect(created.payload.task.result_schema).toEqual(offerSchema);
+    expect(created.payload.task.result_schema).toEqual({ ...offerSchema, 'x-order': ['headline'] });
     expect(created.payload.task).toMatchObject({
       cross_workspace: true,
       untrusted: true,
@@ -180,7 +180,7 @@ describe('agent sharing', () => {
         name: 'draft',
         title: 'Draft',
         description: 'Draft the requested page.',
-        result_schema: offerSchema,
+        result_schema: { ...offerSchema, 'x-order': ['headline'] },
         input_schema: null,
         notes_enabled: true,
         notes_max: null,
@@ -220,8 +220,9 @@ describe('agent sharing', () => {
 
     const guestUsage = await workspacePlanUsage(guest.workspace.id);
     const ownerUsage = await workspacePlanUsage(owner.workspace.id);
-    expect(guestUsage.usage.tasks_this_month).toBe(1);
-    expect(ownerUsage.usage.tasks_this_month).toBe(1);
+    expect(guestUsage.usage).toMatchObject({ tasks_this_month: 1, tasks_charged_this_month: 1 });
+    // The owner's private task plus the guest task it received; only the private one is charged to the owner.
+    expect(ownerUsage.usage).toMatchObject({ tasks_this_month: 2, tasks_charged_this_month: 1 });
   });
 
   it('blocks a pending grant, then fails open tasks when access is revoked', async () => {
@@ -375,8 +376,8 @@ describe('agent sharing', () => {
       description: 'Counts for the guest.',
     });
     expect(first.isError).toBe(false);
-    expect((await workspacePlanUsage(guest.workspace.id)).usage.tasks_this_month).toBe(1);
-    expect((await workspacePlanUsage(owner.workspace.id)).usage.tasks_this_month).toBe(0);
+    expect((await workspacePlanUsage(guest.workspace.id)).usage).toMatchObject({ tasks_this_month: 1, tasks_charged_this_month: 1 });
+    expect((await workspacePlanUsage(owner.workspace.id)).usage).toMatchObject({ tasks_this_month: 1, tasks_charged_this_month: 0 });
     const blocked = await mcpTool(guestKey, 'create_task', {
       to: `@${ownerHandle}/Planner`,
       offer: 'draft',
@@ -392,8 +393,8 @@ describe('agent sharing', () => {
       result_schema: { type: 'object' },
     });
     expect(ownerTask.isError).toBe(false);
-    expect((await workspacePlanUsage(owner.workspace.id)).usage.tasks_this_month).toBe(1);
-    expect((await workspacePlanUsage(guest.workspace.id)).usage.tasks_this_month).toBe(1);
+    expect((await workspacePlanUsage(owner.workspace.id)).usage).toMatchObject({ tasks_this_month: 2, tasks_charged_this_month: 1 });
+    expect((await workspacePlanUsage(guest.workspace.id)).usage).toMatchObject({ tasks_this_month: 1, tasks_charged_this_month: 1 });
   });
 
   it('caps guest workspaces on the free plan and lifts that cap when unlimited', async () => {
@@ -491,7 +492,7 @@ describe('agent sharing', () => {
       description: 'Granted.',
     });
     expect(created.isError).toBe(false);
-    expect(created.payload.task.result_schema).toEqual(offerSchema);
+    expect(created.payload.task.result_schema).toEqual({ ...offerSchema, 'x-order': ['headline'] });
     const unshared = await mcpTool(plannerKey, 'set_agent_sharing', { agent: 'Planner', shared: false });
     expect(unshared.payload.agent.shared).toBe(false);
     const after = await mcpTool(guestKey, 'get_task', { id: created.payload.task.id });

@@ -55,6 +55,11 @@ export const MAX_PENDING_PER_BOT = 50;
 export const PENDING_REQUEST_TTL_DAYS = 14;
 export const PREAPPROVED_EMAILS_MAX = 500;
 export const PENDING_NOTIFY_INTERVAL_MS = 60 * 60 * 1000;
+/**
+ * Customer update emails (question, result, failure) per customer user per hour. One email per event; this cap only
+ * stops a looping bot from flooding one inbox. rate_events rows are pruned after a day.
+ */
+export const CUSTOMER_UPDATE_EMAIL_LIMIT = { kind: 'customerUpdateEmail', limit: 30, windowMs: 60 * 60 * 1000 } as const;
 export const CUSTOMER_LINK_MAX_USES = 100_000;
 
 /** Customer API (R3-R8). */
@@ -134,4 +139,4 @@ export const TASK_TITLE_MAX = 200;
 export const PRODUCT_NAME = 'ReplySlip';
 
 export const ONE_LINER =
-  'ReplySlip lets AI agents send each other tasks whose answers must match a JSON Schema, and message each other inside a task.';
+  'Valetto lets AI agents send each other tasks whose answers must match a JSON Schema, and message each other inside a task.';

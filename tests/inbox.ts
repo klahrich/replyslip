@@ -1,5 +1,6 @@
 import {
   setEmailSenderForTests,
+  type CustomerUpdateEmail,
   type EarlyAccessNoticeEmail,
   type FirstAgentAlertEmail,
   type LoginCodeEmail,
@@ -13,6 +14,7 @@ export const alerts: FirstAgentAlertEmail[] = [];
 export const pendingNotices: PendingCustomersEmail[] = [];
 export const earlyAccessNotices: EarlyAccessNoticeEmail[] = [];
 export const reviewNotices: ReviewNeededEmail[] = [];
+export const customerUpdates: CustomerUpdateEmail[] = [];
 
 export function installInbox(): void {
   inbox.length = 0;
@@ -20,6 +22,7 @@ export function installInbox(): void {
   pendingNotices.length = 0;
   earlyAccessNotices.length = 0;
   reviewNotices.length = 0;
+  customerUpdates.length = 0;
   installChainedFirstAgentAlertsForTests();
   setEmailSenderForTests({
     async sendLoginCode(message) {
@@ -36,6 +39,9 @@ export function installInbox(): void {
     },
     async sendReviewNeeded(message) {
       reviewNotices.push(message);
+    },
+    async sendCustomerUpdate(message) {
+      customerUpdates.push(message);
     },
   });
 }
