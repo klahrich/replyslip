@@ -137,6 +137,12 @@ export const agents = pgTable(
     notifyPendingEmail: boolean('notify_pending_email').notNull().default(true),
     /** Last pending-request email to the owner. Throttles it to one per hour. */
     pendingNotifiedAt: ts('pending_notified_at'),
+    /** auto (null counts as auto) or review_first: the owner approves each customer request and releases each answer. */
+    reviewMode: text('review_mode'),
+    /** Hourly owner email when requests wait for review. Null counts as on. */
+    notifyReviewEmail: boolean('notify_review_email'),
+    /** Last review-needed email to the owner. Throttles it to one per hour. */
+    reviewNotifiedAt: ts('review_notified_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -148,6 +154,7 @@ export const agents = pgTable(
     check('agents_role_check', sql`${table.role} in ('agent', 'customer_sender')`),
     check('agents_customer_daily_cap_check', sql`${table.customerDailyCap} >= 1 and ${table.customerDailyCap} <= 10000`),
     check('agents_customer_access_mode_check', sql`${table.customerAccessMode} in ('open_link', 'approve_each')`),
+    check('agents_review_mode_check', sql`${table.reviewMode} is null or ${table.reviewMode} in ('auto', 'review_first')`),
   ],
 );
 
@@ -265,12 +272,31 @@ export const tasks = pgTable(
     clientRequestId: uuid('client_request_id'),
     /** When the current question was asked. Cleared when the sender answers. */
     questionAskedAt: ts('question_asked_at'),
+    /** Copy of the target agent's review_mode when the task was created. review_first means the owner gates it. */
+    reviewMode: text('review_mode'),
+    /** While awaiting_release: what the bot did that is held (result, question or failure). */
+    heldAction: text('held_action'),
+    /** Last owner review action (approve, decline, release, send back). */
+    reviewedAt: ts('reviewed_at'),
+    reviewedBy: uuid('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+    /** When the owner released the held answer to the sender. */
+    releasedAt: ts('released_at'),
+    /** Note from the owner on Send back or Decline. Shown to the target bot only, never to the sender. */
+    ownerNote: text('owner_note'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     completedAt: ts('completed_at'),
   },
   (table) => [
-    check('tasks_status_check', sql`${table.status} in ('open', 'done', 'needs_info', 'failed')`),
+    check(
+      'tasks_status_check',
+      sql`${table.status} in ('open', 'done', 'needs_info', 'failed', 'in_review', 'awaiting_release')`,
+    ),
+    check('tasks_review_mode_check', sql`${table.reviewMode} is null or ${table.reviewMode} in ('auto', 'review_first')`),
+    check('tasks_held_action_check', sql`${table.heldAction} is null or ${table.heldAction} in ('result', 'question', 'failure')`),
+    index('tasks_held_idx')
+      .on(table.workspaceId, table.updatedAt)
+      .where(sql`${table.status} in ('in_review', 'awaiting_release')`),
     check('tasks_input_pair_check', sql`(${table.input} is null) = (${table.inputSchema} is null)`),
     index('tasks_workspace_created_idx').on(table.workspaceId, table.createdAt),
     index('tasks_to_agent_idx').on(table.toAgentId, table.status),
@@ -554,7 +580,7 @@ export const wakes = pgTable(
     check('wakes_status_check', sql`${table.status} in ('pending', 'delivered', 'failed', 'cancelled')`),
     check(
       'wakes_reason_check',
-      sql`${table.reason} in ('message', 'task', 'result', 'question', 'failure', 'test', 'answer')`,
+      sql`${table.reason} in ('message', 'task', 'result', 'question', 'failure', 'test', 'answer', 'review_needed', 'sent_back')`,
     ),
     index('wakes_due_idx').on(table.status, table.nextAttemptAt),
   ],

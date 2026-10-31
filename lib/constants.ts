@@ -11,6 +11,12 @@ export const SHARE_CAP_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** rate_events.kind for a guest task. The share id is stored in rate_events.email. */
 export const GUEST_TASK_RATE_KIND = 'guest_task';
 export const ACCESS_REVOKED_REASON = 'access revoked';
+/** fail_reason when the owner declines a request in review_first mode. Customers see fail_code declined_by_owner. */
+export const OWNER_DECLINED_REASON = 'declined by owner';
+/** Owner note on Send back or Decline, in characters after trimming. Shown to the bot only. */
+export const OWNER_NOTE_MAX = 2_000;
+/** Held items listed by GET /api/v1/reviews. */
+export const REVIEWS_LIST_MAX = 100;
 export const OFFER_DESCRIPTION_MAX = 4_000;
 /** Owner-set readable offer title, in characters after trimming. */
 export const OFFER_TITLE_MAX = 60;
@@ -92,6 +98,10 @@ export const RATE_LIMITS = {
   /** R8 answers, keyed by the signed-in user id. */
   customerAnswer: { agent: 30, windowMs: 15 * 60 * 1000 },
   testWake: { agent: 10, windowMs: 15 * 60 * 1000 },
+  /** Owner review actions (approve, decline, release, send back), keyed by the signed-in user id. */
+  reviewAction: { agent: 300, windowMs: 15 * 60 * 1000 },
+  /** review_mode changes, keyed by the signed-in user id. */
+  reviewMode: { agent: 30, windowMs: 15 * 60 * 1000 },
 } as const;
 
 /** A local agent is watcher_online when some non-revoked workspace watcher key polled within this window. */

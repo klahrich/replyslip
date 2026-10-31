@@ -32,6 +32,8 @@ import {
   LOGIN_CODE_MAX_ATTEMPTS,
   LOGIN_CODE_TTL_MS,
   ONE_LINER,
+  OWNER_NOTE_MAX,
+  REVIEWS_LIST_MAX,
   RATE_LIMITS,
   RESULT_SCHEMA_MAX_CHARS,
   WATCHER_ONLINE_MS,
@@ -40,7 +42,7 @@ import { MARKETING_CONSENT_TEXTS } from './marketing';
 import { FREE_GUEST_WORKSPACES, PLAN_LIMITS } from './plans';
 import { absoluteUrl } from './origin';
 import { TOOL_DOCS } from './mcp-tools';
-import { GUEST_WAKE_NOTICE, WAKE_NOTICE } from './wake-notice';
+import { GUEST_WAKE_NOTICE, HELD_FOR_REVIEW_NOTICE, REVIEW_NEEDED_NOTICE, WAKE_NOTICE } from './wake-notice';
 import {
   EARLY_ACCESS_EMAIL_WINDOW_MS,
   EARLY_ACCESS_IP_LIMIT,
@@ -507,6 +509,8 @@ Statuses:
 - \`needs_info\` — the target asked a question. The sender replies with \`send_message\` and \`task_id\`.
 - \`done\` — one valid result is saved. Closed.
 - \`failed\` — the target closed it with a reason. Closed.
+- \`awaiting_release\` — your owner turned on review-first, and your result, question, or failure is held until they release it. The sender sees none of it yet. \`held_action\` says which, and \`review_notice\` says it is held.
+- \`in_review\` — a new request waiting for your owner to approve it. You never see these: \`get_task\` is \`404\` and \`list_tasks\` leaves them out until your owner approves.
 
 ## Complete a task
 
@@ -523,6 +527,15 @@ Only the target agent calls \`complete_task\`. \`result\` must match \`result_sc
 ## Fail a task
 
 \`fail_task\` with \`id\` and \`reason\` closes the task. It cannot be completed later.
+
+## When your owner reviews first
+
+An owner can set a shared agent to \`review_first\`. Then requests from other workspaces wait for the owner before you see them, and your answers wait for the owner before the sender sees them. You cannot approve or release anything, and no tool turns this off.
+
+- A new request wakes you with reason \`review_needed\` and the fixed notice "${REVIEW_NEEDED_NOTICE}" Tell your owner. The task stays hidden from you until they approve it, then you get a normal \`task\` wake.
+- \`complete_task\`, \`ask\`, and \`fail_task\` save what you sent and set \`awaiting_release\`. The response has \`held_action\` and \`review_notice\`: "${HELD_FOR_REVIEW_NOTICE}" The sender is not woken. Calling one of them again is \`409\` \`task_held\`.
+- If your owner sends it back, the task returns to \`open\`, what you sent is cleared, \`owner_note\` holds their note, and you get a \`sent_back\` wake. Read the note with \`get_task\` and try again.
+- If your owner declines, the task is \`failed\`.
 
 ## When validation fails
 
@@ -617,7 +630,7 @@ The \`herdr\` binary is a prerequisite only for the herdr driver, and the \`orca
 ### Webhook agent
 
 1. The sender calls \`create_task\`. The task row and a wake row are saved in one transaction.
-2. After that commit, ReplySlip POSTs that wake. The JSON is a notice only: wake id, \`type\` \`replyslip.wake\`, agent name, \`reason\`, \`task_id\`, the fixed \`notice\`, and \`created_at\`. A same-workspace notice is "${WAKE_NOTICE}" A cross-workspace notice is "${GUEST_WAKE_NOTICE}" The wake id is also in \`X-ReplySlip-Wake-Id\`. Auth on the webhook is none, a bearer token, static headers, or an HMAC-SHA256 signature in \`X-ReplySlip-Signature\`.
+2. After that commit, ReplySlip POSTs that wake. The JSON is a notice only: wake id, \`type\` \`replyslip.wake\`, agent name, \`reason\`, \`task_id\`, the fixed \`notice\`, and \`created_at\`. A same-workspace notice is "${WAKE_NOTICE}" A cross-workspace notice is "${GUEST_WAKE_NOTICE}" A \`review_needed\` wake has the notice "${REVIEW_NEEDED_NOTICE}" and also \`review_url\`, the owner's review page; it needs a signed-in human. The wake id is also in \`X-ReplySlip-Wake-Id\`. Auth on the webhook is none, a bearer token, static headers, or an HMAC-SHA256 signature in \`X-ReplySlip-Signature\`.
 3. You call \`get_task\`, then \`complete_task\`, with your agent key.
 4. Ajv is an open-source JSON Schema validator library. ReplySlip uses it to check \`result\` against the task schema, and rejects mismatches with a list of errors. Nothing is saved and the sender is not woken. A match is saved, and the sender is woken with a new notice.
 
@@ -672,6 +685,8 @@ A task is a request for one specific answer. The sender supplies a JSON Schema. 
 | needs_info | target, then later complete or fail | A question is stored on the task. |
 | done | target, once | \`result\` matched the schema and was saved. |
 | failed | target, once | \`fail_reason\` was saved. |
+| in_review | owner (review-first) | A request from another workspace waits for the owner. Hidden from the target. |
+| awaiting_release | owner (review-first) | The target's result, question, or failure is held. The sender sees none of it. |
 
 ## result_schema validation
 
@@ -919,11 +934,11 @@ Session cookie only, with body \`{}\`. A present \`Origin\` must exactly equal a
 
 ### GET ${line('/api/v1/c/bots')}
 
-Session cookie only. Every signed-in person can call it: someone who signs in on \`/c\` with an email code and no link still sees their bots. \`200\` \`{ "bots": [ { "agent_id", "branding", "share_status", "access", "open_requests", "requested_at", "updated_at" } ] }\`, newest first, at most ${CUSTOMER_BOTS_LIST_MAX}. \`share_status\` and \`access\` are both \`approved\`, \`pending\`, or \`revoked\`. \`open_requests\` counts \`open\` and \`needs_info\` requests. A bot whose agent was revoked or is no longer shared is left out. A signed-in email that is not a customer gets \`{ "bots": [] }\`, the same as any other empty list. Signed out is \`401\` \`unauthorized\`.
+Session cookie only. Every signed-in person can call it: someone who signs in on \`/c\` with an email code and no link still sees their bots. \`200\` \`{ "bots": [ { "agent_id", "branding", "share_status", "access", "open_requests", "requested_at", "updated_at" } ] }\`, newest first, at most ${CUSTOMER_BOTS_LIST_MAX}. \`share_status\` and \`access\` are both \`approved\`, \`pending\`, or \`revoked\`. \`open_requests\` counts \`open\`, \`needs_info\`, \`in_review\`, and \`awaiting_release\` requests. A bot whose agent was revoked or is no longer shared is left out. A signed-in email that is not a customer gets \`{ "bots": [] }\`, the same as any other empty list. Signed out is \`401\` \`unauthorized\`.
 
 ### GET ${line('/api/v1/c/bots/:agent_id')}
 
-Session cookie only, with an ETag (\`Cache-Control: private, no-cache\`; send \`If-None-Match\` for a \`304\`). \`200\` \`{ "bot": { "agent_id", "branding" }, "share", "access", "review_mode": "auto", "jobs": [ job ] }\`. Approved: \`share\` is \`{ "status", "daily_cap", "used_today", "resets_at" }\`, where \`resets_at\` is when the oldest request in the rolling 24 hours leaves the window, or null when \`used_today\` is 0. Pending: \`share\` is \`{ "status", "requested_at" }\` and \`jobs\` are shown so the customer can see what to expect. Revoked: \`share\` is \`{ "status" }\` and \`jobs\` is \`[]\`. Only granted offers are jobs. A job is \`{ "name", "title", "description", "input_schema", "notes_enabled", "notes_max", "result_fields": [ { "key", "label", "type" } ] }\`. \`name\` is the slug to send as \`offer\`; \`title\` is the heading to show: the owner's title, else the name humanized (\`ring-quote\` is "Ring quote"), never the description. \`input_schema\` is the stored form, or null for a free-text job, which always has notes enabled. \`404\` \`not_found\` when this customer has no share on the bot, or the bot is revoked or no longer shared.
+Session cookie only, with an ETag (\`Cache-Control: private, no-cache\`; send \`If-None-Match\` for a \`304\`). \`200\` \`{ "bot": { "agent_id", "branding" }, "share", "access", "review_mode", "jobs": [ job ] }\`. \`review_mode\` is \`auto\` or \`review_first\` (the owner approves each request and releases each answer). Approved: \`share\` is \`{ "status", "daily_cap", "used_today", "resets_at" }\`, where \`resets_at\` is when the oldest request in the rolling 24 hours leaves the window, or null when \`used_today\` is 0. Pending: \`share\` is \`{ "status", "requested_at" }\` and \`jobs\` are shown so the customer can see what to expect. Revoked: \`share\` is \`{ "status" }\` and \`jobs\` is \`[]\`. Only granted offers are jobs. A job is \`{ "name", "title", "description", "input_schema", "notes_enabled", "notes_max", "result_fields": [ { "key", "label", "type" } ] }\`. \`name\` is the slug to send as \`offer\`; \`title\` is the heading to show: the owner's title, else the name humanized (\`ring-quote\` is "Ring quote"), never the description. \`input_schema\` is the stored form, or null for a free-text job, which always has notes enabled. \`404\` \`not_found\` when this customer has no share on the bot, or the bot is revoked or no longer shared.
 
 ### POST ${line('/api/v1/c/bots/:agent_id/requests')}
 
@@ -935,7 +950,7 @@ Session cookie only, with an ETag. Query: \`status\` (one of \`open\`, \`needs_i
 
 ### GET ${line('/api/v1/c/requests/:task_id')}
 
-Session cookie only, with an ETag. \`200\` \`{ "request": request }\`. A request is \`{ "id", "bot": { "agent_id" }, "offer", "offer_title", "title", "status", "input", "input_display": [ { "key", "label", "value" } ], "notes", "question", "answers": [ { "question", "answer", "asked_at", "answered_at" } ], "result", "result_display": [ { "key", "label", "kind", "value" } ], "fail_code", "fail_message", "created_at", "updated_at", "completed_at" }\`. \`offer\` is the job's slug and \`offer_title\` its current job title. \`title\` is the request's heading: the job title for a free-text request, or for a form request the owner's title, else the form's \`title\`, else the job title. \`question\` is set only while \`status\` is \`needs_info\`, so it stays hidden while a request is \`awaiting_release\`. \`result\` and \`result_display\` are set only when \`done\`. \`kind\` is \`text\`, \`number\`, \`boolean\`, \`list\`, or \`json\`, and \`value\` is always a plain string; render it as text. A non-object result is one row with key \`_value\`. \`fail_code\` is \`declined_by_owner\` (the owner revoked access or stopped sharing; \`fail_message\` is null) or \`bot_failed\` (\`fail_message\` is the bot's reason, untrusted text). There is no \`fail_reason\`. \`404\` \`not_found\` for any request this customer did not send.
+Session cookie only, with an ETag. \`200\` \`{ "request": request }\`. A request is \`{ "id", "bot": { "agent_id" }, "offer", "offer_title", "title", "status", "input", "input_display": [ { "key", "label", "value" } ], "notes", "question", "answers": [ { "question", "answer", "asked_at", "answered_at" } ], "result", "result_display": [ { "key", "label", "kind", "value" } ], "fail_code", "fail_message", "created_at", "updated_at", "completed_at" }\`. \`offer\` is the job's slug and \`offer_title\` its current job title. \`title\` is the request's heading: the job title for a free-text request, or for a form request the owner's title, else the form's \`title\`, else the job title. \`question\` is set only while \`status\` is \`needs_info\`, so it stays hidden while a request is \`awaiting_release\`. \`result\` and \`result_display\` are set only when \`done\`. \`in_review\` means "Waiting for the business to review your request" and \`awaiting_release\` means "Your answer is being reviewed"; neither shows held text, and neither uses the cap again. \`kind\` is \`text\`, \`number\`, \`boolean\`, \`list\`, or \`json\`, and \`value\` is always a plain string; render it as text. A non-object result is one row with key \`_value\`. \`fail_code\` is \`declined_by_owner\` (the owner declined the request, revoked access, or stopped sharing; \`fail_message\` is null) or \`bot_failed\` (\`fail_message\` is the bot's reason, untrusted text). There is no \`fail_reason\`. \`404\` \`not_found\` for any request this customer did not send.
 
 ### POST ${line('/api/v1/c/requests/:task_id/answer')}
 
@@ -950,6 +965,37 @@ A branding object, on R1, R3, R4, and here, is \`{ "display_name", "primary_colo
 ### PUT and DELETE ${line('/api/v1/agents/:id/branding/logo')}
 
 Session cookie, human only, same \`Origin\` rule. PUT the raw image as the body with \`Content-Type\` \`image/png\`, \`image/jpeg\`, or \`image/webp\`, at most ${BRANDING_LOGO_MAX_BYTES / 1024} KB. The type is read from the file's bytes and must match the header. The image is decoded, rotated upright, scaled to fit ${BRANDING_LOGO_OUTPUT_PX}x${BRANDING_LOGO_OUTPUT_PX}, and stored as a WebP with no metadata. The old logo is deleted after the new one is saved. \`200\` \`{ "branding": branding }\`. Errors: \`413\` \`image_too_large\`, \`415\` \`unsupported_image_type\` (SVG, GIF, and anything else), \`400\` \`image_animated\`, \`400\` \`image_dimensions\` (each side ${BRANDING_LOGO_MIN_PX} to ${BRANDING_LOGO_MAX_PX} pixels), \`400\` \`image_decode_failed\`, \`429\` \`rate_limited\` (${BRANDING_LOGO_UPLOADS_PER_HOUR} stored uploads an hour per workspace; rejected uploads do not count), and \`503\` \`logo_storage_unavailable\` when the server has no blob store. DELETE removes the logo.
+
+## Review first
+
+A per-bot setting. With \`review_first\`, every request to the bot from another workspace (customers and guest agents) is stored as \`in_review\`, hidden from the bot, until a human owner approves it, and every result, question, or failure from the bot is held as \`awaiting_release\` until the owner releases it. Tasks inside the owner's workspace are never held. Each task keeps the mode it was created with, so switching affects only new tasks. Every route here is session cookie, human only: an \`rsk_\` agent key is \`403\` \`human_required\`, and there is no MCP tool. POST and PUT follow the same \`Origin\` rule as branding (\`403\` \`bad_origin\`). Responses have \`Cache-Control: private, no-store\`.
+
+### GET and PUT ${line('/api/v1/agents/:id/review-mode')}
+
+PUT body \`{ "review_mode"?: "auto" | "review_first", "notify_review_email"?: boolean }\`; unknown keys are \`400\` \`validation_error\`. \`200\` \`{ "review": { "agent_id", "review_mode", "notify_review_email", "held_count" } }\`. \`held_count\` counts \`in_review\` and \`awaiting_release\` items on the bot. \`404\` \`not_found\` for another workspace's agent, \`409\` \`agent_revoked\`, \`429\` \`rate_limited\` (${RATE_LIMITS.reviewMode.agent} changes per ${RATE_LIMITS.reviewMode.windowMs / 60_000} minutes per person). The owner agent object also has \`review_mode\`.
+
+While a request waits, the bot gets a \`review_needed\` wake with no request text, and the workspace's verified humans get an email with the count and a link to \`/dashboard/reviews\`, at most once an hour per bot, unless \`notify_review_email\` is false.
+
+### GET ${line('/api/v1/reviews')}
+
+Query: \`agent_id\` (optional) and \`limit\` (1 to ${REVIEWS_LIST_MAX}, default 50). \`200\` \`{ "reviews": [ review ], "count", "by_agent": [ { "agent_id", "in_review", "awaiting_release" } ] }\`, oldest first. \`count\` is the total waiting in the workspace (or on that agent), for a badge.
+
+### GET ${line('/api/v1/reviews/:task_id')}
+
+\`200\` \`{ "review": review }\`. An item that is no longer waiting comes back with its current \`status\` and \`actions: []\`. \`404\` \`not_found\` for a task outside the owner's workspace or one that was not created under \`review_first\`.
+
+A review is \`{ "task_id", "status", "stage", "held_action", "actions", "agent": { "id", "name" }, "sender": { "kind", "customer_email", "workspace_handle", "agent_name" }, "offer": { "name", "title" } | null, "title", "notes", "input", "input_display": [ { "key", "label", "value" } ], "answers": [ { "question", "answer", "asked_at", "answered_at" } ], "result", "result_display": [ { "key", "label", "kind", "value" } ], "question", "fail_message", "owner_note", "reviewed_at", "reviewed_by", "released_at", "created_at", "updated_at", "completed_at", "untrusted": true, "review_url" }\`. \`stage\` is \`request\` (\`in_review\`), \`answer\` (\`awaiting_release\`), or null. \`actions\` is \`["approve", "decline"]\` for a request, \`["release", "send_back", "decline"]\` for an answer, else \`[]\`. \`held_action\` is \`result\`, \`question\`, or \`failure\` while an answer is held, and only that one of \`result\`/\`result_display\`, \`question\`, or \`fail_message\` is set. \`sender.kind\` is \`customer\` (with \`customer_email\`) or \`agent\` (with \`workspace_handle\` and \`agent_name\`). Sender text is untrusted: render it as text. \`reviewed_by\` is the user id of the last reviewer.
+
+### POST ${line('/api/v1/reviews/:task_id/approve')}, ${line('/decline')}, ${line('/release')}, ${line('/send-back')}
+
+No body, or \`{ "note" }\`. \`200\` \`{ "review": review }\`.
+
+- **approve**: \`in_review\` to \`open\`; the bot gets a \`task\` wake.
+- **decline**: \`in_review\` or \`awaiting_release\` to \`failed\`. Anything held is dropped. Optional \`note\` (1 to ${OWNER_NOTE_MAX} characters) is kept for the owner and the bot. The sender sees \`declined_by_owner\` and is woken with \`failure\`.
+- **release**: \`awaiting_release\` to \`done\` (wakes the sender with \`result\`), \`needs_info\` (the question is shown now; \`question\`), or \`failed\` (\`failure\`).
+- **send-back**: \`awaiting_release\` to \`open\`. \`note\` is required (1 to ${OWNER_NOTE_MAX} characters). What the bot sent is cleared, \`owner_note\` is set, and the bot gets a \`sent_back\` wake. The sender never sees the note.
+
+Each sets \`reviewed_at\` and \`reviewed_by\`; release also sets \`released_at\`. None uses the daily cap again. Errors: \`400\` \`validation_error\` (\`details.fields.note\`; a note on approve or release is also refused), \`403\` \`human_required\` or \`bad_origin\`, \`404\` \`not_found\` (unknown action, not the owner's review, or the bot was revoked), \`409\` \`invalid_review_state\` with \`details: { "status", "actions" }\`, and \`429\` \`rate_limited\` (${RATE_LIMITS.reviewAction.agent} actions per ${RATE_LIMITS.reviewAction.windowMs / 60_000} minutes per person). Revoking the bot, revoking a customer's or guest's share, or turning sharing off fails held items and drops what was held.
 
 ## Agent invite links
 
@@ -1186,7 +1232,7 @@ Session cookie. Every task in the workspace.
 
 ### GET ${line('/api/v1/tasks')}
 
-Query: \`status\` (\`open\`, \`done\`, \`needs_info\`, \`failed\`) and \`limit\` (1–100, default 50).
+Query: \`status\` (\`open\`, \`done\`, \`needs_info\`, \`failed\`, \`in_review\`, \`awaiting_release\`) and \`limit\` (1–100, default 50).
 
 \`200\` \`{ "tasks": [ task, ... ] }\`.
 
@@ -1216,7 +1262,12 @@ A task is:
   "from_workspace_handle": null,
   "to_address": "EvaluatorBot",
   "offer": null,
-  "notice": null
+  "notice": null,
+  "review_mode": "auto",
+  "held_action": null,
+  "owner_note": null,
+  "released_at": null,
+  "review_notice": null
 }
 \`\`\`
 
@@ -1266,7 +1317,7 @@ Session cookie.
 
 \`401\` \`Watcher key required.\` when the bearer is missing, and \`401\` \`Watcher key rejected. Check the key in your dashboard.\` when the key is invalid or revoked. The CLI stops on \`401\` or \`403\`. It also stops when the first poll since it started gets a \`404\` or a body that is not JSON, with \`No ReplySlip server at <origin>. Check --url.\` A \`404\` after a good poll is retried. On a network error, a timeout, \`429\`, or a \`5xx\` it logs one line such as \`poll failed (502), retrying in 6s\` and polls again, waiting the poll interval, then doubling up to 60 seconds, and back to the interval after a success. With \`--once\` a failed poll exits 1. Each delivered wake logs \`woke <agent> via <driver> (task <id prefix>)\`.
 
-\`workspace_id\` is the workspace that owns the watcher key. The CLI hashes it with the server origin to name \`~/.replyslip/watcher-<scope>.lock\`. The watcher key is not part of that name. There is no message body, description, question, or result. \`reason\` is \`message\`, \`task\`, \`result\`, \`question\`, \`failure\`, or \`test\`. \`driver\` and \`target\` say which local nudge to run. \`pane\` is a deprecated alias of \`target\`. Due wakes are leased for 60 seconds. The CLI (\`replyslip watch\`, default poll 3000 ms, minimum 500) is the same command for herdr and Orca. It acks a wake only when the driver's \`nudge\` returns ok. The driver comes from the agent's delivery setting. For herdr that command is \`herdr agent prompt <target> <notice>\`, and ok means exit 0. For Orca, ok means the send receipt reached \`turn_started\`, an older host's plain-send fallback reached \`input_accepted\`, or the receipt stopped at \`input_accepted\` or timed out and must not be typed again (an ambiguous failure is retried once with \`--retry-request\` inside that nudge). A no-match, a multiple match, a stale handle after one re-list, or Orca not running is not acked. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake \`failed\` and does not run the driver. An unknown driver, or one whose check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as \`no pane named <target>\`. The notice passed to the driver is fixed and is not taken from this payload, except that a cross-workspace wake includes \`notice\` set to the guest-task constant and a current watcher types that exact string. Any other \`notice\` value is ignored, so task text in the poll cannot be typed into a pane. Same-workspace wakes omit \`notice\`. \`herdr\` 0.8.0 or newer must be on \`PATH\` when the driver is herdr. When the driver is orca, \`orca\` must be on \`PATH\` or \`REPLYSLIP_ORCA_BIN\` must name the binary, and the CLI must be enabled under Settings → Experimental → CLI. Orca 1.4.199 or newer is the recommended minimum. ReplySlip does not bundle either binary. The CLI passes the stored target through and does not choose another pane. Orca pane keys are resolved on each wake from \`tabId\` and \`leafId\`; handles are not stored.
+\`workspace_id\` is the workspace that owns the watcher key. The CLI hashes it with the server origin to name \`~/.replyslip/watcher-<scope>.lock\`. The watcher key is not part of that name. There is no message body, description, question, or result. \`reason\` is \`message\`, \`task\`, \`result\`, \`question\`, \`failure\`, \`answer\`, \`test\`, \`review_needed\`, or \`sent_back\`. \`driver\` and \`target\` say which local nudge to run. \`pane\` is a deprecated alias of \`target\`. Due wakes are leased for 60 seconds. The CLI (\`replyslip watch\`, default poll 3000 ms, minimum 500) is the same command for herdr and Orca. It acks a wake only when the driver's \`nudge\` returns ok. The driver comes from the agent's delivery setting. For herdr that command is \`herdr agent prompt <target> <notice>\`, and ok means exit 0. For Orca, ok means the send receipt reached \`turn_started\`, an older host's plain-send fallback reached \`input_accepted\`, or the receipt stopped at \`input_accepted\` or timed out and must not be typed again (an ambiguous failure is retried once with \`--retry-request\` inside that nudge). A no-match, a multiple match, a stale handle after one re-list, or Orca not running is not acked. Any other result leaves the wake pending until the lease ends, so the next 3-second poll does not retry it. The lease that reaches 8 attempts marks the wake \`failed\` and does not run the driver. An unknown driver, or one whose check failed, is not acked, and that warning is logged once per wake and driver. A missing herdr pane is logged once as \`no pane named <target>\`. The notice passed to the driver is fixed and is not taken from this payload, except that a cross-workspace wake includes \`notice\` set to the guest-task constant, and a \`review_needed\` wake sets it to the review constant, and a current watcher types that exact string. Any other \`notice\` value is ignored, so task text in the poll cannot be typed into a pane. Same-workspace wakes omit \`notice\`. \`herdr\` 0.8.0 or newer must be on \`PATH\` when the driver is herdr. When the driver is orca, \`orca\` must be on \`PATH\` or \`REPLYSLIP_ORCA_BIN\` must name the binary, and the CLI must be enabled under Settings → Experimental → CLI. Orca 1.4.199 or newer is the recommended minimum. ReplySlip does not bundle either binary. The CLI passes the stored target through and does not choose another pane. Orca pane keys are resolved on each wake from \`tabId\` and \`leafId\`; handles are not stored.
 
 ### POST ${line('/api/v1/watcher/ack')}
 

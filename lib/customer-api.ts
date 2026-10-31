@@ -16,6 +16,7 @@ import type { AgentPrincipal } from './agents';
 import { sessionUser, type SessionUser } from './auth';
 import {
   ACCESS_REVOKED_REASON,
+  OWNER_DECLINED_REASON,
   CUSTOMER_BOTS_LIST_MAX,
   CUSTOMER_NOTES_MAX,
   CUSTOMER_REQUESTS_PAGE_DEFAULT,
@@ -49,7 +50,7 @@ const NOT_FOUND = 'This page is not available.';
 const REQUEST_NOT_FOUND = 'This request was not found.';
 const OFFER_NOT_FOUND = "This job isn't available.";
 
-/** Statuses R6 accepts (17.4). in_review and awaiting_release match nothing until review-first ships. */
+/** Statuses R6 accepts (17.4). in_review and awaiting_release are review_first holds (section 16). */
 export const REQUEST_STATUSES: readonly RequestStatus[] = [
   'open',
   'done',
@@ -139,7 +140,7 @@ export async function listCustomerBots(user: SessionUser) {
         eq(tasks.fromWorkspaceId, workspaceId),
         inArray(tasks.toAgentId, ids),
         sql`${tasks.workspaceId} <> ${workspaceId}`,
-        sql`${tasks.status} in ('open', 'needs_info')`,
+        sql`${tasks.status} in ('open', 'needs_info', 'in_review', 'awaiting_release')`,
       ),
     )
     .groupBy(tasks.toAgentId);
@@ -223,7 +224,7 @@ export async function getCustomerBot(user: SessionUser, agentId: string) {
   const { share, agent } = await botShare(db, workspaceOf(user), agentId, true);
   const status = share.status as ShareStatus;
   const branding: Branding = await brandingFor(db, agent);
-  const reviewMode: ReviewMode = 'auto';
+  const reviewMode: ReviewMode = agent.reviewMode === 'review_first' ? 'review_first' : 'auto';
   let shareBody: Record<string, unknown>;
   let jobs: Awaited<ReturnType<typeof jobsFor>> = [];
   if (status === 'approved') {
@@ -320,7 +321,9 @@ function failFields(task: TaskRow): { fail_code: FailCode | null; fail_message: 
   if (task.status !== 'failed') return { fail_code: null, fail_message: null };
   // Tasks failed by a revoke or sharing turned off: the owner stopped them, and the stored reason is
   // system text, not the bot's. Everything else today is the bot's own fail_task.
-  if (task.failReason === ACCESS_REVOKED_REASON) return { fail_code: 'declined_by_owner', fail_message: null };
+  if (task.failReason === ACCESS_REVOKED_REASON || task.failReason === OWNER_DECLINED_REASON) {
+    return { fail_code: 'declined_by_owner', fail_message: null };
+  }
   return { fail_code: 'bot_failed', fail_message: task.failReason ?? null };
 }
 

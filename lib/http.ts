@@ -137,6 +137,21 @@ export async function readJson(req: Request): Promise<unknown> {
   }
 }
 
+/** Like readJson, but an empty body is `{}` (for POSTs whose fields are all optional). */
+export async function readOptionalJson(req: Request): Promise<unknown> {
+  const text = await req.text();
+  if (!text.trim()) return {};
+  const contentType = req.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    throw new HttpError(415, 'unsupported_media_type', 'Content-Type must be application/json.');
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new HttpError(400, 'invalid_json', 'Request body must be valid JSON.');
+  }
+}
+
 export function parseBody<T>(schema: z.ZodType<T>, data: unknown): T {
   const result = schema.safeParse(data);
   if (!result.success) {
