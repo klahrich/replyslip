@@ -25,6 +25,7 @@ async function redirectFor(host: string, url: string): Promise<string | null> {
 const NEVER_REDIRECTED = [
   '/api/mcp',
   '/api/v1/c/abc',
+  '/api/v1/s/demo/abc',
   '/api/valetto/early-access',
   '/mcp',
   '/_next/static/chunk.js',
@@ -32,6 +33,8 @@ const NEVER_REDIRECTED = [
   '/i/abc',
   '/c',
   '/c/abc',
+  '/s/demo/abc',
+  '/s/demo/abc/shot/desktop',
   '/sign-in',
   '/claim',
   '/dashboard',

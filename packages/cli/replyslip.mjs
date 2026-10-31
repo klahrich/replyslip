@@ -31,7 +31,13 @@ var RATE_LIMITS = {
   /** Owner review actions (approve, decline, release, send back), keyed by the signed-in user id. */
   reviewAction: { agent: 300, windowMs: 15 * 60 * 1e3 },
   /** review_mode changes, keyed by the signed-in user id. */
-  reviewMode: { agent: 30, windowMs: 15 * 60 * 1e3 }
+  reviewMode: { agent: 30, windowMs: 15 * 60 * 1e3 },
+  /** Site assistant demo page loads (demo info), per IP (stored as a keyed hash). */
+  siteEntry: { ip: 300, windowMs: 15 * 60 * 1e3 },
+  /** Site assistant demo screenshots, per IP (keyed hash). Their own generous bucket so images never eat siteEntry. */
+  siteShot: { ip: 2e3, windowMs: 15 * 60 * 1e3 },
+  /** Site assistant demo messages, per IP (keyed hash). The daily caps in lib/site-assistant/caps.ts sit behind this. */
+  siteMessage: { ip: 30, windowMs: 15 * 60 * 1e3 }
 };
 
 // packages/cli/src/register.ts

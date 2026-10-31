@@ -1,0 +1,123 @@
+{
+  "_note": "Generic visitor questions for ten more invented sample businesses (story 0b). No real business, place or trade. Used to measure the keyword pre-check.",
+  "business-01": [
+    "What are your hours?",
+    "How much does a typical job cost?",
+    "Is the first visit free?",
+    "Do you work on weekends?",
+    "Can you start next month?",
+    "Do I need a permit for this?",
+    "Which areas do you cover?",
+    "How long does a typical job take?",
+    "Travaillez-vous le samedi?",
+    "Est-ce que vos travaux sont garantis?"
+  ],
+  "business-02": [
+    "Do you offer free estimates?",
+    "What's your hourly rate?",
+    "Do you supply the materials?",
+    "Are you available next week?",
+    "Can I book online?",
+    "Do you travel outside the city?",
+    "Are you insured?",
+    "Do you take large projects?",
+    "Offrez-vous des soumissions gratuites?",
+    "Something was damaged during the job, who do I talk to?"
+  ],
+  "business-03": [
+    "Do I have to be there for the visit?",
+    "What does your standard package include?",
+    "How much for a small job?",
+    "Do you bring your own equipment?",
+    "Can I book for next Tuesday?",
+    "Do you work with businesses too?",
+    "Do you serve my area?",
+    "Are your products safe for pets?",
+    "Faites-vous des travaux commerciaux?",
+    "Can I get a refund if I'm not happy?"
+  ],
+  "business-04": [
+    "How far ahead do I need to book?",
+    "Do you have reviews I can read?",
+    "What's the price for a full job?",
+    "Do you offer financing?",
+    "Are you licensed?",
+    "How do I get a quote?",
+    "Can I see examples of past work?",
+    "Do you clean up afterwards?",
+    "Combien pour une petite job?",
+    "Quels sont vos délais?"
+  ],
+  "business-05": [
+    "Do you offer a warranty?",
+    "Can you match a competitor's quote?",
+    "How soon can you come?",
+    "Do you do emergency calls?",
+    "What payment methods do you accept?",
+    "Is there a deposit?",
+    "Do you give discounts for seniors?",
+    "Can I change my booking?",
+    "Parlez-vous anglais?",
+    "Est-ce que vous êtes assurés?"
+  ],
+  "business-06": [
+    "Do you have a minimum order?",
+    "How much is delivery?",
+    "Can I pick up instead?",
+    "Are you open on holidays?",
+    "Do you take same-day orders?",
+    "What happens if it rains?",
+    "Can I cancel my booking?",
+    "How do I pay the balance?",
+    "Livrez-vous le dimanche?",
+    "I want to file a complaint about my last order."
+  ],
+  "business-07": [
+    "How much for an estimate?",
+    "Do you offer a warranty on your work?",
+    "How long will the job last?",
+    "Do you handle the permits?",
+    "Do you work in winter?",
+    "Can you send me a written quote?",
+    "Are your workers employees or subcontractors?",
+    "What brands do you use?",
+    "Combien de temps faut-il pour les travaux?",
+    "Pouvez-vous venir cette semaine?"
+  ],
+  "business-08": [
+    "Do you offer consultations?",
+    "Can I visit your showroom?",
+    "How long is the wait right now?",
+    "What's the price per square foot?",
+    "Do you remove the old one?",
+    "Do you install as well?",
+    "What colours are available?",
+    "Is the price negotiable?",
+    "Avez-vous un catalogue?",
+    "Offrez-vous une garantie?"
+  ],
+  "business-09": [
+    "How do I contact you?",
+    "Can I talk to the owner?",
+    "Do you have availability this weekend?",
+    "Do you charge for travel?",
+    "How much do you charge per hour?",
+    "Can you give me a ballpark price?",
+    "Do you work with landlords?",
+    "What should I do to prepare?",
+    "Est-ce que je dois être présent?",
+    "Je veux un remboursement."
+  ],
+  "business-10": [
+    "Who do I call if something goes wrong later?",
+    "Do you offer maintenance plans?",
+    "Are you family-owned?",
+    "How long have you been in business?",
+    "Do you do free inspections?",
+    "What's included in the quote?",
+    "How much would it cost for my house?",
+    "Can I pay in instalments?",
+    "Combien chargez-vous?",
+    "Quelles sont vos heures d'ouverture?"
+  ]
+}

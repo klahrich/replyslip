@@ -12,6 +12,13 @@ export function requestOrigin(req: Request): string {
   return new URL(req.url).origin;
 }
 
+/** True when the visitor reached us over https: the proxy's x-forwarded-proto, else the request URL. */
+export function isHttpsRequest(req: Request): boolean {
+  const forwardedProto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
+  if (forwardedProto) return forwardedProto === 'https';
+  return new URL(req.url).protocol === 'https:';
+}
+
 export function absoluteUrl(origin: string, path: string): string {
   if (!origin) return path;
   return `${origin.replace(/\/$/, '')}${path}`;

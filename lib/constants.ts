@@ -107,6 +107,12 @@ export const RATE_LIMITS = {
   reviewAction: { agent: 300, windowMs: 15 * 60 * 1000 },
   /** review_mode changes, keyed by the signed-in user id. */
   reviewMode: { agent: 30, windowMs: 15 * 60 * 1000 },
+  /** Site assistant demo page loads (demo info), per IP (stored as a keyed hash). */
+  siteEntry: { ip: 300, windowMs: 15 * 60 * 1000 },
+  /** Site assistant demo screenshots, per IP (keyed hash). Their own generous bucket so images never eat siteEntry. */
+  siteShot: { ip: 2000, windowMs: 15 * 60 * 1000 },
+  /** Site assistant demo messages, per IP (keyed hash). The daily caps in lib/site-assistant/caps.ts sit behind this. */
+  siteMessage: { ip: 30, windowMs: 15 * 60 * 1000 },
 } as const;
 
 /** A local agent is watcher_online when some non-revoked workspace watcher key polled within this window. */
