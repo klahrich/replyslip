@@ -5,9 +5,11 @@
  * conversation and the token; it sends through `demoApi` and keeps its own state.
  * No contact capture anywhere in the demo. Replies aren't streamed: one checked reply per message.
  * Message text, the banner and the notice are always React text nodes, never HTML.
+ * Minimize folds the chat into a corner bubble, like a site chat widget. The chat stays mounted (only hidden),
+ * so the conversation, the draft, a pending reply and the scroll position all survive. Nothing goes to storage.
  */
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { ArrowUp, RotateCw } from 'lucide-react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { ArrowUp, MessageCircle, Minus, RotateCw } from 'lucide-react';
 import { LogoTile } from '../Frame';
 import { brandStyle } from '../../_lib/brand';
 import { demoApi } from '../../_lib/site-demo-api';
@@ -60,6 +62,7 @@ export function DemoChat({
   lang,
   onLangChange,
   onGone,
+  onOpenChange,
   className,
 }: {
   token: string;
@@ -67,6 +70,8 @@ export function DemoChat({
   lang: Lang;
   onLangChange: (lang: Lang) => void;
   onGone: (kind: GoneKind) => void;
+  /** Called when the visitor minimizes (false) or reopens (true) the chat, so the page can lay out around it. */
+  onOpenChange?: (open: boolean) => void;
   className?: string;
 }) {
   const t = SITE_STRINGS[lang];
@@ -79,8 +84,17 @@ export function DemoChat({
   const [thinking, setThinking] = useState(false);
   const [capped, setCapped] = useState(false);
   const [inline, setInline] = useState<Inline | null>(null);
+  const [open, setOpen] = useState(true);
+  /** A reply came in while minimized: a dot on the bubble until the chat reopens. */
+  const [unread, setUnread] = useState(false);
+  const openRef = useRef(true);
+  /** The page's scroll position when minimized (on phones the page scrolls, not the chat), restored on reopen. */
+  const pageY = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  const minimizeRef = useRef<HTMLButtonElement>(null);
+  const bubbleRef = useRef<HTMLButtonElement>(null);
   const suggestions = useMemo(() => pickSuggestions(conversation.suggested_questions, lang), [conversation.suggested_questions, lang]);
   const branding = useMemo(
     () => ({
@@ -98,8 +112,48 @@ export function DemoChat({
   );
 
   useEffect(() => {
-    if (items.length || thinking) endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    // Hidden chat: leave its scroll alone. Reopening after a new reply scrolls to it.
+    if (openRef.current && (items.length || thinking)) endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [items.length, thinking]);
+
+  function minimize() {
+    if (!openRef.current) return;
+    pageY.current = window.scrollY;
+    openRef.current = false;
+    setOpen(false);
+    onOpenChange?.(false);
+    requestAnimationFrame(() => bubbleRef.current?.focus());
+  }
+
+  // Escape minimizes from anywhere in the chat, and also while focus has dropped to the page because the input
+  // is disabled for a pending reply.
+  const onEscape = useEffectEvent((ev: globalThis.KeyboardEvent) => {
+    if (ev.key !== 'Escape' || ev.isComposing || ev.defaultPrevented || !openRef.current) return;
+    const active = document.activeElement;
+    if (!active || active === document.body || sectionRef.current?.contains(active)) {
+      ev.preventDefault();
+      minimize();
+    }
+  });
+  useEffect(() => {
+    const listener = (ev: globalThis.KeyboardEvent) => onEscape(ev);
+    document.addEventListener('keydown', listener);
+    return () => document.removeEventListener('keydown', listener);
+  }, []);
+
+  function reopen() {
+    const hadUnread = unread;
+    openRef.current = true;
+    setOpen(true);
+    setUnread(false);
+    onOpenChange?.(true);
+    requestAnimationFrame(() => {
+      window.scrollTo(0, pageY.current);
+      const input = inputRef.current;
+      (input && !input.disabled ? input : minimizeRef.current)?.focus({ preventScroll: true });
+      if (hadUnread) endRef.current?.scrollIntoView({ block: 'end' });
+    });
+  }
 
   const disabled = thinking || capped;
 
@@ -134,11 +188,13 @@ export function DemoChat({
     try {
       const { message } = await demoApi.send(token, { client_message_id: clientId, text: body });
       setItems((xs) => [...xs, toItem(message, true)]);
+      if (!openRef.current) setUnread(true);
     } catch (e) {
       fail(e, clientId, body);
     } finally {
       setThinking(false);
-      requestAnimationFrame(() => inputRef.current?.focus());
+      // Minimized: focus stays on the bubble; reopening focuses the input.
+      requestAnimationFrame(() => openRef.current && inputRef.current?.focus());
     }
   }
 
@@ -189,13 +245,21 @@ export function DemoChat({
 
   const speaker = (it: Item) => (it.role === 'visitor' ? t.you : business.name);
 
-  return (
+  const panel = (
     <section
+      id="vt-demo-chat"
       aria-label={business.name}
       style={brandStyle(branding)}
+      ref={sectionRef}
+      inert={!open}
+      data-state={open ? 'open' : 'minimized'}
       className={cn(
         'flex flex-col bg-card shadow-[0_-8px_30px_rgba(0,0,0,0.08)] md:shadow-2xl md:ring-1 md:ring-black/5',
         'animate-in fade-in slide-in-from-bottom-6 duration-300 ease-out motion-reduce:animate-none md:slide-in-from-bottom-0 md:slide-in-from-right-8',
+        // Minimize and reopen: scale and fade into the bottom-right corner, where the bubble sits.
+        'origin-bottom-right transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none',
+        // Visibility transitions only on the way out (it stays visible until the fade ends), so reopening shows it at once.
+        !open && 'pointer-events-none invisible scale-75 opacity-0 transition-[opacity,scale,visibility]',
         className,
       )}
     >
@@ -204,7 +268,21 @@ export function DemoChat({
           <LogoTile branding={branding} size={36} />
           <h1 className="min-w-0 text-[16px] leading-tight font-semibold tracking-tight [overflow-wrap:anywhere]">{business.name}</h1>
         </div>
-        <LangSwitch lang={lang} onChange={onLangChange} />
+        <div className="-mr-2 flex shrink-0 items-center gap-1">
+          <LangSwitch lang={lang} onChange={onLangChange} />
+          <button
+            ref={minimizeRef}
+            type="button"
+            onClick={minimize}
+            aria-label={t.minimize}
+            aria-controls="vt-demo-chat"
+            aria-expanded={open}
+            data-testid="minimize"
+            className="grid size-11 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          >
+            <Minus className="size-5" aria-hidden />
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 px-4 pt-4 pb-2 md:min-h-0 md:overflow-y-auto">
@@ -320,6 +398,31 @@ export function DemoChat({
         )}
       </form>
     </section>
+  );
+
+  return (
+    <>
+      {panel}
+      <button
+        ref={bubbleRef}
+        type="button"
+        onClick={reopen}
+        style={brandStyle(branding)}
+        inert={open}
+        aria-label={unread ? t.openChatNew : t.openChat}
+        aria-controls="vt-demo-chat"
+        aria-expanded={open}
+        data-testid="open-chat"
+        className={cn(
+          'fixed right-[calc(1rem+env(safe-area-inset-right))] bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 grid size-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg ring-1 ring-black/10 md:right-[calc(1.5rem+env(safe-area-inset-right))] md:bottom-[calc(1.5rem+env(safe-area-inset-bottom))]',
+          'transition-[opacity,scale] duration-200 ease-out active:scale-95 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none motion-reduce:transition-none',
+          open && 'pointer-events-none invisible scale-50 opacity-0 transition-[opacity,scale,visibility]',
+        )}
+      >
+        <MessageCircle className="size-6" aria-hidden />
+        {unread && <span aria-hidden data-testid="unread-dot" className="absolute top-0.5 right-0.5 size-3.5 rounded-full bg-destructive ring-2 ring-white" />}
+      </button>
+    </>
   );
 }
 

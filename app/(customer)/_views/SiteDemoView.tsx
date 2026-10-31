@@ -12,6 +12,7 @@ import { DemoChat, LangSwitch, type GoneKind } from '../_components/site-demo/De
 import { demoApi } from '../_lib/site-demo-api';
 import { DemoApiError, type DemoConversation, type Lang } from '../_lib/site-demo-types';
 import { SITE_STRINGS } from '../_lib/site-strings';
+import { cn } from '../_lib/utils';
 
 type State =
   | { kind: 'loading' }
@@ -35,6 +36,8 @@ async function fetchDemo(token: string): Promise<{ next: State; pageLang: Lang |
 export function SiteDemoView({ token, initialLang }: { token: string; initialLang: Lang }) {
   const [lang, setLang] = useState<Lang>(initialLang);
   const [state, setState] = useState<State>({ kind: 'loading' });
+  /** The chat's open or minimized state, mirrored here for layout only: the chat keeps its own state. */
+  const [chatOpen, setChatOpen] = useState(true);
   const t = SITE_STRINGS[lang];
 
   // The visitor's own language choice, for this visit only. Nothing goes to browser storage: the demo token
@@ -102,7 +105,14 @@ export function SiteDemoView({ token, initialLang }: { token: string; initialLan
       <div className="relative flex flex-1 flex-col md:min-h-0">
         {/* The shot loads only once the token checks out, so a dead or expired link never requests it. */}
         {conversation ? (
-          <DemoBackdrop token={token} className="relative h-[38dvh] max-h-[360px] min-h-[120px] shrink-0 md:absolute md:inset-0 md:h-auto" />
+          <DemoBackdrop
+            token={token}
+            className={cn(
+              'relative min-h-[120px] shrink-0 md:absolute md:inset-0 md:h-auto',
+              // Minimized on a phone: the site gets the whole screen.
+              chatOpen ? 'h-[38dvh] max-h-[360px] md:max-h-none' : 'max-md:flex-1',
+            )}
+          />
         ) : (
           <div aria-hidden className="relative h-[120px] shrink-0 bg-muted md:absolute md:inset-0 md:h-auto" />
         )}
@@ -113,7 +123,12 @@ export function SiteDemoView({ token, initialLang }: { token: string; initialLan
             lang={lang}
             onLangChange={changeLang}
             onGone={(why) => setState({ kind: 'gone', why })}
-            className="relative z-10 -mt-4 flex-1 rounded-t-2xl md:absolute md:top-6 md:right-6 md:bottom-6 md:mt-0 md:w-[400px] md:rounded-2xl"
+            onOpenChange={setChatOpen}
+            className={cn(
+              'relative z-10 -mt-4 flex-1 rounded-t-2xl md:absolute md:top-6 md:right-6 md:bottom-6 md:mt-0 md:w-[400px] md:rounded-2xl',
+              // Minimized on a phone: out of the page flow, so the site fills the screen behind the bubble.
+              !chatOpen && 'max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:mt-0',
+            )}
           />
         ) : (
           <div role="status" className="relative z-10 -mt-4 flex flex-1 items-start justify-center rounded-t-2xl bg-card pt-16 md:absolute md:top-6 md:right-6 md:bottom-6 md:mt-0 md:w-[400px] md:rounded-2xl">
