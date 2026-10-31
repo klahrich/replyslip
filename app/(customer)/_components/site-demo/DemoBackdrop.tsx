@@ -28,7 +28,7 @@ export function DemoBackdrop({ token, className }: { token: string; className?: 
     >
       {!failed && (
         <picture>
-          <source media="(min-width: 1280px)" srcSet={shotUrl(token, 'desktop')} />
+          <source media="(min-width: 768px)" srcSet={shotUrl(token, 'desktop')} />
           <img
             ref={img}
             src={shotUrl(token, 'mobile')}
