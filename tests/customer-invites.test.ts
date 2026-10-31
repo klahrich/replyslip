@@ -223,32 +223,76 @@ describe('customer links: resolve and accept', () => {
     const o = await owner();
     const { token } = await createLink(o, { kind: 'personal', label: 'Initech' });
     expect((await accept(token, await signIn(emailAddress('first')))).status).toBe(200);
+    const sha = 'ab'.repeat(32);
+    const blobHost = 'https://store1.public.blob.vercel-storage.com';
+    // A logo uploaded before uploads moved to a random folder: the real path names the agent.
+    const legacyPath = `branding/${o.agentId}/${sha}-Xy12AbCd.webp`;
     await getDb().insert(agentBranding).values({
       agentId: o.agentId,
       displayName: 'Acme Tables',
-      logoBlobPath: 'branding/acme.png',
-      logoUrl: 'https://blob.test/branding/acme.png',
+      logoBlobPath: legacyPath,
+      logoUrl: `${blobHost}/${legacyPath}`,
       logoWidth: 200,
       logoHeight: 80,
+      logoSha256: sha,
     });
 
     const late = await signIn(emailAddress('late'));
-    for (const res of [await resolve(token), await resolve(token, late.cookie), await accept(token, late)]) {
+    const deadLink = async () => [await resolve(token), await resolve(token, late.cookie), await accept(token, late)];
+    const expectNoLeak = (res: { text: string }) => {
+      for (const leak of [o.agentId, 'draft', 'review', 'Grok', o.handle, o.email, 'Initech']) {
+        expect(res.text).not.toContain(leak);
+      }
+    };
+    for (const res of await deadLink()) {
       expect(res.status).toBe(410);
       expect(res.data.error.code).toBe('invite_used_up');
       expect(Object.keys(res.data.error.details)).toEqual(['bot']);
       expect(Object.keys(res.data.error.details.bot)).toEqual(['branding']);
+      // The legacy URL would name the agent, so the logo is left out rather than shown.
       expect(res.data.error.details.bot.branding).toMatchObject({
         display_name: 'Acme Tables',
-        logo_url: 'https://blob.test/branding/acme.png',
-        logo_width: 200,
-        logo_height: 80,
+        logo_url: null,
+        logo_width: null,
+        logo_height: null,
         show_footer: true,
       });
-      for (const leak of [o.agentId, 'draft', 'review', 'Grok', o.handle, o.email, 'Initech']) {
-        expect(res.text).not.toContain(leak);
-      }
+      expectNoLeak(res);
     }
+
+    // A logo uploaded now sits in a random folder, so the same responses show it.
+    const freshPath = `branding/${'0f'.repeat(16)}/${sha}-Xy12AbCd.webp`;
+    await getDb()
+      .update(agentBranding)
+      .set({ logoBlobPath: freshPath, logoUrl: `${blobHost}/${freshPath}` })
+      .where(eq(agentBranding.agentId, o.agentId));
+    for (const res of await deadLink()) {
+      expect(res.status).toBe(410);
+      expect(res.data.error.details.bot.branding).toMatchObject({
+        logo_url: `${blobHost}/${freshPath}`,
+        logo_width: 200,
+        logo_height: 80,
+      });
+      expectNoLeak(res);
+    }
+  });
+
+  it('the public link preview never puts the agent id in the logo URL', async () => {
+    const o = await owner();
+    const { token } = await createLink(o, { kind: 'personal' });
+    const legacyPath = `branding/${o.agentId}/${'cd'.repeat(32)}-Qw34ErTy.webp`;
+    await getDb().insert(agentBranding).values({
+      agentId: o.agentId,
+      logoBlobPath: legacyPath,
+      logoUrl: `https://store1.public.blob.vercel-storage.com/${legacyPath}`,
+      logoWidth: 120,
+      logoHeight: 120,
+    });
+    const out = await resolve(token);
+    expect(out.status).toBe(200);
+    expect(out.data.bot.branding).toMatchObject({ logo_url: null, logo_width: null, logo_height: null });
+    // R1 still names the bot in bot.agent_id (the page needs it to open the bot); the logo URL must not add it again.
+    expect(out.text.split(o.agentId)).toHaveLength(2);
   });
 
   it('binds a personal link to its email', async () => {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import sharp, { type Metadata, type OutputInfo } from 'sharp';
 import { getDb, type Db } from '@/db';
@@ -210,7 +210,8 @@ export async function uploadOwnerLogo(
   try {
     const { bytes, contentType } = await read(BRANDING_LOGO_MAX_BYTES);
     logo = await processLogo(bytes, contentType);
-    blob = await logoStore().put(`branding/${agentId}/${logo.sha256}.webp`, logo.webp);
+    // The folder is random, not the agent id: the logo URL is shown on public link pages, which never name the agent.
+    blob = await logoStore().put(`branding/${randomBytes(16).toString('hex')}/${logo.sha256}.webp`, logo.webp);
   } catch (err) {
     await refundKeyedRateLimit(db, { kind: BRANDING_LOGO_RATE_KIND, key: rateKey });
     throw err;
