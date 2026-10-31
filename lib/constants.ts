@@ -48,6 +48,21 @@ export const PENDING_REQUEST_TTL_DAYS = 14;
 export const PREAPPROVED_EMAILS_MAX = 500;
 export const PENDING_NOTIFY_INTERVAL_MS = 60 * 60 * 1000;
 export const CUSTOMER_LINK_MAX_USES = 100_000;
+
+/** Customer API (R3-R8). */
+export const CUSTOMER_BOTS_LIST_MAX = 100;
+export const CUSTOMER_NOTES_MAX = 2_000;
+export const TASK_ANSWER_MAX = 2_000;
+export const CUSTOMER_REQUESTS_PAGE_DEFAULT = 20;
+export const CUSTOMER_REQUESTS_PAGE_MAX = 50;
+
+/** Owner branding (spec 13). */
+export const BRANDING_LOGO_MAX_BYTES = 512 * 1024;
+export const BRANDING_LOGO_RATE_KIND = 'branding_logo';
+export const BRANDING_LOGO_UPLOADS_PER_HOUR = 20;
+export const BRANDING_LOGO_MIN_PX = 64;
+export const BRANDING_LOGO_MAX_PX = 2048;
+export const BRANDING_LOGO_OUTPUT_PX = 512;
 export const CUSTOMER_INVITE_MAX_TTL_DAYS = 365;
 export const CUSTOMER_INVITE_MAX_ACTIVE_PER_AGENT = 200;
 /** Name of the hidden, keyless agent a customer workspace sends tasks as. */
@@ -72,6 +87,8 @@ export const RATE_LIMITS = {
   customerLink: { ip: 60, windowMs: 15 * 60 * 1000 },
   /** Keyed by the signed-in user id (stored where agent keys go). */
   customerAccept: { agent: 20, windowMs: 15 * 60 * 1000 },
+  /** R8 answers, keyed by the signed-in user id. */
+  customerAnswer: { agent: 30, windowMs: 15 * 60 * 1000 },
   testWake: { agent: 10, windowMs: 15 * 60 * 1000 },
 } as const;
 

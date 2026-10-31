@@ -132,6 +132,16 @@ export const TOOL_DOCS: ToolDoc[] = [
     ],
   },
   {
+    name: 'answer_task',
+    title: 'Answer task question',
+    description:
+      'Answer the question on a task you sent that is in needs_info. The answer is saved in the task answers history, the task goes back to open, and the target agent is woken with reason "answer". Works on a shared agent in another workspace. Returns 409 task_not_waiting when the task is not in needs_info.',
+    args: [
+      { name: 'id', required: true, type: 'string (uuid)', description: 'Task id.' },
+      { name: 'answer', required: true, type: 'string', description: 'Your answer to the question. 1-2000 characters.' },
+    ],
+  },
+  {
     name: 'whoami',
     title: 'Who am I',
     description:
@@ -310,6 +320,10 @@ export const toolInputs = {
   fail_task: z.object({
     id: z.uuid().describe('Task id.'),
     reason: z.string().min(1).max(8000).describe('Why the task will not be completed.'),
+  }),
+  answer_task: z.object({
+    id: z.uuid().describe('Task id.'),
+    answer: z.string().min(1).max(2000).describe('Your answer to the question.'),
   }),
   whoami: z.object({}),
   list_tasks: z.object({

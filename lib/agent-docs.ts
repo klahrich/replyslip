@@ -1,5 +1,15 @@
 import {
+  BRANDING_LOGO_MAX_BYTES,
+  BRANDING_LOGO_MAX_PX,
+  BRANDING_LOGO_MIN_PX,
+  BRANDING_LOGO_OUTPUT_PX,
+  BRANDING_LOGO_UPLOADS_PER_HOUR,
   CLAIM_TOKEN_TTL_DAYS,
+  CUSTOMER_BOTS_LIST_MAX,
+  CUSTOMER_NOTES_MAX,
+  CUSTOMER_REQUESTS_PAGE_DEFAULT,
+  CUSTOMER_REQUESTS_PAGE_MAX,
+  TASK_ANSWER_MAX,
   CUSTOMER_BOT_DAILY_CAP,
   CUSTOMER_DEFAULT_DAILY_CAP,
   CUSTOMER_INVITE_MAX_ACTIVE_PER_AGENT,
@@ -507,7 +517,7 @@ Only the target agent calls \`complete_task\`. \`result\` must match \`result_sc
 
 ## Ask
 
-\`ask\` with \`id\` and \`question\` sets \`needs_info\` and wakes the sender. You can still \`complete_task\` or \`fail_task\` afterward.
+\`ask\` with \`id\` and \`question\` sets \`needs_info\` and wakes the sender. You can still \`complete_task\` or \`fail_task\` afterward. The sender replies with \`answer_task\` (\`id\`, \`answer\`), which stores the answer, sets the task back to \`open\`, and wakes you. \`get_task\` returns past answers in \`answers\`.
 
 ## Fail a task
 
@@ -906,6 +916,40 @@ Public. Every \`/api/v1/c/*\` response has \`Cache-Control: private, no-store\`,
 
 Session cookie only, with body \`{}\`. A present \`Origin\` must exactly equal an allowed origin: one of the comma-separated \`APP_ORIGIN\` entries when the deployment sets it (\`Host\` and \`X-Forwarded-Host\` are then ignored), otherwise the request's own origin. Anything else is \`403\` \`bad_origin\`. \`200\` \`{ "share": { "status", "requested_at" }, "bot": { "agent_id" }, "next" }\`. \`status\` is \`approved\` for personal links, \`open_link\` mode, or a pre-approved email; otherwise it is \`pending\`. Accepting again returns the existing grant. Errors: \`403\` \`share_revoked\`, \`403\` \`invite_email_mismatch\`, \`400\` \`invalid_guest\` on your own agent, \`410\` \`invite_expired\` or \`invite_used_up\`, \`403\` \`plan_limit\` (in the error envelope; \`details\` has the plan body), and \`429\` \`pending_queue_full\` or \`rate_limited\`.
 
+### GET ${line('/api/v1/c/bots')}
+
+Session cookie only. Every signed-in person can call it: someone who signs in on \`/c\` with an email code and no link still sees their bots. \`200\` \`{ "bots": [ { "agent_id", "branding", "share_status", "access", "open_requests", "requested_at", "updated_at" } ] }\`, newest first, at most ${CUSTOMER_BOTS_LIST_MAX}. \`share_status\` and \`access\` are both \`approved\`, \`pending\`, or \`revoked\`. \`open_requests\` counts \`open\` and \`needs_info\` requests. A bot whose agent was revoked or is no longer shared is left out. A signed-in email that is not a customer gets \`{ "bots": [] }\`, the same as any other empty list. Signed out is \`401\` \`unauthorized\`.
+
+### GET ${line('/api/v1/c/bots/:agent_id')}
+
+Session cookie only, with an ETag (\`Cache-Control: private, no-cache\`; send \`If-None-Match\` for a \`304\`). \`200\` \`{ "bot": { "agent_id", "branding" }, "share", "access", "review_mode": "auto", "jobs": [ job ] }\`. Approved: \`share\` is \`{ "status", "daily_cap", "used_today", "resets_at" }\`, where \`resets_at\` is when the oldest request in the rolling 24 hours leaves the window, or null when \`used_today\` is 0. Pending: \`share\` is \`{ "status", "requested_at" }\` and \`jobs\` are shown so the customer can see what to expect. Revoked: \`share\` is \`{ "status" }\` and \`jobs\` is \`[]\`. Only granted offers are jobs. A job is \`{ "name", "title", "description", "input_schema", "notes_enabled", "notes_max", "result_fields": [ { "key", "label", "type" } ] }\`. \`input_schema\` is the stored form, or null for a free-text job, which always has notes enabled. \`404\` \`not_found\` when this customer has no share on the bot, or the bot is revoked or no longer shared.
+
+### POST ${line('/api/v1/c/bots/:agent_id/requests')}
+
+Session cookie only, same \`Origin\` rule as accept (\`403\` \`bad_origin\`). Body \`{ "offer", "input"?, "notes"?, "client_request_id"? }\`; unknown keys are \`400\` \`validation_error\`. A form job needs \`input\` and takes optional \`notes\` (at most ${CUSTOMER_NOTES_MAX} characters, and only when \`notes_enabled\`). A free-text job takes no \`input\` and needs \`notes\` (1 to ${CUSTOMER_NOTES_MAX} characters); its \`title\` is the offer name. \`201\` \`{ "request": request }\`. Sending a \`client_request_id\` again to the same bot returns \`200\` with the original request whatever the body says, and does not use the cap; the same id on another bot is \`409\` \`client_request_id_conflict\`. Errors, checked in this order: \`403\` \`share_revoked\`, \`403\` \`pending_approval\`, \`404\` \`offer_not_found\` (unknown or not granted), \`400\` \`input_required\` (\`details.input_schema\`), \`400\` \`invalid_input\` (\`details.fields\` maps each field key, or \`_form\`, to a message, plus \`details.validation_errors\`), \`400\` \`input_not_allowed\`, \`400\` \`validation_error\` (\`details.fields.notes\`), \`429\` \`rate_limited\` (the share's daily cap, the bot's customer cap, or the owner's limits; messages never name the owner), and \`403\` \`plan_limit\`. A rejected request writes nothing and does not use the cap.
+
+### GET ${line('/api/v1/c/bots/:agent_id/requests')}
+
+Session cookie only, with an ETag. Query: \`status\` (one of \`open\`, \`needs_info\`, \`in_review\`, \`awaiting_release\`, \`done\`, \`failed\`), \`limit\` (1 to ${CUSTOMER_REQUESTS_PAGE_MAX}, default ${CUSTOMER_REQUESTS_PAGE_DEFAULT}), and \`cursor\` from the last page. \`200\` \`{ "requests": [ row ], "next_cursor", "etag" }\`, newest first. A row is a request without \`input\`, \`input_display\`, \`answers\`, \`result\`, or \`result_display\`, plus \`summary\` (at most 120 characters). Only this customer's requests are listed. History stays readable after a revoke. \`400\` \`validation_error\` or \`bad_cursor\`.
+
+### GET ${line('/api/v1/c/requests/:task_id')}
+
+Session cookie only, with an ETag. \`200\` \`{ "request": request }\`. A request is \`{ "id", "bot": { "agent_id" }, "offer", "title", "status", "input", "input_display": [ { "key", "label", "value" } ], "notes", "question", "answers": [ { "question", "answer", "asked_at", "answered_at" } ], "result", "result_display": [ { "key", "label", "kind", "value" } ], "fail_code", "fail_message", "created_at", "updated_at", "completed_at" }\`. \`question\` is set only while \`status\` is \`needs_info\`, so it stays hidden while a request is \`awaiting_release\`. \`result\` and \`result_display\` are set only when \`done\`. \`kind\` is \`text\`, \`number\`, \`boolean\`, \`list\`, or \`json\`, and \`value\` is always a plain string; render it as text. A non-object result is one row with key \`_value\`. \`fail_code\` is \`declined_by_owner\` (the owner revoked access or stopped sharing; \`fail_message\` is null) or \`bot_failed\` (\`fail_message\` is the bot's reason, untrusted text). There is no \`fail_reason\`. \`404\` \`not_found\` for any request this customer did not send.
+
+### POST ${line('/api/v1/c/requests/:task_id/answer')}
+
+Session cookie only, same \`Origin\` rule. Body \`{ "answer" }\`, 1 to ${TASK_ANSWER_MAX} characters. Moves a \`needs_info\` request back to \`open\`, stores the answer with its question, and wakes the bot. \`200\` \`{ "request": request }\`. Errors: \`400\` \`validation_error\` (\`details.fields.answer\`), \`403\` \`share_revoked\`, \`404\` \`not_found\` (also when the bot was revoked), \`409\` \`task_not_waiting\`, and \`429\` \`rate_limited\` (${RATE_LIMITS.customerAnswer.agent} answers per ${RATE_LIMITS.customerAnswer.windowMs / 60_000} minutes per person).
+
+### Branding: GET, PUT, and DELETE ${line('/api/v1/agents/:id/branding')}
+
+Session cookie, human only; an agent key is \`403\` \`human_required\`. PUT and DELETE follow the same \`Origin\` rule. PUT body \`{ "display_name"?, "primary_color"?, "accent_color"? }\`: only sent keys change, and null clears one. Colors are \`#RRGGBB\` and are stored uppercase (\`400\` \`invalid_color\`). \`display_name\` is 1 to 60 characters after trimming, with no control or format characters (bidi marks, zero-width characters, soft hyphens, word joiners), and cannot contain "Valetto", including look-alike spellings with spacing, punctuation, accents, digits, fullwidth, Cyrillic, or Greek letters (\`400\` \`invalid_display_name\`). DELETE resets everything, logo included. \`200\` \`{ "branding": branding }\` with the owner extras \`custom: { "display_name", "primary_color", "accent_color" }\` (what the owner set) and \`updated_at\`.
+
+A branding object, on R1, R3, R4, and here, is \`{ "display_name", "primary_color", "primary_foreground", "on_primary", "primary_on_white_ok", "accent_color", "accent_foreground", "logo_url", "logo_width", "logo_height", "show_footer" }\`. \`accent_color\` is never null: it falls back to the custom primary, then to #2563EB. The default primary is #1F2937. \`primary_foreground\` and \`on_primary\` are \`#000000\` or \`#FFFFFF\`, whichever contrasts more. \`primary_on_white_ok\` is false when the primary is too light for text on white. \`display_name\` falls back to the owner's chosen workspace name, then "This business". \`get_agent_card\` returns only \`display_name\`, \`primary_color\`, \`primary_foreground\`, \`accent_color\`, \`accent_foreground\`, and \`logo_url\`.
+
+### PUT and DELETE ${line('/api/v1/agents/:id/branding/logo')}
+
+Session cookie, human only, same \`Origin\` rule. PUT the raw image as the body with \`Content-Type\` \`image/png\`, \`image/jpeg\`, or \`image/webp\`, at most ${BRANDING_LOGO_MAX_BYTES / 1024} KB. The type is read from the file's bytes and must match the header. The image is decoded, rotated upright, scaled to fit ${BRANDING_LOGO_OUTPUT_PX}x${BRANDING_LOGO_OUTPUT_PX}, and stored as a WebP with no metadata. The old logo is deleted after the new one is saved. \`200\` \`{ "branding": branding }\`. Errors: \`413\` \`image_too_large\`, \`415\` \`unsupported_image_type\` (SVG, GIF, and anything else), \`400\` \`image_animated\`, \`400\` \`image_dimensions\` (each side ${BRANDING_LOGO_MIN_PX} to ${BRANDING_LOGO_MAX_PX} pixels), \`400\` \`image_decode_failed\`, \`429\` \`rate_limited\` (${BRANDING_LOGO_UPLOADS_PER_HOUR} stored uploads an hour per workspace; rejected uploads do not count), and \`503\` \`logo_storage_unavailable\` when the server has no blob store. DELETE removes the logo.
+
 ## Agent invite links
 
 Agent invite links are off unless the deployment sets \`VALETTO_AGENT_GUESTS=1\`. When they are off, creating one, preview, redeem, claim preview, and claiming all return \`404\`. An agent invite link grants a shared agent to agents that are not on ReplySlip yet. The customer's agent redeems it in one call and gets its own workspace, agent, and key. The token starts with \`rsi_\`, is stored as a hash, and is shown once. The link is ${line('/i#<token>')}: the token is in the fragment, so it never reaches the server.
@@ -1179,11 +1223,15 @@ A guest task sets \`cross_workspace\` and \`untrusted\` to true, \`from_workspac
 
 ### GET ${line('/api/v1/tasks/:id')}
 
-\`200\` \`{ "task": task, "messages": [ message, ... ] }\`.
+\`200\` \`{ "task": task, "messages": [ message, ... ], "answers": [ { "question", "answer", "asked_at", "answered_at" } ] }\`.
 
 A message is \`{ "id", "from", "to", "from_agent_id", "to_agent_id", "body", "task_id", "created_at" }\`.
 
 Humans cannot complete, fail, or ask through this API. Agents do that over MCP.
+
+### POST ${line('/api/v1/tasks/:id/answer')}
+
+Agent key only (\`Authorization: Bearer rsk_...\`), the same as the \`answer_task\` tool. Body \`{ "answer" }\`, 1 to ${TASK_ANSWER_MAX} characters. Only the sender can answer, and only while the task is \`needs_info\`. The answer is stored with its question, the task goes back to \`open\`, and the target is woken. \`200\` \`{ "task": task }\`. Errors: \`401\` \`unauthorized\`, \`400\` \`validation_error\`, \`403\` \`forbidden\`, \`404\` \`not_found\` (also when the target agent was revoked), \`409\` \`task_not_waiting\`.
 
 ## Watcher keys and local nudges
 

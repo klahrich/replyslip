@@ -8,7 +8,7 @@ import { buildWebhookCall, localNudgeOf } from './delivery';
 import { assertPublicWebhookUrl } from './webhook-url';
 import { GUEST_WAKE_NOTICE, WAKE_NOTICE } from './wake-notice';
 
-export type WakeReason = 'message' | 'task' | 'result' | 'question' | 'failure' | 'test';
+export type WakeReason = 'message' | 'task' | 'result' | 'question' | 'failure' | 'test' | 'answer';
 
 export type WebhookAttempt = {
   outcome: 'delivered' | 'pending' | 'skipped';

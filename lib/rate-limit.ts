@@ -112,3 +112,12 @@ function retryDelayMs(createdAt: Date[], limit: number, windowMs: number, now: n
   if (!pivot) return 0;
   return Math.max(0, pivot.getTime() + windowMs - now);
 }
+
+/** Gives back one event taken by consumeKeyedRateLimit (the newest), for an attempt that was rejected. */
+export async function refundKeyedRateLimit(db: Db, input: { kind: string; key: string }): Promise<void> {
+  await db.execute(sql`
+    delete from rate_events where id = (
+      select id from rate_events where kind = ${input.kind} and email = ${input.key}
+      order by created_at desc limit 1
+    )`);
+}

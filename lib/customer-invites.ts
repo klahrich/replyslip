@@ -14,7 +14,7 @@ import {
   type AgentShareRow,
   type CustomerInviteRow,
 } from '@/db/schema';
-import { defaultBranding } from './customer-branding';
+import { brandingRow, ownerDisplayName, serializeBranding } from './customer-branding';
 import {
   CUSTOMER_DEFAULT_DAILY_CAP,
   CUSTOMER_INVITE_MAX_ACTIVE_PER_AGENT,
@@ -30,7 +30,6 @@ import {
 } from './constants';
 import { randomToken, sha256, tokenPrefix } from './crypto';
 import { getEmailSender } from './email';
-import { chosenWorkspaceName } from './workspace-name';
 import { HttpError } from './errors';
 import { runAfterResponse } from './first-agent-alert';
 import { consumeRateLimit } from './rate-limit';
@@ -540,11 +539,6 @@ async function loadLink(db: Db, token: string, lock: boolean): Promise<LinkConte
 }
 
 /** The owner's chosen workspace name, or null while it is still the default made from an email. */
-async function ownerDisplayName(db: Db, workspaceId: string, name: string): Promise<string | null> {
-  const members = await db.select({ email: users.email }).from(users).where(eq(users.workspaceId, workspaceId));
-  return chosenWorkspaceName(name, members.map((m) => m.email));
-}
-
 async function shareFor(db: Db, agentId: string, workspaceId: string): Promise<AgentShareRow | null> {
   const [share] = await db
     .select()
@@ -566,7 +560,7 @@ function nextFor(status: ShareStatus | null): CustomerNext {
 
 export type CustomerViewer = { id: string; email: string; workspaceId: string | null } | null;
 
-async function consumeOrThrow(input: Parameters<typeof consumeRateLimit>[0]): Promise<void> {
+export async function consumeOrThrow(input: Parameters<typeof consumeRateLimit>[0]): Promise<void> {
   const limit = await consumeRateLimit(input);
   if (limit.limited) {
     throw new HttpError(429, 'rate_limited', 'Too many requests. Try again in a few minutes.', {
@@ -590,13 +584,14 @@ export async function resolveCustomerLink(token: string, viewer: CustomerViewer,
     if (status !== 'active') throw statusError(status);
   }
   const shareStatus = (share?.status as ShareStatus | undefined) ?? null;
+  const row = await brandingRow(db, agent.id);
   return {
     link: {
       kind: invite.kind as CustomerInviteKind,
       email_bound: invite.email !== null,
       expires_at: invite.expiresAt?.toISOString() ?? null,
     },
-    bot: { agent_id: agent.id, branding: defaultBranding(displayName) },
+    bot: { agent_id: agent.id, branding: serializeBranding(row, displayName) },
     access_mode: (invite.kind === 'personal' ? 'open_link' : agent.customerAccessMode) as CustomerAccessMode,
     viewer: viewer ? { signed_in: true, share_status: shareStatus } : { signed_in: false },
     next: viewer ? nextFor(shareStatus) : ('sign_in' as CustomerNext),
