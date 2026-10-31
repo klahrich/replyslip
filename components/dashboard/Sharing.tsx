@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api, errorText } from './api';
 import { Guests } from './Guests';
 import { InviteLinks } from './InviteLinks';
+import { ReviewMode } from './ReviewMode';
 import { SharingToggle } from './SharingToggle';
 import { WorkspaceHandle } from './WorkspaceHandle';
 import type { Agent, Offer } from './types';
@@ -131,6 +132,7 @@ export function Sharing({
           <div className="dash-agent">
             <h3 translate="no">{selected.name}</h3>
             <SharingToggle agent={selected} handle={handle} onChange={onChange} />
+            {selected.shared ? <ReviewMode key={`review-${selected.id}`} agentId={selected.id} agentName={selected.name} /> : null}
             {selected.shared ? (
               error ? (
                 <p className="dash-err" role="alert">

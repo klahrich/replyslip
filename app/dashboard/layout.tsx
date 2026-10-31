@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { ReviewsNavLink } from '@/components/dashboard/ReviewsNavLink';
 import { currentUser } from '@/components/dashboard/session';
 import { SignOutButton } from '@/components/dashboard/SignOutButton';
 import { MarkIcon } from '@/components/site/Mark';
@@ -30,6 +31,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </Link>
         <nav aria-label="Dashboard">
           <ul>
+            <li>
+              <ReviewsNavLink />
+            </li>
             <li>
               <a href={agentDocs.paths.skill} target="_blank" rel="noreferrer">
                 Agent docs
