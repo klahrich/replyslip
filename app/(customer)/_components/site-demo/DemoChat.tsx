@@ -36,6 +36,15 @@ type Item = {
 
 const DEFAULT_MAX = 1000;
 
+/** A tapped suggestion's stored answer waits this long (random in the range) behind the typing indicator, or for the
+ * tap's request if that takes longer, so it reads like a reply rather than a canned pop-up. */
+const TAP_DELAY_MIN_MS = 1200;
+const TAP_DELAY_MAX_MS = 2000;
+const tapDelay = () => TAP_DELAY_MIN_MS + Math.random() * (TAP_DELAY_MAX_MS - TAP_DELAY_MIN_MS);
+
+/** What the minimized bubble flags: a reply that came in, or a send that failed. */
+type Mark = 'reply' | 'error';
+
 /** The short reason shown (and announced) under the input after a failed send. */
 type Inline = 'tooLong' | 'badRequest' | 'rateLimited' | 'busy' | 'network' | 'server';
 
@@ -85,8 +94,12 @@ export function DemoChat({
   const [capped, setCapped] = useState(false);
   const [inline, setInline] = useState<Inline | null>(null);
   const [open, setOpen] = useState(true);
-  /** A reply came in while minimized: a dot on the bubble until the chat reopens. */
-  const [unread, setUnread] = useState(false);
+  /** Something happened while minimized: a dot (reply) or a ! (failed send) on the bubble until the chat reopens. */
+  const [mark, setMark] = useState<Mark | null>(null);
+  /** Screen-reader text for what happened while minimized (the hidden chat's own live regions aren't heard). */
+  const [announce, setAnnounce] = useState('');
+  /** Pending tap delays, cleared if the chat unmounts. */
+  const timers = useRef(new Set<number>());
   const openRef = useRef(true);
   /** The page's scroll position when minimized (on phones the page scrolls, not the chat), restored on reopen. */
   const pageY = useRef(0);
@@ -116,6 +129,40 @@ export function DemoChat({
     if (openRef.current && (items.length || thinking)) endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [items.length, thinking]);
 
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      pending.forEach((id) => window.clearTimeout(id));
+      pending.clear();
+    };
+  }, []);
+
+  function wait(ms: number) {
+    return new Promise<void>((resolve) => {
+      const id = window.setTimeout(() => {
+        timers.current.delete(id);
+        resolve();
+      }, ms);
+      timers.current.add(id);
+    });
+  }
+
+  /** A reply is on screen. If the chat is minimized, flag it on the bubble and announce it. */
+  function replied() {
+    if (openRef.current) return;
+    setMark((m) => m ?? 'reply');
+    setAnnounce(t.newReply(business.name));
+  }
+
+  const reasonText = (why: Inline) => (why === 'tooLong' ? t.tooLong(max) : t[why]);
+
+  /** A send failed with this reason. If the chat is minimized, flag it on the bubble and announce the reason. */
+  function failedHidden(reason: string) {
+    if (openRef.current) return;
+    setMark('error');
+    setAnnounce(reason);
+  }
+
   function minimize() {
     if (!openRef.current) return;
     pageY.current = window.scrollY;
@@ -142,10 +189,11 @@ export function DemoChat({
   }, []);
 
   function reopen() {
-    const hadUnread = unread;
+    const hadUnread = mark !== null;
     openRef.current = true;
     setOpen(true);
-    setUnread(false);
+    setMark(null);
+    setAnnounce('');
     onOpenChange?.(true);
     requestAnimationFrame(() => {
       window.scrollTo(0, pageY.current);
@@ -166,15 +214,19 @@ export function DemoChat({
       // the (now closed) input so they aren't lost, and explain.
       setItems((xs) => xs.filter((x) => x.key !== clientId));
       setText((cur) => cur || body);
+      failedHidden(t.demoCap);
       return setCapped(true);
     }
     if (err.status === 400) {
       // Sending it again would fail the same way: put the words back in the input to change, and say what to change.
       setItems((xs) => xs.filter((x) => x.key !== clientId));
       setText((cur) => cur || body);
-      return setInline(err.code === 'message_too_long' ? 'tooLong' : 'badRequest');
+      const why = err.code === 'message_too_long' ? 'tooLong' : 'badRequest';
+      failedHidden(reasonText(why));
+      return setInline(why);
     }
     setInline(retryReason(err));
+    failedHidden(reasonText(retryReason(err)));
     // Each message has its own client_message_id and Try again reuses it. If the server says the id
     // already belongs to another question, Try again sends this one under a fresh id instead.
     const key = err.status === 409 && err.code === 'client_message_id_reused' ? crypto.randomUUID() : clientId;
@@ -188,7 +240,7 @@ export function DemoChat({
     try {
       const { message } = await demoApi.send(token, { client_message_id: clientId, text: body });
       setItems((xs) => [...xs, toItem(message, true)]);
-      if (!openRef.current) setUnread(true);
+      replied();
     } catch (e) {
       fail(e, clientId, body);
     } finally {
@@ -210,16 +262,39 @@ export function DemoChat({
     void post(clientId, body);
   }
 
-  function tap(sq: SuggestedQuestion) {
+  async function tap(sq: SuggestedQuestion) {
     if (disabled) return;
     const clientId = crypto.randomUUID();
-    // The stored answer is already checked: show it at once, record the tap in the background (no model call).
+    // The stored answer is already checked (no model call). The question shows at once; the answer follows behind the
+    // typing indicator once both the random delay and the tap's request are done, so at max(request, delay).
+    setItems((xs) => [...xs, { key: clientId, role: 'visitor', body: sq.question, status: null, fresh: true, tapId: sq.id }]);
+    setInline(null);
+    setThinking(true);
+    const delay = wait(tapDelay());
+    let failure: Inline | null = null;
+    try {
+      await demoApi.send(token, { client_message_id: clientId, suggested_question_id: sq.id });
+    } catch (e) {
+      const err = e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', '');
+      if (err.status === 410) return onGone('expired');
+      // A suggestion withdrawn since the page loaded still gets its answer; any other 404 is a dead link.
+      if (err.status === 404 && err.code !== 'suggested_question_not_found') return onGone('dead');
+      // Not recorded: the answer still shows, the question gets the same Not sent / Try again as a typed message.
+      if (err.status !== 404) failure = retryReason(err);
+    }
+    await delay;
+    setThinking(false);
     setItems((xs) => [
-      ...xs,
-      { key: clientId, role: 'visitor', body: sq.question, status: null, fresh: true, tapId: sq.id },
+      ...xs.map((x) => (failure && x.key === clientId ? { ...x, failed: true } : x)),
       { key: `${clientId}-a`, role: 'assistant', body: sq.answer, status: 'answered', fresh: true },
     ]);
-    recordTap(clientId, sq.id);
+    if (failure) {
+      setInline(failure);
+      failedHidden(reasonText(failure));
+    } else {
+      replied();
+    }
+    requestAnimationFrame(() => openRef.current && inputRef.current?.focus());
   }
 
   function recordTap(clientId: string, tapId: string) {
@@ -232,6 +307,7 @@ export function DemoChat({
       if (err.status === 404) return err.code === 'suggested_question_not_found' ? undefined : onGone('dead');
       // Not recorded: the answer stays, the question gets the same Not sent / Try again as a typed message.
       setInline(retryReason(err));
+      failedHidden(reasonText(retryReason(err)));
       setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: true } : x)));
     });
   }
@@ -320,7 +396,7 @@ export function DemoChat({
         </div>
 
         {thinking && (
-          <div role="status" data-testid="thinking" className="mt-2.5 flex items-center gap-2 text-[13px] text-muted-foreground animate-in fade-in duration-150">
+          <div role="status" data-testid="thinking" className="mt-2.5 flex items-center gap-2 text-[13px] text-muted-foreground animate-in fade-in duration-150 motion-reduce:animate-none">
             <span aria-hidden className="flex gap-1 rounded-2xl rounded-bl-md border border-border bg-card px-3 py-2.5">
               {[0, 150, 300].map((d) => (
                 <span key={d} className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 motion-reduce:animate-none" style={{ animationDelay: `${d}ms` }} />
@@ -339,7 +415,7 @@ export function DemoChat({
                   key={sq.id}
                   type="button"
                   disabled={disabled}
-                  onClick={() => tap(sq)}
+                  onClick={() => void tap(sq)}
                   className="max-w-full rounded-full border border-border bg-background px-3.5 py-2 text-left text-[14px] leading-snug transition-colors hover:border-primary/40 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.98] disabled:opacity-50 [overflow-wrap:anywhere]"
                 >
                   {sq.question}
@@ -355,7 +431,7 @@ export function DemoChat({
         {capped && <p className="mb-2 px-1 text-[13px] text-muted-foreground">{t.demoCap}</p>}
         {/* Always in the DOM so screen readers announce each new reason politely. */}
         <p role="status" aria-live="polite" aria-atomic="true" data-testid="send-reason" className={cn('px-1 text-[13px] text-destructive', inline && 'mb-2')}>
-          {inline === 'tooLong' ? t.tooLong(max) : inline ? t[inline] : ''}
+          {inline ? reasonText(inline) : ''}
         </p>
         <div className="flex items-end gap-2">
           <label htmlFor="vt-demo-input" className="sr-only">
@@ -409,7 +485,7 @@ export function DemoChat({
         onClick={reopen}
         style={brandStyle(branding)}
         inert={open}
-        aria-label={unread ? t.openChatNew : t.openChat}
+        aria-label={mark === 'error' ? t.openChatError : mark === 'reply' ? t.openChatNew : t.openChat}
         aria-controls="vt-demo-chat"
         aria-expanded={open}
         data-testid="open-chat"
@@ -420,8 +496,17 @@ export function DemoChat({
         )}
       >
         <MessageCircle className="size-6" aria-hidden />
-        {unread && <span aria-hidden data-testid="unread-dot" className="absolute top-0.5 right-0.5 size-3.5 rounded-full bg-destructive ring-2 ring-white" />}
+        {mark === 'reply' && <span aria-hidden data-testid="unread-dot" className="absolute top-0.5 right-0.5 size-3.5 rounded-full bg-destructive ring-2 ring-white" />}
+        {mark === 'error' && (
+          <span aria-hidden data-testid="error-mark" className="absolute -top-0.5 -right-0.5 grid size-5 place-items-center rounded-full bg-destructive text-[12px] leading-none font-bold text-white ring-2 ring-white">
+            !
+          </span>
+        )}
       </button>
+      {/* Outside the hidden chat, so what happens while minimized is still announced. */}
+      <p role="status" aria-live="polite" aria-atomic="true" data-testid="bubble-live" className="sr-only">
+        {announce}
+      </p>
     </>
   );
 }

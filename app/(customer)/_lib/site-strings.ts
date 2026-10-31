@@ -9,6 +9,9 @@ const en = {
   minimize: 'Minimize chat',
   openChat: 'Open chat',
   openChatNew: 'Open chat, new reply',
+  openChatError: 'Open chat, message not sent',
+  /** Announced (screen readers only) when a reply lands while the chat is minimized. */
+  newReply: (name: string) => `New reply from ${name}`,
   thinking: 'Looking for the answer…',
   /** Only when the server sends no demo note of its own. */
   demoLabel: 'Demo',
@@ -40,6 +43,8 @@ const fr: typeof en = {
   minimize: 'Réduire la discussion',
   openChat: 'Ouvrir la discussion',
   openChatNew: 'Ouvrir la discussion, nouvelle réponse',
+  openChatError: 'Ouvrir la discussion, message non envoyé',
+  newReply: (name) => `Nouvelle réponse de ${name}`,
   thinking: 'Je cherche la réponse…',
   demoLabel: 'Démo',
   demoNote: (name) => `Je transmettrais cette question à ${name}. Sur le vrai site, vous pourriez laisser votre courriel ou votre numéro, et l’entreprise vous répondrait.`,
