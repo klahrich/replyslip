@@ -8,7 +8,7 @@ import type { ReviewMode as Mode, ReviewSettings } from './types';
 
 const MODES: { value: Mode; label: string; help: string }[] = [
   { value: 'auto', label: 'Auto', help: 'Your bot answers customers directly.' },
-  { value: 'review_first', label: 'Review first', help: 'You approve each request and each answer before your customer sees it.' },
+  { value: 'review_first', label: 'Review first', help: 'You approve each new request and each answer before your customer sees it. Requests already in progress keep going as before.' },
 ];
 
 /** Per-bot Auto / Review first (GET/PUT /api/v1/agents/:id/review-mode). Saves on change and goes back if the save fails. */
