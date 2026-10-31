@@ -186,6 +186,41 @@ const NON_FRENCH_LETTER = /[^\x00-\x7fàâæçéèêëîïôœùûüÿ]/;
 const NON_LATIN_SHARE = 0.3;
 const MIN_WORDS = 3;
 
+const ALL_FUNCTION_WORDS = new Set([...EN_WORDS, ...FR_WORDS, ...Object.values(OTHER_WORDS).flatMap((set) => [...set])]);
+
+/**
+ * Removes the business's own name from the text before scoring: the whole name wherever it appears, then any of
+ * its words that aren't function words (so "Le Jardin de Marie" keeps "le" and "de" in the visitor's French).
+ */
+function stripNames(text: string, names: string[]): string {
+  let out = text;
+  for (const name of names) {
+    const clean = name.normalize('NFC').trim();
+    if (!clean) continue;
+    out = out.replace(new RegExp(clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu'), ' ');
+    for (const part of clean.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
+      if (part.length < 2 || ALL_FUNCTION_WORDS.has(part)) continue;
+      out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'giu'), ' ');
+    }
+  }
+  return out;
+}
+
+/**
+ * Lowercased words with whether each looks like a proper name: capitalised and not the first word of a sentence
+ * (start of text, or after . ! ? ¿ ¡ or a line break).
+ */
+function wordTokens(text: string): { word: string; properName: boolean }[] {
+  const tokens: { word: string; properName: boolean }[] = [];
+  const normalized = text.replace(/[’‘]/g, "'");
+  for (const match of normalized.matchAll(/\p{L}+/gu)) {
+    const before = normalized.slice(0, match.index).replace(/[ \t"'«»“”(\[-]+$/u, '');
+    const sentenceStart = before === '' || /[.!?¿¡\n]$/.test(before);
+    tokens.push({ word: match[0].toLowerCase(), properName: !sentenceStart && /^\p{Lu}/u.test(match[0]) });
+  }
+  return tokens;
+}
+
 /** Share of letters that are not Latin script (counted by Unicode script, not by accents). */
 export function nonLatinLetterShare(text: string): number {
   const letters = text.match(/\p{L}/gu) ?? [];
@@ -203,22 +238,25 @@ export function nonLatinLetterShare(text: string): number {
  * - Confident means the top score is at least 2 and at least twice the runner-up; English or French also need at
  *   least 2 of their own function words.
  */
-export function detectVisitorLanguage(text: string): 'en' | 'fr' | 'other' | null {
-  if (nonLatinLetterShare(text) > NON_LATIN_SHARE) return 'other';
-  const lower = text.normalize('NFC').toLowerCase().replace(/[’‘]/g, "'");
+export function detectVisitorLanguage(text: string, options: { names?: string[] } = {}): 'en' | 'fr' | 'other' | null {
+  const stripped = stripNames(text.normalize('NFC'), options.names ?? []);
+  if (nonLatinLetterShare(stripped) > NON_LATIN_SHARE) return 'other';
   // Hyphens and apostrophes split too, so "faites-vous", "qu'est-ce" and "don't" count piece by piece.
-  const words = lower.split(/[^\p{L}]+/u).filter(Boolean);
+  const tokens = wordTokens(stripped);
+  const words = tokens.map((t) => t.word);
   if (words.length < MIN_WORDS) return null;
+  const lower = stripped.toLowerCase();
 
   let enWords = 0;
   let frWords = 0;
   let frLetters = 0;
   let foreignLetters = 0;
   const otherWords = new Map<OtherLanguage, number>();
-  for (const w of words) {
+  for (const { word: w, properName } of tokens) {
     if (EN_WORDS.has(w)) enWords += 1;
     if (FR_WORDS.has(w)) frWords += 1;
-    if (NON_FRENCH_LETTER.test(w)) foreignLetters += 1;
+    // A capitalised word mid-sentence is likely a name (Mañana, Straße, Søren, Gómez): its letters prove nothing.
+    if (NON_FRENCH_LETTER.test(w)) foreignLetters += properName ? 0 : 1;
     else if (FRENCH_LETTERS.test(w)) frLetters += 1;
     for (const lang of Object.keys(OTHER_WORDS) as OtherLanguage[]) {
       if (OTHER_WORDS[lang].has(w)) otherWords.set(lang, (otherWords.get(lang) ?? 0) + 1);

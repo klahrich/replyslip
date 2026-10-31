@@ -330,7 +330,9 @@ describe('messages', () => {
     for (const probe of probes) {
       const { token } = await createSiteDemo();
       const detected = detectVisitorLanguage(probe.text);
-      // Wrong on purpose: en/fr where the server is sure, "other" only where it can't tell.
+      // Where the server is sure, the fake model mislabels on purpose (en/fr) and is never called. Where the server
+      // can't tell, the fake model gives the correct "other" tag: these 4 probes test that a model "other" still
+      // reaches the owner, not a mislabel. Known limit: undecided text the model wrongly tags en/fr gets answered.
       const tag = detected === null ? 'other' : i++ % 2 ? 'fr' : 'en';
       const model = fakeModel(() => answer({ language: tag }));
       setSiteLlmTransportForTests(model.transport);

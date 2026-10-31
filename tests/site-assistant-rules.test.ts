@@ -412,6 +412,37 @@ describe('server language check (spec 6b)', () => {
     expect(detectVisitorLanguage('Do you have a store in the 東 district, or is it far from the city?')).toBe('en');
   });
 
+  it('does not send English questions that name a business with non-French letters to the owner', async () => {
+    const examples = [
+      ['Is Casa Mañana open?', 'Casa Mañana'],
+      ['Is Straße Bakery open late?', 'Straße Bakery'],
+      ['Can Søren come Tuesday?', 'Søren Renovations'],
+      ['Is Gómez open?', 'Gómez Landscaping'],
+    ] as const;
+    for (const [text, name] of examples) {
+      // Without the name matching the business: the capitalised mid-sentence word's letters don't count.
+      expect(detectVisitorLanguage(text), text).not.toBe('other');
+      // With it: the business's own name is stripped before scoring.
+      expect(detectVisitorLanguage(text, { names: [name] }), `${text} / ${name}`).not.toBe('other');
+      for (const businessName of [name, 'Maple Ridge Landscaping']) {
+        const { result, calls } = await ask(text, answer({ language: 'en' }), { businessName });
+        expect(calls, `${text} / ${businessName}`).toHaveLength(1);
+        expect(result, `${text} / ${businessName}`).toMatchObject({ status: 'answered', language: 'en' });
+      }
+    }
+    // Longer English and French with such a name are still confidently theirs.
+    expect(detectVisitorLanguage('Is Casa Mañana open on Sunday?')).toBe('en');
+    expect(detectVisitorLanguage('Est-ce que Peña Jardins est ouvert le samedi ?', { names: ['Peña Jardins'] })).toBe('fr');
+  });
+
+  it('still reads lowercase non-French text as other, and keeps the non-Latin rule after stripping the name', () => {
+    expect(detectVisitorLanguage('mañana pueden venir a pintar?')).toBe('other');
+    expect(detectVisitorLanguage('tôi muốn hỏi về dịch vụ')).toBe('other');
+    expect(detectVisitorLanguage('Tôi muốn hỏi về dịch vụ', { names: ['Maple Ridge Landscaping'] })).toBe('other');
+    expect(detectVisitorLanguage('gdzie są państwo i ile to kosztuje?')).toBe('other');
+    expect(detectVisitorLanguage('Maple Ridge 你们提供免费估价吗？', { names: ['Maple Ridge'] })).toBe('other');
+  });
+
   it('keeps the two French fixture questions French, and no fixture question other', () => {
     expect(detectVisitorLanguage('Pouvez-vous venir cette semaine?')).toBe('fr');
     expect(detectVisitorLanguage('Avez-vous un catalogue?')).toBe('fr');

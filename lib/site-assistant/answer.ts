@@ -26,7 +26,7 @@ export type SiteAnswerInput = {
  * model "other" into en/fr.
  */
 export function visitorLanguage(input: SiteAnswerInput): { detected: 'en' | 'fr' | 'other' | null; reply: 'en' | 'fr' } {
-  const detected = detectVisitorLanguage(input.visitorMessage);
+  const detected = detectVisitorLanguage(input.visitorMessage, { names: [input.businessName] });
   if (detected === 'en' || detected === 'fr') return { detected, reply: detected };
   const business = input.businessLanguage === 'fr' || input.businessLanguage === 'en' ? input.businessLanguage : null;
   return { detected, reply: business ?? guessLanguage(input.visitorMessage) };
