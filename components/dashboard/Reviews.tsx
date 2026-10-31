@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { api, errorText, formatTime, SIGNED_OUT_EVENT } from './api';
+import { api, errorText, SIGNED_OUT_EVENT } from './api';
+import { LocalTime } from './LocalTime';
 import { jobTitle, senderText } from './review-text';
 import type { Review, ReviewsResponse } from './types';
 import { previewText } from './review-text';
@@ -23,9 +24,7 @@ function ReviewRow({ r }: { r: Review }) {
             <span translate="no">{senderText(r)}</span> · to <span translate="no">{r.agent.name}</span>
           </span>
         </span>
-        <time className="dash-review-time" dateTime={r.updated_at}>
-          {formatTime(r.updated_at)}
-        </time>
+        <LocalTime className="dash-review-time" iso={r.updated_at} />
         <span className="dash-review-open" aria-hidden="true">
           Open →
         </span>

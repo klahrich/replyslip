@@ -3,7 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Agents } from './Agents';
-import { api, errorText, formatTime, SIGNED_OUT_EVENT } from './api';
+import { api, errorText, SIGNED_OUT_EVENT } from './api';
+import { LocalTime } from './LocalTime';
 import { EmailPrefs } from './EmailPrefs';
 import { JoinCodes, type DocPaths } from './JoinCodes';
 import { SetupChecklist } from './SetupChecklist';
@@ -104,7 +105,7 @@ export function Dashboard({
         <p className="dash-muted">Workspace</p>
         <WorkspaceName initialName={workspace.name} />
         <p className="dash-muted">
-          Signed in as {email} · created {formatTime(workspace.created_at)}
+          Signed in as {email} · created <LocalTime iso={workspace.created_at} />
           {loaded ? ` · ${live} active ${live === 1 ? 'agent' : 'agents'}` : ''}
         </p>
         <p className="dash-muted">

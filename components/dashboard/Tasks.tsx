@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, errorText, formatTime } from './api';
+import { api, errorText } from './api';
+import { LocalTime } from './LocalTime';
 import type { Message, Task, TaskStatus } from './types';
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -64,9 +65,7 @@ function TaskRow({ task }: { task: Task }) {
             <span translate="no">{senderLabel(task)}</span> → <span translate="no">{task.to}</span>
           </span>
           <StatusPill status={task.status} />
-          <time className="dash-task-time" dateTime={task.created_at}>
-            {formatTime(task.created_at)}
-          </time>
+          <LocalTime className="dash-task-time" iso={task.created_at} />
         </summary>
         <div className="dash-task-body">
           <dl className="dash-dl">
@@ -78,12 +77,12 @@ function TaskRow({ task }: { task: Task }) {
             </div>
             <div>
               <dt>Updated</dt>
-              <dd>{formatTime(task.updated_at)}</dd>
+              <dd><LocalTime iso={task.updated_at} /></dd>
             </div>
             {task.completed_at ? (
               <div>
                 <dt>Closed</dt>
-                <dd>{formatTime(task.completed_at)}</dd>
+                <dd><LocalTime iso={task.completed_at} /></dd>
               </div>
             ) : null}
           </dl>
@@ -146,7 +145,7 @@ function TaskRow({ task }: { task: Task }) {
                   <li key={m.id}>
                     <p className="dash-muted">
                       <span translate="no">{m.from}</span> → <span translate="no">{m.to}</span> ·{' '}
-                      {formatTime(m.created_at)}
+                      <LocalTime iso={m.created_at} />
                     </p>
                     <p className="dash-pre-text">{m.body}</p>
                   </li>
