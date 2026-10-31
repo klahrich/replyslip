@@ -80,22 +80,45 @@ export function siteLlmConfig(): SiteLlmConfig {
   };
 }
 
+const warnedPriceEnvs = new Set<string>();
+
+/** Test hook: forget which bad price settings were already warned about. */
+export function resetSitePriceWarningsForTests(): void {
+  warnedPriceEnvs.clear();
+}
+
+function isPrice(value: number | null): value is number {
+  return value !== null && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * A fallback price, USD per million tokens. Unset is null. A set value must be a finite number above 0: a price of 0
+ * would make the fallback free against the cost cap, so 0, negatives and non-numbers are null too (the fallback
+ * stays off), with one warning per setting naming only the setting.
+ */
 function optionalPriceEnv(name: string): number | null {
   const raw = process.env[name]?.trim();
   if (!raw) return null;
   const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : null;
+  if (isPrice(value)) return value;
+  if (!warnedPriceEnvs.has(name)) {
+    warnedPriceEnvs.add(name);
+    console.warn(`[site-assistant] ${name} must be a number above 0; the fallback model is off.`);
+  }
+  return null;
 }
 
 /** The config for the fallback call, at the fallback model's own prices; null when there's no usable fallback. */
 export function siteFallbackLlmConfig(config: SiteLlmConfig): SiteLlmConfig | null {
   if (!config.fallbackModel || config.fallbackModel === config.model) return null;
-  if (config.fallbackPriceInPerM === null || config.fallbackPriceOutPerM === null) return null;
+  const priceIn = config.fallbackPriceInPerM;
+  const priceOut = config.fallbackPriceOutPerM;
+  if (!isPrice(priceIn) || !isPrice(priceOut)) return null;
   return {
     ...config,
     model: config.fallbackModel,
-    priceInPerM: config.fallbackPriceInPerM,
-    priceOutPerM: config.fallbackPriceOutPerM,
+    priceInPerM: priceIn,
+    priceOutPerM: priceOut,
   };
 }
 

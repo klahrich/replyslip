@@ -35,7 +35,7 @@ import {
   revokeDemoLinks,
   setSuggestedAnswerChecked,
 } from '@/lib/site-assistant/import';
-import { siteLlmConfig, type SiteLlmConfig } from '@/lib/site-assistant/config';
+import { resetSitePriceWarningsForTests, siteFallbackLlmConfig, siteLlmConfig, type SiteLlmConfig } from '@/lib/site-assistant/config';
 import { setSiteLlmTransportForTests, type SiteLlmTransport } from '@/lib/site-assistant/llm';
 import { siteRateKey } from '@/lib/site-assistant/routes';
 import { RATE_LIMITS } from '@/lib/constants';
@@ -584,6 +584,49 @@ describe('fallback model', () => {
     const result = await ask(model.transport, { ...config, fallbackPriceInPerM: null });
     expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'llm_error' });
     expect(model.calls).toHaveLength(1);
+  });
+
+  it.each([
+    ['0', '0'],
+    ['a negative value', '-0.5'],
+    ['a non-number', 'cheap'],
+  ])('keeps the fallback off, with one warning, when a fallback price is %s', async (_label, bad) => {
+    resetSitePriceWarningsForTests();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const [badName, goodName] of [
+        ['SITE_LLM_FALLBACK_PRICE_IN_PER_M', 'SITE_LLM_FALLBACK_PRICE_OUT_PER_M'],
+        ['SITE_LLM_FALLBACK_PRICE_OUT_PER_M', 'SITE_LLM_FALLBACK_PRICE_IN_PER_M'],
+      ] as const) {
+        warn.mockClear();
+        stubFallbackEnv();
+        vi.stubEnv(badName, bad);
+        vi.stubEnv(goodName, '1.5');
+        const first = siteLlmConfig();
+        expect(siteFallbackLlmConfig(first)).toBeNull();
+        siteLlmConfig();
+        expect(warn).toHaveBeenCalledTimes(1);
+        const message = String(warn.mock.calls[0]![0]);
+        // Names the setting only, never its value.
+        expect(message).toBe(`[site-assistant] ${badName} must be a number above 0; the fallback model is off.`);
+        expect(message).not.toMatch(/key|sk-|postgres/i);
+
+        // And no second model call is made.
+        const model = fakeModel((_req, n) => (n === 1 ? notFound : answer({})));
+        const result = await ask(model.transport, { ...first, apiKey: config.apiKey });
+        expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'llm_error' });
+        expect(model.calls).toHaveLength(1);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('never prices the fallback at 0 or below, even when set in config directly', () => {
+    for (const [inPrice, outPrice] of [[0, 1.5], [0.3, 0], [-1, 1.5], [0.3, Number.NaN], [Number.POSITIVE_INFINITY, 1.5]]) {
+      expect(siteFallbackLlmConfig({ ...config, fallbackPriceInPerM: inPrice!, fallbackPriceOutPerM: outPrice! })).toBeNull();
+    }
+    expect(siteFallbackLlmConfig(config)).toMatchObject({ model: config.fallbackModel, priceInPerM: 0.3, priceOutPerM: 1.5 });
   });
 
   it('runs inside the one reservation and caps through the route', async () => {
