@@ -143,6 +143,18 @@ async function contextsFor(db: Db, rows: TaskRow[]): Promise<Map<string, Context
  */
 async function serializeReview(db: Db, task: TaskRow, context: Context | undefined) {
   const held = task.status === 'awaiting_release' ? (task.heldAction as HeldAction | null) : null;
+  // After release, show the owner what went out (the content stays on the task; decline and send-back clear it).
+  const shown: HeldAction | null =
+    held ??
+    (task.releasedAt
+      ? task.status === 'done'
+        ? 'result'
+        : task.status === 'needs_info'
+          ? 'question'
+          : task.status === 'failed'
+            ? 'failure'
+            : null
+      : null);
   const answers = await taskAnswersFor(db, task.id);
   return {
     task_id: task.id,
@@ -163,10 +175,10 @@ async function serializeReview(db: Db, task: TaskRow, context: Context | undefin
     input: task.input ?? null,
     input_display: inputDisplay(task.inputSchema ?? null, task.input ?? null),
     answers: answers.map(serializeAnswer),
-    result: held === 'result' ? (task.result ?? null) : null,
-    result_display: held === 'result' ? resultDisplay(task.resultSchema, task.result) : [],
-    question: held === 'question' ? task.question : null,
-    fail_message: held === 'failure' ? task.failReason : null,
+    result: shown === 'result' ? (task.result ?? null) : null,
+    result_display: shown === 'result' ? resultDisplay(task.resultSchema, task.result) : [],
+    question: shown === 'question' ? task.question : null,
+    fail_message: shown === 'failure' ? task.failReason : null,
     owner_note: task.ownerNote ?? null,
     reviewed_at: task.reviewedAt?.toISOString() ?? null,
     reviewed_by: task.reviewedBy ?? null,

@@ -364,6 +364,9 @@ describe('answer checkpoint', () => {
     const released = await act(o, task.id, 'release');
     expect(released.data.review).toMatchObject({ status: 'done', held_action: null, actions: [] });
     expect(released.data.review.released_at).not.toBeNull();
+    // The owner still sees what went out after release.
+    expect(released.data.review).toMatchObject({ result: { headline: 'CANARY-HELD-RESULT' } });
+    expect((await getReview(o, task.id)).data.review.result_display[0]).toMatchObject({ value: 'CANARY-HELD-RESULT' });
     const after = await getRequest(c, task.id);
     expect(after.data.request).toMatchObject({ status: 'done', result: { headline: 'CANARY-HELD-RESULT' } });
     expect(after.data.request.completed_at).not.toBeNull();
@@ -383,7 +386,8 @@ describe('answer checkpoint', () => {
     expect((await answerRequest(c, task.id, 'early')).data.error.code).toBe('task_not_waiting');
     expect((await getReview(o, task.id)).data.review.question).toBe('CANARY-HELD-QUESTION?');
 
-    expect((await act(o, task.id, 'release')).data.review.status).toBe('needs_info');
+    const releasedQ = (await act(o, task.id, 'release')).data.review;
+    expect(releasedQ).toMatchObject({ status: 'needs_info', question: 'CANARY-HELD-QUESTION?' });
     expect((await getRequest(c, task.id)).data.request.question).toBe('CANARY-HELD-QUESTION?');
     const answered = await answerRequest(c, task.id, 'Blue');
     expect(answered.status, answered.text).toBe(200);
@@ -404,7 +408,7 @@ describe('answer checkpoint', () => {
     expect(r7.data.request).toMatchObject({ fail_code: null, fail_message: null });
     expectNoHeld(r7.text, 'CANARY-HELD-FAILURE');
     expect((await getReview(o, task.id)).data.review.fail_message).toBe('CANARY-HELD-FAILURE');
-    await act(o, task.id, 'release');
+    expect((await act(o, task.id, 'release')).data.review.fail_message).toBe('CANARY-HELD-FAILURE');
     expect((await getRequest(c, task.id)).data.request).toMatchObject({
       status: 'failed',
       fail_code: 'bot_failed',
