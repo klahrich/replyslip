@@ -134,38 +134,6 @@ CREATE TABLE "site_visitor_usage_daily" (
 	CONSTRAINT "site_visitor_usage_daily_conversation_id_day_pk" PRIMARY KEY("conversation_id","day")
 );
 --> statement-breakpoint
-CREATE TABLE "site_message_requests" (
-	"demo_link_id" uuid NOT NULL,
-	"client_message_id" uuid NOT NULL,
-	"business_id" uuid NOT NULL,
-	"conversation_id" uuid NOT NULL,
-	"request_hash" text NOT NULL,
-	"state" text DEFAULT 'pending' NOT NULL,
-	"visitor_message_id" uuid,
-	"assistant_message_id" uuid,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "site_message_requests_demo_link_id_client_message_id_pk" PRIMARY KEY("demo_link_id","client_message_id"),
-	CONSTRAINT "site_message_requests_state_check" CHECK ("site_message_requests"."state" in ('pending', 'done', 'failed')),
-	CONSTRAINT "site_message_requests_done_check" CHECK ("site_message_requests"."state" <> 'done' or ("site_message_requests"."visitor_message_id" is not null and "site_message_requests"."assistant_message_id" is not null))
-);
---> statement-breakpoint
-CREATE TABLE "site_ip_usage_daily" (
-	"key_hash" text NOT NULL,
-	"day" date NOT NULL,
-	"messages" integer DEFAULT 0 NOT NULL,
-	CONSTRAINT "site_ip_usage_daily_key_hash_day_pk" PRIMARY KEY("key_hash","day"),
-	CONSTRAINT "site_ip_usage_daily_nonneg_check" CHECK ("site_ip_usage_daily"."messages" >= 0)
-);
---> statement-breakpoint
-ALTER TABLE "site_message_requests" ADD CONSTRAINT "site_message_requests_demo_link_fk" FOREIGN KEY ("demo_link_id","business_id") REFERENCES "public"."site_demo_links"("id","business_id") ON DELETE cascade ON UPDATE no action;
---> statement-breakpoint
-ALTER TABLE "site_message_requests" ADD CONSTRAINT "site_message_requests_conversation_fk" FOREIGN KEY ("conversation_id","business_id") REFERENCES "public"."site_conversations"("id","business_id") ON DELETE cascade ON UPDATE no action;
---> statement-breakpoint
-CREATE INDEX "site_message_requests_conversation_idx" ON "site_message_requests" USING btree ("conversation_id");
---> statement-breakpoint
-CREATE INDEX "site_ip_usage_daily_day_idx" ON "site_ip_usage_daily" USING btree ("day");
---> statement-breakpoint
 ALTER TABLE "site_conversations" ADD CONSTRAINT "site_conversations_demo_link_fk" FOREIGN KEY ("demo_link_id","business_id") REFERENCES "public"."site_demo_links"("id","business_id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "site_demo_links" ADD CONSTRAINT "site_demo_links_business_id_site_businesses_id_fk" FOREIGN KEY ("business_id") REFERENCES "public"."site_businesses"("id") ON DELETE cascade ON UPDATE no action;

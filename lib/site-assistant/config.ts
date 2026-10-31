@@ -50,6 +50,12 @@ export type SiteLlmConfig = {
   timeoutMs: number;
   priceInPerM: number;
   priceOutPerM: number;
+  /**
+   * The fallback model's own prices, USD per million tokens. No default: the repo has no list price for it, so
+   * the fallback only runs once both are set.
+   */
+  fallbackPriceInPerM: number | null;
+  fallbackPriceOutPerM: number | null;
 };
 
 function fallbackModelEnv(): string | null {
@@ -69,6 +75,27 @@ export function siteLlmConfig(): SiteLlmConfig {
     timeoutMs: numberEnv('SITE_LLM_TIMEOUT_MS', SITE_DEFAULT_TIMEOUT_MS),
     priceInPerM: numberEnv('SITE_LLM_PRICE_IN_PER_M', SITE_DEFAULT_PRICE_IN_PER_M),
     priceOutPerM: numberEnv('SITE_LLM_PRICE_OUT_PER_M', SITE_DEFAULT_PRICE_OUT_PER_M),
+    fallbackPriceInPerM: optionalPriceEnv('SITE_LLM_FALLBACK_PRICE_IN_PER_M'),
+    fallbackPriceOutPerM: optionalPriceEnv('SITE_LLM_FALLBACK_PRICE_OUT_PER_M'),
+  };
+}
+
+function optionalPriceEnv(name: string): number | null {
+  const raw = process.env[name]?.trim();
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** The config for the fallback call, at the fallback model's own prices; null when there's no usable fallback. */
+export function siteFallbackLlmConfig(config: SiteLlmConfig): SiteLlmConfig | null {
+  if (!config.fallbackModel || config.fallbackModel === config.model) return null;
+  if (config.fallbackPriceInPerM === null || config.fallbackPriceOutPerM === null) return null;
+  return {
+    ...config,
+    model: config.fallbackModel,
+    priceInPerM: config.fallbackPriceInPerM,
+    priceOutPerM: config.fallbackPriceOutPerM,
   };
 }
 

@@ -286,8 +286,25 @@ describe('fixed text', () => {
       needsOwnerReply('en'), needsOwnerReply('fr'), offTopicReply('en', 'M'), offTopicReply('fr', 'M'), cappedReply('en'), cappedReply('fr'),
       ...(['owner_topic', 'not_in_context', 'other_language', 'check_failed'] as const).flatMap((r) => [demoNote(r, 'en', 'M'), demoNote(r, 'fr', 'M')]),
     ];
-    for (const text of texts) expect(text, text).not.toMatch(/e-?mail|courriel|phone|téléphone|numéro|number|contact/i);
+    // A demo note may describe the live site's contact step in its last sentence; nothing else mentions contact.
+    const LIVE = /(On the live site, you'd leave your email or phone here and M would get back to you\.|Sur le vrai site, vous laisseriez ici votre courriel ou votre numéro, et M vous répondrait\.)$/;
+    for (const text of texts) expect(text.replace(LIVE, ''), text).not.toMatch(/e-?mail|courriel|phone|téléphone|numéro|number|contact/i);
+    for (const text of texts) expect(text.replace(LIVE, ''), text).not.toMatch(/please|leave (us )?your|laissez|indiquez|entrez/i);
     expect(noticeText().en).toMatch(/Don't type personal details/);
+  });
+
+  it('writes the demo notes in plain words, each ending with what the live site would do', () => {
+    expect(demoNote('check_failed', 'en', 'Maple')).toBe(
+      "I'm not sure about this one, so I'd pass it to Maple rather than guess. On the live site, you'd leave your email or phone here and Maple would get back to you.",
+    );
+    for (const reason of ['owner_topic', 'not_in_context', 'other_language', 'check_failed'] as const) {
+      const en = demoNote(reason, 'en', 'Maple');
+      const fr = demoNote(reason, 'fr', 'Maple');
+      expect(en).toMatch(/On the live site, you'd leave your email or phone here and Maple would get back to you\.$/);
+      expect(fr).toMatch(/Sur le vrai site, vous laisseriez ici votre courriel ou votre numéro, et Maple vous répondrait\.$/);
+      // No jargon in what the visitor reads.
+      for (const text of [en, fr]) expect(text, text).not.toMatch(/\bDemo:|Démo :|assistant|context|contexte|pages|check|vérifi|model|modèle/i);
+    }
   });
 
   it('guesses French from accents and function words', () => {

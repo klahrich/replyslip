@@ -1,4 +1,4 @@
-import { costMicroUsd, estimateInputTokens, siteLlmConfig, SITE_CONTEXT_MAX_CHARS, SITE_HISTORY_MAX_CHARS, SITE_HISTORY_MAX_MESSAGES, type SiteLlmConfig } from './config';
+import { costMicroUsd, estimateInputTokens, siteFallbackLlmConfig, siteLlmConfig, SITE_CONTEXT_MAX_CHARS, SITE_HISTORY_MAX_CHARS, SITE_HISTORY_MAX_MESSAGES, type SiteLlmConfig } from './config';
 import { findOwnerKeyword, guessLanguage } from './keywords';
 import { callSiteLlm, shouldTryFallback, type SiteLlmTransport } from './llm';
 import { normalizeForMatch } from './normalize';
@@ -149,38 +149,45 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
 
   let result = await callSiteLlm(config, SITE_INSTRUCTIONS, promptInput, deps.transport);
   let model = config.model;
-  let spent = { inputTokens: 0, outputTokens: 0 };
-  // One retry on the fallback model. It gets its own worst-case reservation first, so the two calls together
-  // never go past what was reserved; if the caps refuse it, the message goes to the owner without the call.
-  if (config.fallbackModel && config.fallbackModel !== config.model && shouldTryFallback(result) && result.kind === 'error') {
-    spent = { inputTokens: result.inputTokens, outputTokens: result.outputTokens };
-    const fallbackConfig = { ...config, model: config.fallbackModel };
+  // What the last call costs and what it reserved, at that call's own model prices.
+  let callConfig: SiteLlmConfig = config;
+  let callWorstCase = worstCase;
+  let spent = { inputTokens: 0, outputTokens: 0, costMicroUsd: 0 };
+  // One retry on the fallback model, priced at its own rates. It gets its own worst-case reservation first, so
+  // the two calls together never go past what was reserved; if the caps refuse it, the message goes to the owner
+  // without the call. No fallback prices configured: no fallback (we don't guess what it costs).
+  const fallbackConfig = siteFallbackLlmConfig(config);
+  if (fallbackConfig && shouldTryFallback(result) && result.kind === 'error') {
+    spent = {
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      costMicroUsd: costMicroUsd(result.inputTokens, result.outputTokens, config),
+    };
+    const fallbackWorstCase = costMicroUsd(estimatedIn, fallbackConfig.maxOutputTokens, fallbackConfig);
     if (deps.reserve) {
-      const decision = await deps.reserve(costMicroUsd(estimatedIn, fallbackConfig.maxOutputTokens, fallbackConfig));
-      if (!decision.ok) {
-        return fixedOwner(input, 'llm_fallback_capped', guessed, {
-          llmCalled: true,
-          ...spent,
-          costMicroUsd: costMicroUsd(spent.inputTokens, spent.outputTokens, config),
-          model,
-        });
-      }
+      const decision = await deps.reserve(fallbackWorstCase);
+      if (!decision.ok) return fixedOwner(input, 'llm_fallback_capped', guessed, { llmCalled: true, ...spent, model });
     }
     model = fallbackConfig.model;
+    callConfig = fallbackConfig;
+    callWorstCase = fallbackWorstCase;
     result = await callSiteLlm(fallbackConfig, SITE_INSTRUCTIONS, promptInput, deps.transport);
   }
   if (result.kind === 'timeout') {
-    // Usage is unknown: charge the worst case (plus whatever the failed first call used).
-    const earlier = costMicroUsd(spent.inputTokens, spent.outputTokens, config);
-    return fixedOwner(input, 'llm_timeout', guessed, { llmCalled: true, ...spent, costMicroUsd: earlier + worstCase, model });
+    // Usage is unknown: charge that call's worst case (plus whatever the failed first call used).
+    return fixedOwner(input, 'llm_timeout', guessed, {
+      llmCalled: true,
+      inputTokens: spent.inputTokens,
+      outputTokens: spent.outputTokens,
+      costMicroUsd: spent.costMicroUsd + callWorstCase,
+      model,
+    });
   }
-  const inputTokens = spent.inputTokens + result.inputTokens;
-  const outputTokens = spent.outputTokens + result.outputTokens;
   const usage = {
     llmCalled: true,
-    inputTokens,
-    outputTokens,
-    costMicroUsd: costMicroUsd(inputTokens, outputTokens, config),
+    inputTokens: spent.inputTokens + result.inputTokens,
+    outputTokens: spent.outputTokens + result.outputTokens,
+    costMicroUsd: spent.costMicroUsd + costMicroUsd(result.inputTokens, result.outputTokens, callConfig),
     model,
   };
   if (result.kind === 'error') return fixedOwner(input, 'llm_error', guessed, usage);

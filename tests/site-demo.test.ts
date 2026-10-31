@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { getDb } from '@/db';
 import * as schema from '@/db/schema';
 import {
+  rateEvents,
   siteBusinesses,
   siteConversations,
   siteDemoLinks,
@@ -36,6 +37,8 @@ import {
 } from '@/lib/site-assistant/import';
 import { siteLlmConfig, type SiteLlmConfig } from '@/lib/site-assistant/config';
 import { setSiteLlmTransportForTests, type SiteLlmTransport } from '@/lib/site-assistant/llm';
+import { siteRateKey } from '@/lib/site-assistant/routes';
+import { RATE_LIMITS } from '@/lib/constants';
 import { cappedReply, needsOwnerReply } from '@/lib/site-assistant/replies';
 import { call } from './helpers';
 import { answer, createSiteBusiness, createSiteDemo, FIXTURE_DIR, fakeModel, MAPLE_CONTEXT, NO_MODEL, TEST_LLM_CONFIG } from './site-fixtures';
@@ -54,8 +57,8 @@ afterEach(() => {
   setSiteLlmTransportForTests(null);
 });
 
-function info(token: string, cookie?: string) {
-  return call(demoRoute as never, `${URL_BASE}/api/v1/s/demo/${token}`, { params: { token }, cookie });
+function info(token: string, cookie?: string, headers?: Record<string, string>) {
+  return call(demoRoute as never, `${URL_BASE}/api/v1/s/demo/${token}`, { params: { token }, cookie, headers });
 }
 const conversation = info;
 /** Each call comes from a fresh IP unless `x-forwarded-for` is given, so per-IP counts don't leak between tests. */
@@ -95,8 +98,8 @@ async function ipCount(ip: string, linkId: string, day = usageDay()) {
 async function linkConversations(linkId: string) {
   return getDb().select().from(siteConversations).where(eq(siteConversations.demoLinkId, linkId));
 }
-function shot(token: string, kind: string) {
-  return call(shotRoute as never, `${URL_BASE}/s/demo/${token}/shot/${kind}`, { params: { token, kind } });
+function shot(token: string, kind: string, headers?: Record<string, string>) {
+  return call(shotRoute as never, `${URL_BASE}/s/demo/${token}/shot/${kind}`, { params: { token, kind }, headers });
 }
 
 function expectSiteHeaders(res: Response) {
@@ -196,7 +199,7 @@ describe('messages', () => {
     const { token } = await createSiteDemo();
     const model = fakeModel(() => answer({}));
     setSiteLlmTransportForTests(model.transport);
-    const res = await send(token, { client_message_id: randomUUID(), text: 'What areas do you serve?' });
+    const res = await send(token, { client_message_id: randomUUID(), text: 'What areas do you serve?' }, undefined, { 'x-forwarded-proto': 'https' });
     expect(res.status).toBe(200);
     expectSiteHeaders(res.res);
     expect(Object.keys(res.data)).toEqual(['message']);
@@ -217,6 +220,42 @@ describe('messages', () => {
     // The cookie is scoped to this demo: another demo's load doesn't see this conversation.
     const other = await createSiteDemo();
     expect((await info(other.token, res.cookie!)).data.messages).toEqual([]);
+  });
+
+  it('sets Secure on the visitor cookie only over https or in production', async () => {
+    const { token } = await createSiteDemo();
+    setSiteLlmTransportForTests(fakeModel(() => answer({})).transport);
+    const post = (headers?: Record<string, string>) => send(token, { client_message_id: randomUUID(), text: 'What areas do you serve?' }, undefined, headers);
+    const flags = (res: Awaited<ReturnType<typeof post>>) => res.res.headers.get('set-cookie')!.split('; ').slice(1);
+
+    // Plain http (the test URL is http://localhost): no Secure, so the browser keeps it.
+    const plain = await post();
+    expect(flags(plain)).toEqual(['HttpOnly', 'SameSite=Lax', `Path=/api/v1/s/demo/${token}`, 'Max-Age=2592000']);
+    expect(flags(await post({ 'x-forwarded-proto': 'http' }))).not.toContain('Secure');
+    // https behind the proxy.
+    expect(flags(await post({ 'x-forwarded-proto': 'https' }))).toEqual(['HttpOnly', 'Secure', 'SameSite=Lax', `Path=/api/v1/s/demo/${token}`, 'Max-Age=2592000']);
+    // https in the URL itself.
+    const direct = await call(messagesRoute as never, `https://localhost/api/v1/s/demo/${token}/messages`, {
+      params: { token },
+      body: { client_message_id: randomUUID(), text: 'What areas do you serve?' },
+      headers: { 'x-forwarded-for': `test-${randomUUID()}` },
+    });
+    expect(direct.res.headers.get('set-cookie')).toMatch(/; Secure;/);
+    // Production always sets it, even if the proxy says http.
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(flags(await post({ 'x-forwarded-proto': 'http' }))).toContain('Secure');
+  });
+
+  it('fails before writing a pending request when ENCRYPTION_KEY is missing', async () => {
+    const { token, link } = await createSiteDemo();
+    setSiteLlmTransportForTests(fakeModel(() => answer({})).transport);
+    const demo = await resolveDemo(token);
+    const clientMessageId = randomUUID();
+    vi.stubEnv('ENCRYPTION_KEY', '');
+    await expect(postDemoMessage(demo, randomUUID(), { clientMessageId, text: 'What areas do you serve?' }, { ip: '192.0.2.1' })).rejects.toThrow(/ENCRYPTION_KEY/);
+    vi.unstubAllEnvs();
+    expect(await getDb().select().from(siteMessageRequests).where(eq(siteMessageRequests.demoLinkId, link.id))).toHaveLength(0);
+    expect(await linkConversations(link.id)).toHaveLength(0);
   });
 
   it('sends prior messages of this conversation only', async () => {
@@ -269,7 +308,7 @@ describe('messages', () => {
     const { token } = await createSiteDemo();
     const res = await send(token, { client_message_id: randomUUID(), text: 'How much for a patio?' });
     expect(res.data.message).toMatchObject({ status: 'needs_owner', body: needsOwnerReply('en'), handoff_reason: 'owner_topic' });
-    expect(res.data.message.demo_note).toMatch(/always go to the owner/);
+    expect(res.data.message.demo_note).toMatch(/always go straight to /);
   });
 
   it('rejects bad bodies, long text and cross-site posts', async () => {
@@ -431,7 +470,13 @@ describe('messages', () => {
 });
 
 describe('fallback model', () => {
-  const config = { ...TEST_LLM_CONFIG, fallbackModel: 'gpt-6.1-terra' };
+  // Test prices for the fallback, deliberately different from the primary's 0.1 / 0.5.
+  const config = { ...TEST_LLM_CONFIG, fallbackModel: 'gpt-6.1-terra', fallbackPriceInPerM: 0.3, fallbackPriceOutPerM: 1.5 };
+  function stubFallbackEnv() {
+    vi.stubEnv('SITE_LLM_FALLBACK_MODEL', 'gpt-6.1-terra');
+    vi.stubEnv('SITE_LLM_FALLBACK_PRICE_IN_PER_M', '0.3');
+    vi.stubEnv('SITE_LLM_FALLBACK_PRICE_OUT_PER_M', '1.5');
+  }
   const ask = (transport: SiteLlmTransport, cfg: SiteLlmConfig = config) =>
     answerVisitorMessage(
       { businessName: 'Maple Ridge Landscaping', contextMd: MAPLE_CONTEXT, history: [], visitorMessage: 'What areas do you serve?' },
@@ -488,7 +533,7 @@ describe('fallback model', () => {
   });
 
   it('goes to the owner without the fallback when the business cap is nearly used, and never passes the cap', async () => {
-    vi.stubEnv('SITE_LLM_FALLBACK_MODEL', 'gpt-6.1-terra');
+    stubFallbackEnv();
     const question = 'What areas do you serve?';
     const { token, business } = await createSiteDemo({ dailyCostCapMicroUsd: 10_000_000 });
     // The worst case the route will reserve for one call on this business and question.
@@ -519,8 +564,30 @@ describe('fallback model', () => {
     expect(usage!.messages).toBe(1);
   });
 
+  it('prices the fallback at its own rates, for the reservation and the charge', async () => {
+    const reserves: number[] = [];
+    const model = fakeModel((_req, n) => (n === 1 ? notFound : answer({})));
+    const result = await answerVisitorMessage(
+      { businessName: 'Maple Ridge Landscaping', contextMd: MAPLE_CONTEXT, history: [], visitorMessage: 'What areas do you serve?' },
+      { transport: model.transport, config, reserve: async (w) => (reserves.push(w), { ok: true }) },
+    );
+    expect(result.status).toBe('answered');
+    // Same token estimate, three times the price on both sides here.
+    expect(reserves[1]).toBeGreaterThanOrEqual(reserves[0]! * 3 - 1);
+    expect(reserves[1]).toBeLessThanOrEqual(reserves[0]! * 3 + 1);
+    // The fake reports 1000 in / 100 out on the answering call: 1000 x 0.3 + 100 x 1.5 = 450, not 150 at luna's rates.
+    expect(result.costMicroUsd).toBe(450);
+  });
+
+  it('makes no fallback call when the fallback has no prices configured', async () => {
+    const model = fakeModel((_req, n) => (n === 1 ? notFound : answer({})));
+    const result = await ask(model.transport, { ...config, fallbackPriceInPerM: null });
+    expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'llm_error' });
+    expect(model.calls).toHaveLength(1);
+  });
+
   it('runs inside the one reservation and caps through the route', async () => {
-    vi.stubEnv('SITE_LLM_FALLBACK_MODEL', 'gpt-6.1-terra');
+    stubFallbackEnv();
     const { token, business } = await createSiteDemo();
     const model = fakeModel((_req, n) => (n === 1 ? notFound : answer({})));
     setSiteLlmTransportForTests(model.transport);
@@ -534,6 +601,41 @@ describe('fallback model', () => {
 });
 
 describe('screenshots', () => {
+  it('rate-limits screenshots in their own bucket, never against page loads or messages', async () => {
+    const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#336699' } }).png().toBuffer();
+    const { token } = await createSiteDemo({ desktopShot: png, desktopShotType: 'image/png', mobileShot: png, mobileShotType: 'image/png' });
+    const ip = { 'x-forwarded-for': `198.51.100.${Math.floor(Math.random() * 250)}` };
+    for (let i = 0; i < 20; i += 1) expect((await shot(token, i % 2 ? 'mobile' : 'desktop', ip)).status).toBe(200);
+    const kinds = await getDb().select({ kind: rateEvents.kind }).from(rateEvents);
+    expect(new Set(kinds.map((k) => k.kind))).toEqual(new Set(['siteShot']));
+
+    // Use up this IP's whole page-load budget: screenshots still load, the page itself is limited.
+    const key = siteRateKey(new Request('http://localhost/', { headers: ip }));
+    await getDb().insert(rateEvents).values(Array.from({ length: RATE_LIMITS.siteEntry.ip }, () => ({ kind: 'siteEntry', ip: key })));
+    expect((await info(token, undefined, ip)).status).toBe(429);
+    expect((await shot(token, 'desktop', ip)).status).toBe(200);
+    expect(RATE_LIMITS.siteShot.ip).toBeGreaterThanOrEqual(1_000);
+  });
+
+  it('stores only a keyed hash of the IP in rate_events, never the raw IP', async () => {
+    const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#336699' } }).png().toBuffer();
+    const { token } = await createSiteDemo({ desktopShot: png, desktopShotType: 'image/png' });
+    setSiteLlmTransportForTests(fakeModel(() => answer({})).transport);
+    const raw = '203.0.113.77';
+    const ip = { 'x-forwarded-for': `${raw}, 10.0.0.1` };
+    expect((await info(token, undefined, ip)).status).toBe(200);
+    expect((await shot(token, 'desktop', ip)).status).toBe(200);
+    expect((await send(token, { client_message_id: randomUUID(), text: 'What areas do you serve?' }, undefined, ip)).status).toBe(200);
+    const rows = await getDb().select().from(rateEvents);
+    expect(rows.map((r) => r.kind).sort()).toEqual(['siteEntry', 'siteMessage', 'siteShot']);
+    for (const row of rows) {
+      expect(row.ip).toMatch(/^[0-9a-f]{64}$/);
+      expect(row.ip).not.toContain(raw);
+    }
+    expect(new Set(rows.map((r) => r.ip)).size).toBe(1);
+    expect(await getDb().select().from(rateEvents).where(sql`${rateEvents.ip} like ${'%' + raw + '%'}`)).toHaveLength(0);
+  });
+
   it('serves the stored image, private and noindex, and 404s for bad, revoked or expired tokens', async () => {
     const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#336699' } }).png().toBuffer();
     const { token, link } = await createSiteDemo({ desktopShot: png, desktopShotType: 'image/png' });

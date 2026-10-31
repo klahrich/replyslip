@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { keyedHash } from '@/lib/crypto';
 import { HttpError } from '@/lib/errors';
 import { json, parseBody, readCookie, readJson } from '@/lib/http';
-import { assertSameOrigin, clientIp } from '@/lib/origin';
+import { assertSameOrigin, clientIp, isHttpsRequest } from '@/lib/origin';
 import { consumeRateLimit } from '@/lib/rate-limit';
 import { SITE_MESSAGE_MAX_CHARS } from './config';
 import {
@@ -20,8 +21,13 @@ import { handleSite } from './http';
 
 type TokenContext = { params: Promise<{ token: string }> };
 
-async function limit(req: Request, kind: 'siteEntry' | 'siteMessage'): Promise<void> {
-  const rate = await consumeRateLimit({ kind, ip: clientIp(req) });
+/** The burst limits store a keyed hash of the IP in rate_events, never the raw IP. */
+export function siteRateKey(req: Request): string {
+  return keyedHash('site-rate', clientIp(req));
+}
+
+async function limit(req: Request, kind: 'siteEntry' | 'siteShot' | 'siteMessage'): Promise<void> {
+  const rate = await consumeRateLimit({ kind, ip: siteRateKey(req) });
   if (rate.limited) {
     throw new HttpError(429, 'rate_limited', 'Too many requests. Try again later.', {
       retry_after_seconds: rate.retryAfterSeconds,
@@ -90,7 +96,7 @@ export function postDemoMessageRoute(req: Request, context: TokenContext, deps: 
     );
     // A new visitor gets the cookie only when the conversation is theirs (not on a replay of someone else's message).
     const headers: HeadersInit =
-      existing || !result.ownsConversation ? {} : { 'set-cookie': visitorCookieHeader(token, visitor) };
+      existing || !result.ownsConversation ? {} : { 'set-cookie': visitorCookieHeader(token, visitor, isHttpsRequest(req) || process.env.NODE_ENV === 'production') };
     return json({ message: result.message }, 200, headers);
   });
 }
@@ -100,7 +106,7 @@ export function getDemoShotRoute(req: Request, context: { params: Promise<{ toke
   return handleSite(async () => {
     const { token, kind } = await context.params;
     if (kind !== 'desktop' && kind !== 'mobile') throw new HttpError(404, 'not_found', 'Not found.');
-    await limit(req, 'siteEntry');
+    await limit(req, 'siteShot');
     const demo = await resolveDemo(token, { expiredAs404: true });
     const shot = await demoShot(demo, kind);
     if (!shot) throw new HttpError(404, 'not_found', 'Not found.');

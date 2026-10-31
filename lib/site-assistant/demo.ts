@@ -116,11 +116,15 @@ export function visitorCookiePath(token: string): string {
   return `/api/v1/s/demo/${token}`;
 }
 
-export function visitorCookieHeader(token: string, value: string): string {
+/**
+ * `secure` adds the Secure flag. The route sets it for https requests and always in production; without it a
+ * browser on plain http (a LAN test box, say) would drop the cookie and every message would start a new visitor.
+ */
+export function visitorCookieHeader(token: string, value: string, secure = true): string {
   return [
     `${VISITOR_COOKIE}=${value}`,
     'HttpOnly',
-    'Secure',
+    ...(secure ? ['Secure'] : []),
     'SameSite=Lax',
     `Path=${visitorCookiePath(token)}`,
     `Max-Age=${VISITOR_COOKIE_MAX_AGE}`,
@@ -455,6 +459,8 @@ export async function postDemoMessage(
   const text = suggestion ? suggestion.question : input.text!;
   const requestHash = sha256(suggestion ? `tap\u0000${suggestion.id}` : `text\u0000${text}`);
 
+  // Keyed hashes first: a missing ENCRYPTION_KEY fails here, before any pending request row is written.
+  const ipKeys = ipKeysFor(deps.ip ?? 'unknown', demo.link.id);
   const claim = await claimRequest(demo, visitorValue, input.clientMessageId, requestHash);
   if (claim.kind === 'replay') return { ...claim.reply, ownsConversation: claim.ownsConversation };
   const conversation = claim.conversation;
@@ -467,7 +473,6 @@ export async function postDemoMessage(
   const capDb = deps.db ?? db;
   const day = usageDay();
   const limits = capLimitsFor(business);
-  const ipKeys = ipKeysFor(deps.ip ?? 'unknown', demo.link.id);
   let counted = false;
   let reserved = 0;
   let capped = false;

@@ -41,28 +41,34 @@ export function cappedReply(language: ReplyLanguage): string {
     : 'This demo has reached today’s message limit. Come back tomorrow.';
 }
 
-/** Demo-only note under a needs_owner reply: why it went to the owner, and what the live site would do. */
+/**
+ * Demo-only note under a needs_owner reply, in plain words for the visitor: why it went to the business, and
+ * that on the live site they would leave an email or phone and the owner would answer. The demo itself never
+ * asks for contact details.
+ */
 export function demoNote(reason: HandoffReason, language: ReplyLanguage, name: string): string {
   if (language === 'fr') {
+    const live = `Sur le vrai site, vous laisseriez ici votre courriel ou votre numéro, et ${name} vous répondrait.`;
     switch (reason) {
       case 'owner_topic':
-        return `Démo : les questions de prix, de disponibilités, de réservations et de plaintes vont toujours au propriétaire. Sur le vrai site de ${name}, la question irait à l’équipe.`;
+        return `Les questions de prix, de disponibilités, de réservations et de plaintes vont directement à ${name}. ${live}`;
       case 'not_in_context':
-        return `Démo : les pages publiques de ${name} ne répondent pas à cette question, alors l’assistant ne devine pas. Sur le vrai site, la question irait à l’équipe.`;
+        return `Je n’ai pas trouvé ça sur le site de ${name}, alors je préfère transmettre la question plutôt que de deviner. ${live}`;
       case 'other_language':
-        return `Démo : l’assistant répond en français et en anglais. Les autres langues vont à l’équipe de ${name}.`;
+        return `Je peux discuter en français et en anglais. Pour les autres langues, je transmettrais votre question à ${name}. ${live}`;
       case 'check_failed':
-        return `Démo : l’assistant n’a pas pu vérifier sa réponse dans les pages de ${name}, alors il ne l’affiche pas. Sur le vrai site, la question irait à l’équipe.`;
+        return `Je n’ai pas de réponse sûre à celle-ci, alors je préfère la transmettre à ${name} plutôt que de deviner. ${live}`;
     }
   }
+  const live = `On the live site, you'd leave your email or phone here and ${name} would get back to you.`;
   switch (reason) {
     case 'owner_topic':
-      return `Demo: questions about prices, availability, bookings and complaints always go to the owner. On ${name}'s live site, the question would go to the team.`;
+      return `Prices, availability, bookings and complaints always go straight to ${name}. ${live}`;
     case 'not_in_context':
-      return `Demo: ${name}'s public pages don't answer this, so the assistant doesn't guess. On the live site, the question would go to the team.`;
+      return `I couldn't find this on ${name}'s website, so I'd pass it to ${name} rather than guess. ${live}`;
     case 'other_language':
-      return `Demo: the assistant answers in English and French. Other languages go to ${name}'s team.`;
+      return `I can chat in English and French. For other languages, I'd pass your question to ${name}. ${live}`;
     case 'check_failed':
-      return `Demo: the assistant couldn't check its answer against ${name}'s pages, so it doesn't show it. On the live site, the question would go to the team.`;
+      return `I'm not sure about this one, so I'd pass it to ${name} rather than guess. ${live}`;
   }
 }

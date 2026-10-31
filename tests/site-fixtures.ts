@@ -19,6 +19,8 @@ export const TEST_LLM_CONFIG: SiteLlmConfig = {
   timeoutMs: 2_000,
   priceInPerM: 0.1,
   priceOutPerM: 0.5,
+  fallbackPriceInPerM: null,
+  fallbackPriceOutPerM: null,
 };
 
 /** Fails the test if anything reaches for a real model. */
