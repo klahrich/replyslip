@@ -57,7 +57,7 @@ function DeadLink({ code, branding = null }: { code: string; branding?: Branding
 
 /**
  * Personal links work once. Someone who already joined with one gets back in with an email code and lands on
- * their businesses list (/c); someone still signed in just gets a way there.
+ * their business (or their businesses list when they have several); someone still signed in just gets a way there.
  */
 function UsedUpLink({ title, branding }: { title: string; branding: Branding | null }) {
   const business = branding?.display_name ?? 'this business';
