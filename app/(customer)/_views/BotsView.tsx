@@ -1,32 +1,58 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { listBots } from '../_lib/api';
 import { brandStyle } from '../_lib/brand';
 import type { BotsResponse } from '../_lib/types';
+import { EmailSignIn, SignInCard } from '../_components/EmailSignIn';
 import { LogoTile, PlainFrame } from '../_components/Frame';
-import { Notice } from '../_components/Notice';
-import { Loading } from './common';
+import { ConnectError, Loading, loadFailure } from './common';
 
 const shareLabel = { approved: '', pending: 'Waiting for approval', revoked: 'Access turned off' } as const;
 
 export function BotsView({ signedOut }: { signedOut: boolean }) {
+  const router = useRouter();
   const [data, setData] = useState<BotsResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      setData(await listBots());
+    } catch (e) {
+      // 401 is SessionGate's (it shows the sign-in form); a failed fetch or 5xx gets a retry.
+      if (loadFailure(e) === 'connect') setFailed(true);
+    }
+  }, []);
   useEffect(() => {
-    if (!signedOut) listBots().then(setData, () => setData({ bots: [] }));
-  }, [signedOut]);
+    if (signedOut) return;
+    const t = setTimeout(load, 0);
+    return () => clearTimeout(t);
+  }, [signedOut, load]);
 
   if (signedOut) {
     return (
       <PlainFrame>
-        <Notice title="You're signed out">
-          <p>To come back, open the link the business sent you.</p>
-        </Notice>
+        <SignInCard>
+          <EmailSignIn
+            title="You're signed out"
+            intro="To come back, enter the email you used with this business. We'll send you a 6-digit code."
+            onSignedIn={() => router.replace('/c')}
+          />
+        </SignInCard>
       </PlainFrame>
     );
   }
+  if (failed)
+    return (
+      <ConnectError
+        onRetry={() => {
+          setFailed(false);
+          void load();
+        }}
+      />
+    );
   if (!data) return <Loading />;
   return (
     <PlainFrame>

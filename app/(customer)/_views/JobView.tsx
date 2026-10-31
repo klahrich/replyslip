@@ -5,16 +5,16 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Eye, Hourglass } from 'lucide-react';
 import { getBot } from '../_lib/api';
-import { ApiError, type BotResponse } from '../_lib/types';
+import type { BotResponse } from '../_lib/types';
 import { BrandFrame } from '../_components/Frame';
 import { JobForm } from '../_components/JobForm';
 import { usePoll } from '../_components/usePoll';
-import { Account, Loading, NotFound } from './common';
+import { Account, ConnectError, Loading, NotFound, loadFailure, type LoadFailure } from './common';
 
 export function JobView({ agentId, offer }: { agentId: string; offer: string }) {
   const router = useRouter();
   const [data, setData] = useState<BotResponse | null>(null);
-  const [missing, setMissing] = useState(false);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -22,7 +22,7 @@ export function JobView({ agentId, offer }: { agentId: string; offer: string }) 
       if (d.access === 'revoked') router.replace(`/c/${agentId}`);
       setData(d);
     } catch (e) {
-      if (e instanceof ApiError) setMissing(true);
+      setFailure(loadFailure(e));
     }
   }, [agentId, router]);
 
@@ -33,7 +33,17 @@ export function JobView({ agentId, offer }: { agentId: string; offer: string }) 
   // Section 17.1: a pending customer sees the form disabled; it turns on by itself once approved.
   usePoll(load, () => 30000, data?.access === 'pending');
 
-  if (missing) return <NotFound />;
+  if (failure === 'missing') return <NotFound />;
+  // A failed poll keeps the form on screen; only a first load that fails shows the retry screen.
+  if (failure === 'connect' && !data)
+    return (
+      <ConnectError
+        onRetry={() => {
+          setFailure(null);
+          void load();
+        }}
+      />
+    );
   if (!data) return <Loading />;
   const job = data.jobs.find((j) => j.name === offer);
   if (!job) return <NotFound message="This job isn't available anymore." />;

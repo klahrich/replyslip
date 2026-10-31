@@ -79,12 +79,15 @@ export function JobForm({
   const [formError, setFormError] = useState<{ title: string; body: string } | null>(null);
   const notesShown = !schema || job.notes_enabled;
   const notesRequired = !schema;
-  const { isSubmitting } = form.formState;
+  // Read here so react-hook-form tracks them; submit uses them to leave untouched optional switches out.
+  const { isSubmitting, dirtyFields, touchedFields } = form.formState;
 
   async function submit(values: Values) {
     setFormError(null);
     const input: InputObject = {};
     for (const [k, f] of fields) {
+      // An optional yes/no the customer never touched is left out, not sent as false (spec 7: send only what they gave).
+      if (f.type === 'boolean' && !required.has(k) && !dirtyFields[k] && !touchedFields[k]) continue;
       const v = toJson(f, values[k]);
       if (v !== undefined) input[k] = v;
     }

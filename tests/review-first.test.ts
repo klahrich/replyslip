@@ -397,6 +397,24 @@ describe('answer checkpoint', () => {
     expect(done.payload.task.status).toBe('awaiting_release');
   });
 
+  it('does not show an earlier released question once the request is declined', async () => {
+    const o = await owner();
+    await reviewFirst(o);
+    const c = await approvedCustomer(o);
+    const task = await approvedRequest(o, c);
+    await mcpTool(o.agentKey, 'ask', { id: task.id, question: 'Which metal?' });
+    const releasedQ = (await act(o, task.id, 'release')).data.review;
+    expect(releasedQ.released_at).not.toBeNull();
+    expect((await answerRequest(c, task.id, 'Gold')).status).toBe(200);
+    // Reopened after the answer: nothing released is current.
+    expect((await getReview(o, task.id)).data.review).toMatchObject({ question: null, released_at: null });
+    await mcpTool(o.agentKey, 'complete_task', { id: task.id, result: { headline: 'CANARY-DECLINED' } });
+    const declined = (await act(o, task.id, 'decline')).data.review;
+    expect(declined).toMatchObject({ status: 'failed', result: null, question: null, fail_message: null, released_at: null });
+    expect((await getReview(o, task.id)).data.review).toMatchObject({ fail_message: null, released_at: null });
+    expect((await getRequest(c, task.id)).data.request.fail_code).toBe('declined_by_owner');
+  });
+
   it('holds a bot failure and releases it as bot_failed', async () => {
     const o = await owner();
     await reviewFirst(o);
