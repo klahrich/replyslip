@@ -26,6 +26,8 @@ type Item = {
   failed?: boolean;
   /** New in this visit: animate in. Restored rows don't. */
   fresh?: boolean;
+  /** Visitor rows from a suggestion tap: the suggestion, so Try again records the same tap. */
+  tapId?: string;
   /** needs_owner only: the server's demo note (why it went to the owner). */
   note?: string | null;
 };
@@ -143,14 +145,23 @@ export function DemoChat({
     // The stored answer is already checked: show it at once, record the tap in the background (no model call).
     setItems((xs) => [
       ...xs,
-      { key: clientId, role: 'visitor', body: sq.question, status: null, fresh: true },
+      { key: clientId, role: 'visitor', body: sq.question, status: null, fresh: true, tapId: sq.id },
       { key: `${clientId}-a`, role: 'assistant', body: sq.answer, status: 'answered', fresh: true },
     ]);
-    demoApi.send(token, { client_message_id: clientId, suggested_question_id: sq.id }).catch((e: unknown) => {
-      if (!(e instanceof DemoApiError)) return;
-      if (e.status === 410) onGone('expired');
-      // Only a dead link ends the page; a suggestion withdrawn since the page loaded keeps the answer on screen.
-      else if (e.status === 404 && e.code !== 'suggested_question_not_found') onGone('dead');
+    recordTap(clientId, sq.id);
+  }
+
+  function recordTap(clientId: string, tapId: string) {
+    setInline(null);
+    setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: false } : x)));
+    demoApi.send(token, { client_message_id: clientId, suggested_question_id: tapId }).catch((e: unknown) => {
+      const err = e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', '');
+      if (err.status === 410) return onGone('expired');
+      // A suggestion withdrawn since the page loaded keeps its answer on screen; any other 404 is a dead link.
+      if (err.status === 404) return err.code === 'suggested_question_not_found' ? undefined : onGone('dead');
+      // Not recorded: the answer stays, the question gets the same Not sent / Try again as a typed message.
+      setInline('busy');
+      setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: true } : x)));
     });
   }
 
@@ -197,7 +208,7 @@ export function DemoChat({
                   <button
                     type="button"
                     disabled={thinking}
-                    onClick={() => void post(it.key, it.body)}
+                    onClick={() => (it.tapId ? recordTap(it.key, it.tapId) : void post(it.key, it.body))}
                     className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 font-medium underline underline-offset-4 disabled:opacity-50"
                   >
                     <RotateCw className="size-3.5" aria-hidden />
