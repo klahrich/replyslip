@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { Db } from '@/db';
-import { siteGlobalDailyCostCapMicroUsd } from './config';
+import { keyedHash } from '@/lib/crypto';
+import { siteGlobalDailyCostCapMicroUsd, siteIpDailyLimits } from './config';
 import type { CapDecision } from './answer';
 
 /** UTC day key for the usage tables. Reserve and settle use the same key even across midnight. */
@@ -10,6 +11,8 @@ export function usageDay(now = new Date()): string {
 
 export type CapLimits = {
   visitorDailyMessages: number;
+  ipLinkDailyMessages: number;
+  ipAllDailyMessages: number;
   businessDailyMessages: number;
   businessDailyCostMicroUsd: number;
   globalDailyCostMicroUsd: number;
@@ -20,12 +23,22 @@ export function capLimitsFor(business: {
   dailyMessageCap: number;
   dailyCostCapMicroUsd: number;
 }): CapLimits {
+  const ip = siteIpDailyLimits();
   return {
     visitorDailyMessages: business.visitorDailyMessageCap,
+    ipLinkDailyMessages: ip.perLink,
+    ipAllDailyMessages: ip.all,
     businessDailyMessages: business.dailyMessageCap,
     businessDailyCostMicroUsd: business.dailyCostCapMicroUsd,
     globalDailyCostMicroUsd: siteGlobalDailyCostCapMicroUsd(),
   };
+}
+
+/** HMAC keys for the per-IP counts: this IP on this demo link, and this IP on every demo link. */
+export type IpKeys = { link: string; all: string };
+
+export function ipKeysFor(ip: string, demoLinkId: string): IpKeys {
+  return { link: keyedHash('site-ip-link', `${demoLinkId}|${ip}`), all: keyedHash('site-ip-all', ip) };
 }
 
 class CapHit extends Error {
@@ -47,6 +60,8 @@ export async function reserveSiteUsage(
   input: {
     businessId: string;
     conversationId: string;
+    /** Required when messages is 1. */
+    ipKeys?: IpKeys;
     day: string;
     messages: 0 | 1;
     costMicroUsd: number;
@@ -54,6 +69,7 @@ export async function reserveSiteUsage(
   },
 ): Promise<CapDecision> {
   const { businessId, conversationId, day, messages, limits } = input;
+  if (messages > 0 && !input.ipKeys) throw new Error('reserveSiteUsage: ipKeys are required to count a message');
   const cost = Math.max(0, Math.ceil(input.costMicroUsd));
   try {
     await db.transaction(async (tx) => {
@@ -66,6 +82,21 @@ export async function reserveSiteUsage(
           where site_visitor_usage_daily.messages + 1 <= ${limits.visitorDailyMessages}
           returning messages`);
         if (visitor.length === 0) throw new CapHit('cap_visitor');
+
+        // Per IP, so a cleared cookie doesn't reset the count: this link first, then all links.
+        for (const [key, max, reason] of [
+          [input.ipKeys!.link, limits.ipLinkDailyMessages, 'cap_ip_link'],
+          [input.ipKeys!.all, limits.ipAllDailyMessages, 'cap_ip_all'],
+        ] as const) {
+          if (max < 1) throw new CapHit(reason);
+          const ipRow = await tx.execute(sql`
+            insert into site_ip_usage_daily (key_hash, day, messages)
+            values (${key}, ${day}, 1)
+            on conflict (key_hash, day) do update set messages = site_ip_usage_daily.messages + 1
+            where site_ip_usage_daily.messages + 1 <= ${max}
+            returning messages`);
+          if (ipRow.length === 0) throw new CapHit(reason);
+        }
       }
 
       // Per-business caps before the global one.
@@ -144,4 +175,58 @@ export async function settleSiteUsage(
         cost_micro_usd = site_usage_global_daily.cost_micro_usd + ${actual},
         llm_calls = site_usage_global_daily.llm_calls + ${calls}`);
   });
+}
+
+/**
+ * Undoes a reservation that never reached settle: a message the cost cap refused after it was counted, or a
+ * request that threw mid-reply. `messages: 1` gives back the visitor, IP and business message counts;
+ * `reservedMicroUsd` gives back in-flight cost on the business and global rows.
+ */
+export async function releaseSiteUsage(
+  db: Db,
+  input: {
+    businessId: string;
+    conversationId: string;
+    ipKeys: IpKeys;
+    day: string;
+    messages: 0 | 1;
+    reservedMicroUsd: number;
+  },
+): Promise<void> {
+  const reserved = Math.max(0, Math.ceil(input.reservedMicroUsd));
+  const messages = input.messages;
+  if (messages === 0 && reserved === 0) return;
+  await db.transaction(async (tx) => {
+    if (messages > 0) {
+      await tx.execute(sql`
+        update site_visitor_usage_daily set messages = greatest(0, messages - 1)
+        where conversation_id = ${input.conversationId} and day = ${input.day}`);
+      await tx.execute(sql`
+        update site_ip_usage_daily set messages = greatest(0, messages - 1)
+        where key_hash in (${input.ipKeys.link}, ${input.ipKeys.all}) and day = ${input.day}`);
+    }
+    await tx.execute(sql`
+      update site_usage_daily set
+        messages = greatest(0, messages - ${messages}),
+        reserved_micro_usd = greatest(0, reserved_micro_usd - ${reserved})
+      where business_id = ${input.businessId} and day = ${input.day}`);
+    if (reserved > 0) {
+      await tx.execute(sql`
+        update site_usage_global_daily set reserved_micro_usd = greatest(0, reserved_micro_usd - ${reserved})
+        where day = ${input.day}`);
+    }
+  });
+}
+
+/** Seconds until the next UTC midnight, when the daily counts start over (at least 1). */
+export function secondsUntilUtcMidnight(now = new Date()): number {
+  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.max(1, Math.ceil((next - now.getTime()) / 1000));
+}
+
+/** Per-IP rows are only needed for today; anything older than `keepDays` days goes. */
+export async function deleteOldIpUsage(db: Db, keepDays = 2): Promise<number> {
+  const rows = await db.execute(sql`
+    delete from site_ip_usage_daily where day < (now() at time zone 'utc')::date - ${keepDays}::int returning day`);
+  return rows.length;
 }

@@ -19,6 +19,8 @@ export type DecidedBy =
   | 'llm_timeout'
   | 'llm_unconfigured'
   | 'cap_visitor'
+  | 'cap_ip_link'
+  | 'cap_ip_all'
   | 'cap_business_messages'
   | 'cap_business_cost'
   | 'cap_global_cost';

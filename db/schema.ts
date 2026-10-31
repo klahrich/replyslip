@@ -839,6 +839,65 @@ export const siteVisitorUsageDaily = pgTable(
   ],
 );
 
+/**
+ * One row per (demo link, client_message_id): the idempotency key for POST /api/v1/s/demo/:token/messages. The
+ * primary key makes a second request with the same id, with or without the cookie, wait for or replay the first
+ * instead of making a second model call. `failed` (or a `pending` row older than the function timeout) can be
+ * taken over by a retry. `request_hash` stops one id being reused for a different question.
+ */
+export const siteMessageRequests = pgTable(
+  'site_message_requests',
+  {
+    demoLinkId: uuid('demo_link_id').notNull(),
+    clientMessageId: uuid('client_message_id').notNull(),
+    businessId: uuid('business_id').notNull(),
+    conversationId: uuid('conversation_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    state: text('state').notNull().default('pending'),
+    visitorMessageId: uuid('visitor_message_id'),
+    assistantMessageId: uuid('assistant_message_id'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.demoLinkId, table.clientMessageId] }),
+    foreignKey({
+      name: 'site_message_requests_demo_link_fk',
+      columns: [table.demoLinkId, table.businessId],
+      foreignColumns: [siteDemoLinks.id, siteDemoLinks.businessId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'site_message_requests_conversation_fk',
+      columns: [table.conversationId, table.businessId],
+      foreignColumns: [siteConversations.id, siteConversations.businessId],
+    }).onDelete('cascade'),
+    index('site_message_requests_conversation_idx').on(table.conversationId),
+    check('site_message_requests_state_check', sql`${table.state} in ('pending', 'done', 'failed')`),
+    check(
+      'site_message_requests_done_check',
+      sql`${table.state} <> 'done' or (${table.visitorMessageId} is not null and ${table.assistantMessageId} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * Per-IP daily message counts, so clearing the visitor cookie doesn't reset the limit. `key_hash` is an HMAC
+ * (ENCRYPTION_KEY) of the IP with the demo link id, or with "*" for the all-links count. The raw IP is never stored.
+ */
+export const siteIpUsageDaily = pgTable(
+  'site_ip_usage_daily',
+  {
+    keyHash: text('key_hash').notNull(),
+    day: date('day', { mode: 'string' }).notNull(),
+    messages: integer('messages').notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.keyHash, table.day] }),
+    index('site_ip_usage_daily_day_idx').on(table.day),
+    check('site_ip_usage_daily_nonneg_check', sql`${table.messages} >= 0`),
+  ],
+);
+
 export type AgentRow = typeof agents.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;

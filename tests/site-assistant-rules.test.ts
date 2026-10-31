@@ -48,11 +48,11 @@ describe('keyword pre-check (spec 4.3)', () => {
   });
 
   it('keeps "combien" and "garantie" for price and complaint wording only', () => {
-    // RedBot's suggested questions "Combien de temps dure…" and "Offrez-vous une garantie…" are plain questions.
-    for (const text of ['Combien pour encadrer une affiche?', 'Combien est-ce pour un patio?', "J'ai une réclamation de garantie"]) {
+    // Suggested questions like "Combien de temps faut-il…" and "Offrez-vous une garantie…" are plain questions.
+    for (const text of ['Combien pour une petite job?', 'Combien est-ce pour un patio?', "J'ai une réclamation de garantie"]) {
       expect(findOwnerKeyword(text), text).not.toBeNull();
     }
-    for (const text of ['Combien de temps dure une rénovation de salle de bain?', 'Offrez-vous une garantie sur vos travaux?', 'Combien de couches appliquez-vous?']) {
+    for (const text of ['Combien de temps faut-il pour les travaux?', "Offrez-vous une garantie sur la main-d'œuvre?", 'Combien de visites faut-il?']) {
       expect(findOwnerKeyword(text), text).toBeNull();
     }
   });
@@ -329,8 +329,8 @@ describe('fixture questions: keyword pre-check owner share', () => {
     expect(owner / total).toBeLessThan(0.6);
   });
 
-  it("on RedBot's 10 businesses", async () => {
-    const { total, owner } = await measure('redbot-questions.json');
+  it('on ten more sample businesses', async () => {
+    const { total, owner } = await measure('more-questions.json');
     expect(total).toBe(100);
     expect(owner / total).toBeGreaterThan(0.2);
     expect(owner / total).toBeLessThan(0.6);

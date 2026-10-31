@@ -3,6 +3,8 @@
  * The API key is only ever read server-side and never logged.
  */
 export const SITE_DEFAULT_MODEL = 'gpt-6-luna';
+/** Tried once when the primary model is not found or returns a 5xx. SITE_LLM_FALLBACK_MODEL=off disables it. */
+export const SITE_DEFAULT_FALLBACK_MODEL = 'gpt-6.1-terra';
 /** gpt-6-luna list prices, USD per million tokens. Override with SITE_LLM_PRICE_IN_PER_M / _OUT_PER_M. */
 export const SITE_DEFAULT_PRICE_IN_PER_M = 0.1;
 export const SITE_DEFAULT_PRICE_OUT_PER_M = 0.5;
@@ -11,6 +13,13 @@ export const SITE_DEFAULT_TIMEOUT_MS = 20_000;
 /** Lowest effort on current OpenAI reasoning models. Set SITE_LLM_REASONING_EFFORT=off to omit the field. */
 export const SITE_DEFAULT_REASONING_EFFORT = 'none';
 export const SITE_DEFAULT_GLOBAL_DAILY_COST_CAP_USD = 5;
+/**
+ * Typed messages per IP per UTC day: on one demo link, and across all demo links. These sit beside the per-cookie
+ * visitor cap so clearing cookies doesn't reset the limit. Override with SITE_IP_DAILY_MESSAGES_PER_LINK and
+ * SITE_IP_DAILY_MESSAGES.
+ */
+export const SITE_DEFAULT_IP_DAILY_MESSAGES_PER_LINK = 20;
+export const SITE_DEFAULT_IP_DAILY_MESSAGES = 40;
 
 /** Visitor question limit, in characters. */
 export const SITE_MESSAGE_MAX_CHARS = 1_000;
@@ -33,6 +42,8 @@ function numberEnv(name: string, fallback: number): number {
 export type SiteLlmConfig = {
   apiKey: string | null;
   model: string;
+  /** null: no fallback. */
+  fallbackModel: string | null;
   baseUrl: string;
   maxOutputTokens: number;
   reasoningEffort: string | null;
@@ -41,11 +52,17 @@ export type SiteLlmConfig = {
   priceOutPerM: number;
 };
 
+function fallbackModelEnv(): string | null {
+  const raw = process.env.SITE_LLM_FALLBACK_MODEL?.trim() || SITE_DEFAULT_FALLBACK_MODEL;
+  return raw === 'off' ? null : raw;
+}
+
 export function siteLlmConfig(): SiteLlmConfig {
   const effort = process.env.SITE_LLM_REASONING_EFFORT?.trim() || SITE_DEFAULT_REASONING_EFFORT;
   return {
     apiKey: process.env.SITE_LLM_API_KEY?.trim() || null,
     model: process.env.SITE_LLM_MODEL?.trim() || SITE_DEFAULT_MODEL,
+    fallbackModel: fallbackModelEnv(),
     baseUrl: (process.env.SITE_LLM_BASE_URL?.trim() || 'https://api.openai.com/v1').replace(/\/+$/, ''),
     maxOutputTokens: Math.max(1, Math.floor(numberEnv('SITE_LLM_MAX_OUTPUT_TOKENS', SITE_DEFAULT_MAX_OUTPUT_TOKENS))),
     reasoningEffort: effort === 'off' ? null : effort,
@@ -58,6 +75,13 @@ export function siteLlmConfig(): SiteLlmConfig {
 /** Global LLM spend cap per UTC day, in micro-USD. */
 export function siteGlobalDailyCostCapMicroUsd(): number {
   return Math.round(numberEnv('SITE_DAILY_COST_CAP_USD', SITE_DEFAULT_GLOBAL_DAILY_COST_CAP_USD) * 1_000_000);
+}
+
+export function siteIpDailyLimits(): { perLink: number; all: number } {
+  return {
+    perLink: Math.floor(numberEnv('SITE_IP_DAILY_MESSAGES_PER_LINK', SITE_DEFAULT_IP_DAILY_MESSAGES_PER_LINK)),
+    all: Math.floor(numberEnv('SITE_IP_DAILY_MESSAGES', SITE_DEFAULT_IP_DAILY_MESSAGES)),
+  };
 }
 
 /** The /s and /api/v1/s routes 404 unless VALETTO_SITE_ASSISTANT=1 (spec section 5). */

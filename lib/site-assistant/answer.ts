@@ -1,6 +1,6 @@
 import { costMicroUsd, estimateInputTokens, siteLlmConfig, SITE_CONTEXT_MAX_CHARS, SITE_HISTORY_MAX_CHARS, SITE_HISTORY_MAX_MESSAGES, type SiteLlmConfig } from './config';
 import { findOwnerKeyword, guessLanguage } from './keywords';
-import { callSiteLlm, type SiteLlmTransport } from './llm';
+import { callSiteLlm, shouldTryFallback, type SiteLlmTransport } from './llm';
 import { normalizeForMatch } from './normalize';
 import { cappedReply, needsOwnerReply, offTopicReply, replyLanguage } from './replies';
 import { applyRules, contactIndex, type DecidedBy } from './rules';
@@ -33,6 +33,8 @@ export type SiteAnswerResult = {
   inputTokens: number;
   outputTokens: number;
   costMicroUsd: number;
+  /** The model that produced the result, when one was called (the fallback after a primary failure). */
+  model?: string;
 };
 
 export type CapDecision = { ok: true } | { ok: false; decidedBy: Extract<DecidedBy, `cap_${string}`> };
@@ -141,16 +143,27 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
     if (!decision.ok) return cappedResult(input, decision.decidedBy);
   }
 
-  const result = await callSiteLlm(config, SITE_INSTRUCTIONS, promptInput, deps.transport);
+  let result = await callSiteLlm(config, SITE_INSTRUCTIONS, promptInput, deps.transport);
+  let model = config.model;
+  let spent = { inputTokens: 0, outputTokens: 0 };
+  // One retry on the fallback model, inside the same reservation and caps (the caller already reserved).
+  if (config.fallbackModel && config.fallbackModel !== config.model && shouldTryFallback(result)) {
+    if (result.kind === 'error') spent = { inputTokens: result.inputTokens, outputTokens: result.outputTokens };
+    model = config.fallbackModel;
+    result = await callSiteLlm({ ...config, model }, SITE_INSTRUCTIONS, promptInput, deps.transport);
+  }
   if (result.kind === 'timeout') {
     // Usage is unknown: charge the worst case.
-    return fixedOwner(input, 'llm_timeout', guessed, { llmCalled: true, costMicroUsd: worstCase });
+    return fixedOwner(input, 'llm_timeout', guessed, { llmCalled: true, costMicroUsd: worstCase, model });
   }
+  const inputTokens = spent.inputTokens + result.inputTokens;
+  const outputTokens = spent.outputTokens + result.outputTokens;
   const usage = {
     llmCalled: true,
-    inputTokens: result.inputTokens,
-    outputTokens: result.outputTokens,
-    costMicroUsd: costMicroUsd(result.inputTokens, result.outputTokens, config),
+    inputTokens,
+    outputTokens,
+    costMicroUsd: costMicroUsd(inputTokens, outputTokens, config),
+    model,
   };
   if (result.kind === 'error') return fixedOwner(input, 'llm_error', guessed, usage);
   if (result.kind === 'invalid') return fixedOwner(input, 'invalid_output', guessed, { ...usage, rawOutput: { error: result.detail } });

@@ -58,6 +58,14 @@ export function hashLoginCode(code: string): string {
   return createHmac('sha256', encryptionKey()).update(code).digest('hex');
 }
 
+/**
+ * Keyed hash for values we must count but never store (for example a visitor IP). `purpose` separates uses, so
+ * the same input never hashes to the same value in two tables.
+ */
+export function keyedHash(purpose: string, value: string): string {
+  return createHmac('sha256', encryptionKey()).update(`${purpose}\u0000${value}`).digest('hex');
+}
+
 export function encryptSecret(plaintext: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv);

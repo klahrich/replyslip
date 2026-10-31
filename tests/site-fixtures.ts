@@ -12,6 +12,7 @@ export const FIXTURE_DIR = join(__dirname, 'fixtures', 'site-demo');
 export const TEST_LLM_CONFIG: SiteLlmConfig = {
   apiKey: 'test-not-a-real-key',
   model: 'test-model',
+  fallbackModel: null,
   baseUrl: 'https://llm.invalid/v1',
   maxOutputTokens: 800,
   reasoningEffort: 'none',

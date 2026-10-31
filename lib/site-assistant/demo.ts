@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { and, asc, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { getDb, type Db } from '@/db';
 import {
   siteBusinesses,
   siteConversations,
   siteDemoLinks,
+  siteMessageRequests,
   siteMessages,
   siteSuggestedAnswers,
   type SiteBusinessRow,
@@ -14,7 +15,15 @@ import {
 import { sha256 } from '@/lib/crypto';
 import { HttpError, isUniqueViolation } from '@/lib/errors';
 import { answerVisitorMessage, type SiteAnswerResult } from './answer';
-import { capLimitsFor, reserveSiteUsage, settleSiteUsage, usageDay } from './caps';
+import {
+  capLimitsFor,
+  ipKeysFor,
+  releaseSiteUsage,
+  reserveSiteUsage,
+  secondsUntilUtcMidnight,
+  settleSiteUsage,
+  usageDay,
+} from './caps';
 import { SITE_DEMO_LINK_TTL_DAYS, SITE_DEMO_RETENTION_DAYS, SITE_MESSAGE_MAX_CHARS } from './config';
 import type { SiteLlmTransport } from './llm';
 import { bannerText, cappedReply, demoNote, noticeText, replyLanguage } from './replies';
@@ -143,17 +152,6 @@ async function findConversation(demo: ResolvedDemo, visitor: string) {
   return row ?? null;
 }
 
-async function findOrCreateConversation(demo: ResolvedDemo, visitor: string) {
-  const existing = await findConversation(demo, visitor);
-  if (existing) return existing;
-  const [created] = await getDb()
-    .insert(siteConversations)
-    .values({ businessId: demo.business.id, demoLinkId: demo.link.id, visitorTokenHash: sha256(visitor) })
-    .onConflictDoNothing()
-    .returning();
-  return created ?? (await findConversation(demo, visitor))!;
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 // Response shapes.
 
@@ -258,23 +256,36 @@ export type PostMessageInput =
   | { clientMessageId: string; text: string; suggestedQuestionId?: undefined }
   | { clientMessageId: string; suggestedQuestionId: string; text?: undefined };
 
-export type PostMessageDeps = { transport?: SiteLlmTransport; db?: Db };
+export type PostMessageDeps = {
+  transport?: SiteLlmTransport;
+  /** Database for the cap counters (tests pass separate clients to race them). */
+  db?: Db;
+  /** Client IP, for the per-IP daily counts. Only its keyed hash is stored. */
+  ip?: string;
+  /** Test hook: runs after the answer, before anything is stored. A throw here exercises the cleanup path. */
+  beforeStore?: () => Promise<void> | void;
+};
 
-async function existingReply(conversationId: string, businessId: string, clientMessageId: string) {
-  const rows = await getDb()
-    .select()
-    .from(siteMessages)
-    .where(
-      and(
-        eq(siteMessages.conversationId, conversationId),
-        eq(siteMessages.businessId, businessId),
-        eq(siteMessages.clientMessageId, clientMessageId),
-      ),
-    );
-  return {
-    visitor: rows.find((row) => row.role === 'visitor') ?? null,
-    assistant: rows.find((row) => row.role === 'assistant') ?? null,
-  };
+/** A pending request older than this is treated as dead (the function timeout is 60 s) and can be taken over. */
+const REQUEST_STALE_MS = 90_000;
+/** How long a duplicate waits for the first request with the same client_message_id before giving up with 409. */
+const REQUEST_WAIT_MS = 45_000;
+const REQUEST_POLL_MS = 150;
+
+type MessageRequestRow = typeof siteMessageRequests.$inferSelect;
+type ConversationRow = typeof siteConversations.$inferSelect;
+
+function inProgress(): HttpError {
+  return new HttpError(409, 'message_in_progress', 'This message is still being answered.');
+}
+
+/** Any daily cap. A different code from the short-burst `rate_limited`, so the page shows its daily-limit text. */
+function dailyLimit(decidedBy: string): HttpError {
+  return new HttpError(429, 'daily_limit', cappedReply('en'), {
+    reason: decidedBy,
+    message_fr: cappedReply('fr'),
+    retry_after_seconds: secondsUntilUtcMidnight(),
+  });
 }
 
 function replyBody(demo: ResolvedDemo, visitor: SiteMessageRow, assistant: SiteMessageRow, replayed: boolean) {
@@ -285,30 +296,145 @@ function replyBody(demo: ResolvedDemo, visitor: SiteMessageRow, assistant: SiteM
   };
 }
 
-/** Any daily cap. A different code from the short-burst `rate_limited`, so the page shows its daily-limit text. */
-function dailyLimit(decidedBy: string): HttpError {
-  return new HttpError(429, 'daily_limit', cappedReply('en'), { reason: decidedBy, message_fr: cappedReply('fr') });
+async function findRequest(demo: ResolvedDemo, clientMessageId: string): Promise<MessageRequestRow | null> {
+  const [row] = await getDb()
+    .select()
+    .from(siteMessageRequests)
+    .where(
+      and(
+        eq(siteMessageRequests.demoLinkId, demo.link.id),
+        eq(siteMessageRequests.businessId, demo.business.id),
+        eq(siteMessageRequests.clientMessageId, clientMessageId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+async function storedReply(demo: ResolvedDemo, request: MessageRequestRow) {
+  const rows = await getDb()
+    .select()
+    .from(siteMessages)
+    .where(
+      and(
+        eq(siteMessages.businessId, demo.business.id),
+        eq(siteMessages.conversationId, request.conversationId),
+        inArray(siteMessages.id, [request.visitorMessageId!, request.assistantMessageId!]),
+      ),
+    );
+  const visitor = rows.find((row) => row.id === request.visitorMessageId);
+  const assistant = rows.find((row) => row.id === request.assistantMessageId);
+  if (!visitor || !assistant) throw inProgress();
+  return replyBody(demo, visitor, assistant, true);
+}
+
+class LostRace extends Error {}
+
+type Claim =
+  | { kind: 'replay'; reply: ReturnType<typeof replyBody>; ownsConversation: boolean }
+  | { kind: 'claimed'; conversation: ConversationRow; ownsConversation: boolean };
+
+/**
+ * Takes the (demo link, client_message_id) key, or finds who has it. New key: the conversation (found or created
+ * for this cookie) and the request row go in one transaction, so a lost race leaves no stray conversation. Done:
+ * replay. Failed or stale: take it over. In flight: wait for it, then replay. Same key, different question: 409.
+ */
+async function claimRequest(demo: ResolvedDemo, visitorValue: string, clientMessageId: string, requestHash: string): Promise<Claim> {
+  const db = getDb();
+  const visitorHash = sha256(visitorValue);
+  const started = Date.now();
+  for (;;) {
+    const existing = await findRequest(demo, clientMessageId);
+    if (!existing) {
+      try {
+        return await db.transaction(async (tx) => {
+          await tx
+            .insert(siteConversations)
+            .values({ businessId: demo.business.id, demoLinkId: demo.link.id, visitorTokenHash: visitorHash })
+            .onConflictDoNothing();
+          const [conversation] = await tx
+            .select()
+            .from(siteConversations)
+            .where(
+              and(
+                eq(siteConversations.demoLinkId, demo.link.id),
+                eq(siteConversations.businessId, demo.business.id),
+                eq(siteConversations.visitorTokenHash, visitorHash),
+              ),
+            )
+            .limit(1);
+          const [row] = await tx
+            .insert(siteMessageRequests)
+            .values({
+              demoLinkId: demo.link.id,
+              clientMessageId,
+              businessId: demo.business.id,
+              conversationId: conversation!.id,
+              requestHash,
+            })
+            .onConflictDoNothing()
+            .returning();
+          if (!row) throw new LostRace();
+          return { kind: 'claimed' as const, conversation: conversation!, ownsConversation: true };
+        });
+      } catch (err) {
+        if (err instanceof LostRace || isUniqueViolation(err)) continue;
+        throw err;
+      }
+    }
+
+    if (existing.requestHash !== requestHash) {
+      throw new HttpError(409, 'client_message_id_reused', 'This client_message_id was already used for another message.');
+    }
+    const [conversation] = await db
+      .select()
+      .from(siteConversations)
+      .where(and(eq(siteConversations.id, existing.conversationId), eq(siteConversations.businessId, demo.business.id)))
+      .limit(1);
+    const ownsConversation = conversation?.visitorTokenHash === visitorHash;
+    if (existing.state === 'done') return { kind: 'replay', reply: await storedReply(demo, existing), ownsConversation };
+
+    const stale = Date.now() - existing.updatedAt.getTime() > REQUEST_STALE_MS;
+    if (existing.state === 'failed' || stale) {
+      const [taken] = await db
+        .update(siteMessageRequests)
+        .set({ state: 'pending', updatedAt: new Date() })
+        .where(
+          and(
+            eq(siteMessageRequests.demoLinkId, existing.demoLinkId),
+            eq(siteMessageRequests.clientMessageId, existing.clientMessageId),
+            eq(siteMessageRequests.state, existing.state),
+            eq(siteMessageRequests.updatedAt, existing.updatedAt),
+          ),
+        )
+        .returning();
+      if (taken && conversation) return { kind: 'claimed', conversation, ownsConversation };
+      continue;
+    }
+
+    if (Date.now() - started > REQUEST_WAIT_MS) throw inProgress();
+    await new Promise((resolve) => setTimeout(resolve, REQUEST_POLL_MS));
+  }
 }
 
 /**
- * One visitor message in, one checked reply out (no streaming). Idempotent on client_message_id: a retry gets the
- * stored reply and no second model call. A retry while the first is still running gets 409 message_in_progress.
- * A daily cap is 429 daily_limit and keeps no rows, so a retry with the same client_message_id can go through
- * tomorrow. Suggested-question taps are never capped (no model call).
+ * One visitor message in, one checked reply out (no streaming).
+ *
+ * Idempotent on client_message_id across the whole demo link: a second request with the same id (with or without
+ * the cookie, in parallel or later) waits for or replays the first, with no second model call.
+ *
+ * A daily cap is 429 daily_limit and keeps no rows, so the same id can go through tomorrow. A throw mid-reply
+ * gives back the counts and the cost reservation and marks the request failed, so a retry can take it over.
+ * Suggested-question taps are never capped (no model call).
  */
 export async function postDemoMessage(
   demo: ResolvedDemo,
   visitorValue: string,
   input: PostMessageInput,
   deps: PostMessageDeps = {},
-) {
+): Promise<ReturnType<typeof replyBody> & { ownsConversation: boolean }> {
   const db = getDb();
   const business = demo.business;
-  const conversation = await findOrCreateConversation(demo, visitorValue);
-
-  const prior = await existingReply(conversation.id, business.id, input.clientMessageId);
-  if (prior.visitor && prior.assistant) return replyBody(demo, prior.visitor, prior.assistant, true);
-  if (prior.visitor) throw new HttpError(409, 'message_in_progress', 'This message is still being answered.');
 
   let suggestion: typeof siteSuggestedAnswers.$inferSelect | null = null;
   if (input.suggestedQuestionId !== undefined) {
@@ -327,87 +453,86 @@ export async function postDemoMessage(
     suggestion = row;
   }
   const text = suggestion ? suggestion.question : input.text!;
+  const requestHash = sha256(suggestion ? `tap\u0000${suggestion.id}` : `text\u0000${text}`);
 
-  // History before this message, for the prompt. Only this conversation, only this business.
-  const history = (await conversationMessages(conversation.id, business.id)).map((row) => ({
-    role: row.role as 'visitor' | 'assistant',
-    body: row.body,
-  }));
+  const claim = await claimRequest(demo, visitorValue, input.clientMessageId, requestHash);
+  if (claim.kind === 'replay') return { ...claim.reply, ownsConversation: claim.ownsConversation };
+  const conversation = claim.conversation;
+  const requestKey = and(
+    eq(siteMessageRequests.demoLinkId, demo.link.id),
+    eq(siteMessageRequests.clientMessageId, input.clientMessageId),
+  );
+  const visitorAt = new Date();
 
-  let visitorRow: SiteMessageRow;
+  const capDb = deps.db ?? db;
+  const day = usageDay();
+  const limits = capLimitsFor(business);
+  const ipKeys = ipKeysFor(deps.ip ?? 'unknown', demo.link.id);
+  let counted = false;
+  let reserved = 0;
+  let capped = false;
+  let finished = false;
+
   try {
-    [visitorRow] = (await db
-      .insert(siteMessages)
-      .values({
+    // History before this message, for the prompt. Only this conversation, only this business.
+    const history = (await conversationMessages(conversation.id, business.id)).map((row) => ({
+      role: row.role as 'visitor' | 'assistant',
+      body: row.body,
+    }));
+
+    let result: SiteAnswerResult;
+    let suggestedDecidedBy: string | null = null;
+    if (suggestion) {
+      // A tap on a Karim-checked suggestion: the stored answer, no model call, no cap.
+      result = {
+        status: suggestion.status as SiteAnswerResult['status'],
+        body: suggestion.answer,
+        topic: suggestion.topic,
+        language: suggestion.language as SiteAnswerResult['language'],
+        decidedBy: 'answered',
+        sourcesKept: suggestion.sourcesKept,
+        sourcesDropped: [],
+        ownerQuestion: null,
+        rawOutput: null,
+        llmCalled: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        costMicroUsd: 0,
+      };
+      suggestedDecidedBy = suggestion.decidedBy;
+    } else {
+      const decision = await reserveSiteUsage(capDb, {
         businessId: business.id,
         conversationId: conversation.id,
-        role: 'visitor',
-        body: text,
-        clientMessageId: input.clientMessageId,
-        suggestedAnswerId: suggestion?.id ?? null,
-      })
-      .returning()) as [SiteMessageRow];
-  } catch (err) {
-    if (!isUniqueViolation(err)) throw err;
-    const again = await existingReply(conversation.id, business.id, input.clientMessageId);
-    if (again.visitor && again.assistant) return replyBody(demo, again.visitor, again.assistant, true);
-    throw new HttpError(409, 'message_in_progress', 'This message is still being answered.');
-  }
-
-  let result: SiteAnswerResult;
-  const dropVisitorRow = () => db.delete(siteMessages).where(and(eq(siteMessages.id, visitorRow.id), eq(siteMessages.businessId, business.id)));
-  let suggestedDecidedBy: string | null = null;
-  if (suggestion) {
-    // A tap on a Karim-checked suggestion: the stored answer, no model call, no cap.
-    result = {
-      status: suggestion.status as SiteAnswerResult['status'],
-      body: suggestion.answer,
-      topic: suggestion.topic,
-      language: suggestion.language as SiteAnswerResult['language'],
-      decidedBy: 'answered',
-      sourcesKept: suggestion.sourcesKept,
-      sourcesDropped: [],
-      ownerQuestion: null,
-      rawOutput: null,
-      llmCalled: false,
-      inputTokens: 0,
-      outputTokens: 0,
-      costMicroUsd: 0,
-    };
-    suggestedDecidedBy = suggestion.decidedBy;
-  } else {
-    const day = usageDay();
-    const limits = capLimitsFor(business);
-    const capDb = deps.db ?? db;
-    const answerInput = { businessName: business.displayName, contextMd: business.contextMd, history, visitorMessage: text };
-    const counted = await reserveSiteUsage(capDb, {
-      businessId: business.id,
-      conversationId: conversation.id,
-      day,
-      messages: 1,
-      costMicroUsd: 0,
-      limits,
-    });
-    if (!counted.ok) {
-      await dropVisitorRow();
-      throw dailyLimit(counted.decidedBy);
-    } else {
-      let reserved = 0;
-      result = await answerVisitorMessage(answerInput, {
-        transport: deps.transport,
-        reserve: async (worstCase) => {
-          const decision = await reserveSiteUsage(capDb, {
-            businessId: business.id,
-            conversationId: conversation.id,
-            day,
-            messages: 0,
-            costMicroUsd: worstCase,
-            limits,
-          });
-          if (decision.ok) reserved = worstCase;
-          return decision;
-        },
+        ipKeys,
+        day,
+        messages: 1,
+        costMicroUsd: 0,
+        limits,
       });
+      if (!decision.ok) {
+        capped = true;
+        throw dailyLimit(decision.decidedBy);
+      }
+      counted = true;
+      result = await answerVisitorMessage(
+        { businessName: business.displayName, contextMd: business.contextMd, history, visitorMessage: text },
+        {
+          transport: deps.transport,
+          reserve: async (worstCase) => {
+            const costDecision = await reserveSiteUsage(capDb, {
+              businessId: business.id,
+              conversationId: conversation.id,
+              day,
+              messages: 0,
+              costMicroUsd: worstCase,
+              limits,
+            });
+            if (costDecision.ok) reserved = worstCase;
+            return costDecision;
+          },
+        },
+      );
       if (reserved > 0 || result.llmCalled) {
         await settleSiteUsage(capDb, {
           businessId: business.id,
@@ -418,42 +543,95 @@ export async function postDemoMessage(
           outputTokens: result.outputTokens,
           llmCalled: result.llmCalled,
         });
+        reserved = 0;
       }
       if (result.status === 'capped') {
-        await dropVisitorRow();
+        // The cost cap refused it after the message was counted: the finally block gives the counts back.
+        capped = true;
         throw dailyLimit(result.decidedBy);
       }
     }
+
+    await deps.beforeStore?.();
+
+    const stored = await db.transaction(async (tx) => {
+      const [visitorRow] = (await tx
+        .insert(siteMessages)
+        .values({
+          businessId: business.id,
+          conversationId: conversation.id,
+          role: 'visitor',
+          body: text,
+          clientMessageId: input.clientMessageId,
+          suggestedAnswerId: suggestion?.id ?? null,
+          createdAt: visitorAt,
+        })
+        .returning()) as [SiteMessageRow];
+      const [assistantRow] = (await tx
+        .insert(siteMessages)
+        .values({
+          businessId: business.id,
+          conversationId: conversation.id,
+          role: 'assistant',
+          body: result.body,
+          status: result.status,
+          topic: result.topic,
+          language: result.language,
+          decidedBy: suggestedDecidedBy ?? result.decidedBy,
+          sourcesKept: result.sourcesKept,
+          sourcesDropped: result.sourcesDropped,
+          ownerQuestion: result.ownerQuestion,
+          rawOutput: result.rawOutput ?? null,
+          suggestedAnswerId: suggestion?.id ?? null,
+          clientMessageId: input.clientMessageId,
+          inputTokens: result.llmCalled ? result.inputTokens : null,
+          outputTokens: result.llmCalled ? result.outputTokens : null,
+          costMicroUsd: result.llmCalled ? result.costMicroUsd : null,
+          createdAt: new Date(Math.max(Date.now(), visitorAt.getTime() + 1)),
+        })
+        .returning()) as [SiteMessageRow];
+      await tx
+        .update(siteMessageRequests)
+        .set({ state: 'done', visitorMessageId: visitorRow.id, assistantMessageId: assistantRow.id, updatedAt: new Date() })
+        .where(requestKey);
+      await tx
+        .update(siteConversations)
+        .set({ lastMessageAt: new Date(), language: result.language })
+        .where(and(eq(siteConversations.id, conversation.id), eq(siteConversations.businessId, business.id)));
+      return { visitorRow, assistantRow };
+    });
+    finished = true;
+    return { ...replyBody(demo, stored.visitorRow, stored.assistantRow, false), ownsConversation: claim.ownsConversation };
+  } finally {
+    if (!finished) {
+      try {
+        // Give back what this request took. The settled cost of a model call that did run stays spent.
+        await releaseSiteUsage(capDb, {
+          businessId: business.id,
+          conversationId: conversation.id,
+          ipKeys,
+          day,
+          messages: counted ? 1 : 0,
+          reservedMicroUsd: reserved,
+        });
+      } catch (err) {
+        console.error('site demo: releasing usage failed', err);
+      }
+      try {
+        if (capped) {
+          // A capped attempt keeps no rows, so the same client_message_id can go through tomorrow.
+          await db.delete(siteMessageRequests).where(and(requestKey, eq(siteMessageRequests.state, 'pending')));
+        } else {
+          await db
+            .update(siteMessageRequests)
+            .set({ state: 'failed', updatedAt: new Date() })
+            .where(and(requestKey, eq(siteMessageRequests.state, 'pending')));
+        }
+      } catch (err) {
+        console.error('site demo: marking the request failed did not work', err);
+      }
+    }
   }
-
-  const [assistantRow] = (await db
-    .insert(siteMessages)
-    .values({
-      businessId: business.id,
-      conversationId: conversation.id,
-      role: 'assistant',
-      body: result.body,
-      status: result.status,
-      topic: result.topic,
-      language: result.language,
-      decidedBy: suggestedDecidedBy ?? result.decidedBy,
-      sourcesKept: result.sourcesKept,
-      sourcesDropped: result.sourcesDropped,
-      ownerQuestion: result.ownerQuestion,
-      rawOutput: result.rawOutput ?? null,
-      suggestedAnswerId: suggestion?.id ?? null,
-      clientMessageId: input.clientMessageId,
-      inputTokens: result.llmCalled ? result.inputTokens : null,
-      outputTokens: result.llmCalled ? result.outputTokens : null,
-      costMicroUsd: result.llmCalled ? result.costMicroUsd : null,
-    })
-    .returning()) as [SiteMessageRow];
-  await db
-    .update(siteConversations)
-    .set({ lastMessageAt: new Date(), language: result.language })
-    .where(and(eq(siteConversations.id, conversation.id), eq(siteConversations.businessId, business.id)));
-
-  return replyBody(demo, visitorRow, assistantRow, false);
 }
 
 // ---------------------------------------------------------------------------------------------------------------

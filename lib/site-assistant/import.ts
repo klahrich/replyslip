@@ -280,7 +280,7 @@ export async function generateSuggestedAnswers(
       decidedBy: result.decidedBy,
       sourcesKept: result.sourcesKept,
       rawOutput: result.rawOutput ?? null,
-      model: result.llmCalled ? options.config.model : null,
+      model: result.llmCalled ? (result.model ?? options.config.model) : null,
       generatedAt: new Date(),
       checkedAt: null,
     };

@@ -14,7 +14,7 @@ Peinture Boréale est une entreprise de peinture résidentielle et commerciale �
 - Teinture de patios et de terrasses en bois
 - Réparation de plâtre avant peinture
 
-Nous utilisons des peintures à faible teneur en COV.
+Nous choisissons des produits sans COV pour les chambres d'enfants.
 Tous nos travaux sont garantis deux ans.
 Nos peintres sont certifiés par la CCQ.
 

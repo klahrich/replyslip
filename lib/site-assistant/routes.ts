@@ -86,9 +86,11 @@ export function postDemoMessageRoute(req: Request, context: TokenContext, deps: 
       text !== undefined
         ? { clientMessageId: body.client_message_id!, text }
         : { clientMessageId: body.client_message_id ?? randomUUID(), suggestedQuestionId: body.suggested_question_id! },
-      deps,
+      { ...deps, ip: deps.ip ?? clientIp(req) },
     );
-    const headers: HeadersInit = existing ? {} : { 'set-cookie': visitorCookieHeader(token, visitor) };
+    // A new visitor gets the cookie only when the conversation is theirs (not on a replay of someone else's message).
+    const headers: HeadersInit =
+      existing || !result.ownsConversation ? {} : { 'set-cookie': visitorCookieHeader(token, visitor) };
     return json({ message: result.message }, 200, headers);
   });
 }

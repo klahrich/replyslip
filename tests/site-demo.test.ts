@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import sharp from 'sharp';
@@ -13,6 +13,8 @@ import {
   siteBusinesses,
   siteConversations,
   siteDemoLinks,
+  siteIpUsageDaily,
+  siteMessageRequests,
   siteMessages,
   siteSuggestedAnswers,
   siteUsageDaily,
@@ -22,8 +24,9 @@ import {
 import { GET as demoRoute } from '@/app/api/v1/s/demo/[token]/route';
 import { POST as messagesRoute } from '@/app/api/v1/s/demo/[token]/messages/route';
 import { GET as shotRoute } from '@/app/(customer)/s/demo/[token]/shot/[kind]/route';
-import { capLimitsFor, reserveSiteUsage, settleSiteUsage, usageDay } from '@/lib/site-assistant/caps';
-import { createDemoLink, deleteOldDemoConversations } from '@/lib/site-assistant/demo';
+import { capLimitsFor, ipKeysFor, reserveSiteUsage, secondsUntilUtcMidnight, settleSiteUsage, usageDay } from '@/lib/site-assistant/caps';
+import { answerVisitorMessage } from '@/lib/site-assistant/answer';
+import { createDemoLink, deleteOldDemoConversations, postDemoMessage, resolveDemo } from '@/lib/site-assistant/demo';
 import {
   importRedbotBusinesses,
   listUncheckedSuggestedAnswers,
@@ -31,10 +34,11 @@ import {
   revokeDemoLinks,
   setSuggestedAnswerChecked,
 } from '@/lib/site-assistant/import';
-import { setSiteLlmTransportForTests } from '@/lib/site-assistant/llm';
+import type { SiteLlmConfig } from '@/lib/site-assistant/config';
+import { setSiteLlmTransportForTests, type SiteLlmTransport } from '@/lib/site-assistant/llm';
 import { cappedReply, needsOwnerReply } from '@/lib/site-assistant/replies';
 import { call } from './helpers';
-import { answer, createSiteBusiness, createSiteDemo, FIXTURE_DIR, fakeModel, NO_MODEL, TEST_LLM_CONFIG } from './site-fixtures';
+import { answer, createSiteBusiness, createSiteDemo, FIXTURE_DIR, fakeModel, MAPLE_CONTEXT, NO_MODEL, TEST_LLM_CONFIG } from './site-fixtures';
 
 const URL_BASE = 'http://localhost';
 
@@ -54,8 +58,42 @@ function info(token: string, cookie?: string) {
   return call(demoRoute as never, `${URL_BASE}/api/v1/s/demo/${token}`, { params: { token }, cookie });
 }
 const conversation = info;
+/** Each call comes from a fresh IP unless `x-forwarded-for` is given, so per-IP counts don't leak between tests. */
 function send(token: string, body: unknown, cookie?: string, headers?: Record<string, string>) {
-  return call(messagesRoute as never, `${URL_BASE}/api/v1/s/demo/${token}/messages`, { params: { token }, body, cookie, headers });
+  const withIp = { 'x-forwarded-for': `test-${randomUUID()}`, ...headers };
+  return call(messagesRoute as never, `${URL_BASE}/api/v1/s/demo/${token}/messages`, { params: { token }, body, cookie, headers: withIp });
+}
+
+function expectRetryAfterMidnight(res: Response) {
+  const header = Number(res.headers.get('retry-after'));
+  const expected = secondsUntilUtcMidnight();
+  expect(header).toBeGreaterThanOrEqual(1);
+  expect(Math.abs(header - expected)).toBeLessThanOrEqual(5);
+}
+
+async function usageCounts(businessId: string, conversationIds: string[], day = usageDay()) {
+  const [business] = await getDb().select().from(siteUsageDaily).where(and(eq(siteUsageDaily.businessId, businessId), eq(siteUsageDaily.day, day)));
+  const visitors = conversationIds.length
+    ? await getDb().select().from(siteVisitorUsageDaily).where(and(inArray(siteVisitorUsageDaily.conversationId, conversationIds), eq(siteVisitorUsageDaily.day, day)))
+    : [];
+  return {
+    businessMessages: business?.messages ?? 0,
+    reserved: business?.reservedMicroUsd ?? 0,
+    visitorMessages: visitors.reduce((sum, row) => sum + row.messages, 0),
+  };
+}
+
+async function ipCount(ip: string, linkId: string, day = usageDay()) {
+  const keys = ipKeysFor(ip, linkId);
+  const rows = await getDb().select().from(siteIpUsageDaily).where(and(inArray(siteIpUsageDaily.keyHash, [keys.link, keys.all]), eq(siteIpUsageDaily.day, day)));
+  return {
+    link: rows.find((row) => row.keyHash === keys.link)?.messages ?? 0,
+    all: rows.find((row) => row.keyHash === keys.all)?.messages ?? 0,
+  };
+}
+
+async function linkConversations(linkId: string) {
+  return getDb().select().from(siteConversations).where(eq(siteConversations.demoLinkId, linkId));
 }
 function shot(token: string, kind: string) {
   return call(shotRoute as never, `${URL_BASE}/s/demo/${token}/shot/${kind}`, { params: { token, kind } });
@@ -261,11 +299,185 @@ describe('messages', () => {
     expect(c.status).toBe(429);
     expect(c.data.error).toMatchObject({ code: 'daily_limit', message: cappedReply('en') });
     expectSiteHeaders(c.res);
+    expectRetryAfterMidnight(c.res);
     // Nothing kept for the capped attempt; the same id is free to retry later.
     expect((await info(token, a.cookie!)).data.messages).toHaveLength(4);
     expect(await getDb().select().from(siteMessages).where(eq(siteMessages.clientMessageId, id))).toHaveLength(0);
     // Another visitor still gets through.
     expect((await send(token, { client_message_id: randomUUID(), text: 'Areas?' })).data.message.status).toBe('answered');
+  });
+
+  it('counts by IP too, so clearing the cookie does not reset the limit, per link and across links', async () => {
+    vi.stubEnv('SITE_IP_DAILY_MESSAGES_PER_LINK', '2');
+    vi.stubEnv('SITE_IP_DAILY_MESSAGES', '3');
+    const a = await createSiteDemo();
+    const b = await createSiteDemo();
+    setSiteLlmTransportForTests(fakeModel(() => answer({})).transport);
+    const ip = { 'x-forwarded-for': `203.0.113.${Math.floor(Math.random() * 250)}, 10.0.0.1-${randomUUID()}` };
+    // No cookie on any of these: each is a "new visitor".
+    expect((await send(a.token, { client_message_id: randomUUID(), text: 'Areas?' }, undefined, ip)).status).toBe(200);
+    expect((await send(a.token, { client_message_id: randomUUID(), text: 'Areas?' }, undefined, ip)).status).toBe(200);
+    const third = await send(a.token, { client_message_id: randomUUID(), text: 'Areas?' }, undefined, ip);
+    expect(third.status).toBe(429);
+    expect(third.data.error).toMatchObject({ code: 'daily_limit', details: { reason: 'cap_ip_link' } });
+    expectRetryAfterMidnight(third.res);
+    // Another link from the same IP: room for one more under the all-links limit of 3.
+    expect((await send(b.token, { client_message_id: randomUUID(), text: 'Areas?' }, undefined, ip)).status).toBe(200);
+    const fifth = await send(b.token, { client_message_id: randomUUID(), text: 'Areas?' }, undefined, ip);
+    expect(fifth.status).toBe(429);
+    expect(fifth.data.error.details.reason).toBe('cap_ip_all');
+    // Another IP is unaffected.
+    expect((await send(a.token, { client_message_id: randomUUID(), text: 'Areas?' })).status).toBe(200);
+    // The refused messages were given back to the visitor and business counts; only keyed hashes are stored.
+    const ipValue = ip['x-forwarded-for'].split(',')[0]!.trim();
+    expect(await ipCount(ipValue, a.link.id)).toEqual({ link: 2, all: 3 });
+    expect((await usageCounts(a.business.id, (await linkConversations(a.link.id)).map((c) => c.id))).businessMessages).toBe(3);
+    const stored = await getDb().select().from(siteIpUsageDaily);
+    expect(stored.every((row) => /^[0-9a-f]{64}$/.test(row.keyHash) && !row.keyHash.includes(ipValue))).toBe(true);
+  });
+
+  it('makes one conversation and one model call for parallel no-cookie requests with the same client_message_id', async () => {
+    const { token, link } = await createSiteDemo();
+    const model = fakeModel(() => answer({}));
+    const slow: typeof model.transport = async (req) => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return model.transport(req);
+    };
+    setSiteLlmTransportForTests(slow);
+    const id = randomUUID();
+    const results = await Promise.all(Array.from({ length: 6 }, () => send(token, { client_message_id: id, text: 'What areas do you serve?' })));
+    expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200, 200, 200]);
+    expect(new Set(results.map((r) => r.data.message.id)).size).toBe(1);
+    expect(model.calls).toHaveLength(1);
+    const conversations = await linkConversations(link.id);
+    expect(conversations).toHaveLength(1);
+    // Only the request that owns the conversation hands out its cookie.
+    const withCookie = results.filter((r) => r.res.headers.get('set-cookie'));
+    expect(withCookie).toHaveLength(1);
+    expect((await info(token, withCookie[0]!.cookie!)).data.messages).toHaveLength(2);
+    expect(await getDb().select().from(siteMessages).where(eq(siteMessages.conversationId, conversations[0]!.id))).toHaveLength(2);
+    // A later replay with no cookie gets the stored answer and no cookie.
+    const later = await send(token, { client_message_id: id, text: 'What areas do you serve?' });
+    expect(later.data.message.id).toBe(results[0]!.data.message.id);
+    expect(later.res.headers.get('set-cookie')).toBeNull();
+    expect(model.calls).toHaveLength(1);
+  });
+
+  it('refuses a client_message_id reused for a different question on the same link', async () => {
+    const { token } = await createSiteDemo();
+    setSiteLlmTransportForTests(fakeModel(() => answer({})).transport);
+    const id = randomUUID();
+    const first = await send(token, { client_message_id: id, text: 'What areas do you serve?' });
+    expect(first.status).toBe(200);
+    const reused = await send(token, { client_message_id: id, text: 'Something else entirely?' });
+    expect(reused.status).toBe(409);
+    expect(reused.data.error.code).toBe('client_message_id_reused');
+    // The same id on another demo link is a separate key.
+    const other = await createSiteDemo();
+    expect((await send(other.token, { client_message_id: id, text: 'Something else entirely?' })).status).toBe(200);
+  });
+
+  it('gives back the counts and the reservation and marks the request failed when a reply throws, so a retry works', async () => {
+    const { token, business, link } = await createSiteDemo();
+    const model = fakeModel(() => answer({}));
+    setSiteLlmTransportForTests(model.transport);
+    const demo = await resolveDemo(token);
+    const ip = `test-${randomUUID()}`;
+    const visitor = randomUUID();
+    const input = { clientMessageId: randomUUID(), text: 'What areas do you serve?' };
+    await expect(
+      postDemoMessage(demo, visitor, input, {
+        ip,
+        beforeStore: () => {
+          throw new Error('crash mid-reply');
+        },
+      }),
+    ).rejects.toThrow('crash mid-reply');
+    const conversations = (await linkConversations(link.id)).map((c) => c.id);
+    expect(await usageCounts(business.id, conversations)).toMatchObject({ businessMessages: 0, reserved: 0, visitorMessages: 0 });
+    expect(await ipCount(ip, link.id)).toEqual({ link: 0, all: 0 });
+    const [request] = await getDb().select().from(siteMessageRequests).where(eq(siteMessageRequests.clientMessageId, input.clientMessageId));
+    expect(request!.state).toBe('failed');
+    expect(await getDb().select().from(siteMessages).where(eq(siteMessages.clientMessageId, input.clientMessageId))).toHaveLength(0);
+
+    // The retry takes the failed request over instead of getting 409.
+    const retry = await postDemoMessage(demo, visitor, input, { ip });
+    expect(retry.replayed).toBe(false);
+    expect(retry.message.status).toBe('answered');
+    expect(model.calls).toHaveLength(2);
+    expect(await usageCounts(business.id, conversations)).toMatchObject({ businessMessages: 1, reserved: 0, visitorMessages: 1 });
+    expect(await ipCount(ip, link.id)).toEqual({ link: 1, all: 1 });
+  });
+
+  it('a thrown database error mid-reply also releases and marks failed', async () => {
+    const { token, business, link } = await createSiteDemo();
+    setSiteLlmTransportForTests(fakeModel(() => answer({})).transport);
+    const demo = await resolveDemo(token);
+    const ip = `test-${randomUUID()}`;
+    const input = { clientMessageId: randomUUID(), text: 'What areas do you serve?' };
+    await expect(
+      postDemoMessage(demo, randomUUID(), input, {
+        ip,
+        beforeStore: async () => {
+          await getDb().execute(sql`select 1 / 0`);
+        },
+      }),
+    ).rejects.toThrow();
+    expect(await usageCounts(business.id, (await linkConversations(link.id)).map((c) => c.id))).toMatchObject({ businessMessages: 0, reserved: 0 });
+    const res = await send(token, { client_message_id: input.clientMessageId, text: input.text });
+    expect(res.status).toBe(200);
+    expect(res.data.message.status).toBe('answered');
+  });
+});
+
+describe('fallback model', () => {
+  const config = { ...TEST_LLM_CONFIG, fallbackModel: 'gpt-6.1-terra' };
+  const ask = (transport: SiteLlmTransport, cfg: SiteLlmConfig = config) =>
+    answerVisitorMessage(
+      { businessName: 'Maple Ridge Landscaping', contextMd: MAPLE_CONTEXT, history: [], visitorMessage: 'What areas do you serve?' },
+      { transport, config: cfg },
+    );
+  const notFound = { httpStatus: 404, text: JSON.stringify({ error: { code: 'model_not_found', message: 'no such model' } }) };
+
+  it('retries once on the fallback when the primary model is not found', async () => {
+    const model = fakeModel((_req, n) => (n === 1 ? notFound : answer({})));
+    const result = await ask(model.transport);
+    expect(result.status).toBe('answered');
+    expect(result.model).toBe('gpt-6.1-terra');
+    expect(model.calls).toHaveLength(2);
+    expect(JSON.parse(model.calls[0]!.body).model).toBe('test-model');
+    expect(JSON.parse(model.calls[1]!.body).model).toBe('gpt-6.1-terra');
+  });
+
+  it('retries on a 5xx, but not on a 400, and not when the fallback is off', async () => {
+    const fiveHundred = fakeModel((_req, n) => (n === 1 ? { httpStatus: 503 } : answer({})));
+    expect((await ask(fiveHundred.transport)).status).toBe('answered');
+    expect(fiveHundred.calls).toHaveLength(2);
+
+    const badRequest = fakeModel(() => ({ httpStatus: 400, text: JSON.stringify({ error: { code: 'invalid_request' } }) }));
+    expect((await ask(badRequest.transport)).decidedBy).toBe('llm_error');
+    expect(badRequest.calls).toHaveLength(1);
+
+    const off = fakeModel((_req, n) => (n === 1 ? notFound : answer({})));
+    expect((await ask(off.transport, { ...config, fallbackModel: null })).status).toBe('needs_owner');
+    expect(off.calls).toHaveLength(1);
+
+    const bothDown = fakeModel(() => ({ httpStatus: 500 }));
+    expect((await ask(bothDown.transport)).status).toBe('needs_owner');
+    expect(bothDown.calls).toHaveLength(2);
+  });
+
+  it('runs inside the one reservation and caps through the route', async () => {
+    vi.stubEnv('SITE_LLM_FALLBACK_MODEL', 'gpt-6.1-terra');
+    const { token, business } = await createSiteDemo();
+    const model = fakeModel((_req, n) => (n === 1 ? notFound : answer({})));
+    setSiteLlmTransportForTests(model.transport);
+    const res = await send(token, { client_message_id: randomUUID(), text: 'What areas do you serve?' });
+    expect(res.data.message.status).toBe('answered');
+    expect(model.calls).toHaveLength(2);
+    const [usage] = await getDb().select().from(siteUsageDaily).where(and(eq(siteUsageDaily.businessId, business.id), eq(siteUsageDaily.day, usageDay())));
+    expect(usage).toMatchObject({ messages: 1, reservedMicroUsd: 0 });
+    expect(usage!.costMicroUsd).toBeGreaterThan(0);
   });
 });
 
@@ -313,7 +525,7 @@ describe('caps', () => {
     const limits = capLimitsFor({ ...business, dailyMessageCap: 5 });
     const dbs = Array.from({ length: 12 }, () => separateDb());
     const results = await Promise.all(
-      dbs.map((db) => reserveSiteUsage(db, { businessId: business.id, conversationId: convo.id, day, messages: 1, costMicroUsd: 0, limits })),
+      dbs.map((db) => reserveSiteUsage(db, { businessId: business.id, conversationId: convo.id, ipKeys: ipKeysFor('198.51.100.7', link.id), day, messages: 1, costMicroUsd: 0, limits })),
     );
     expect(results.filter((r) => r.ok)).toHaveLength(5);
     expect(results.filter((r) => !r.ok).every((r) => !r.ok && r.decidedBy === 'cap_business_messages')).toBe(true);
@@ -347,7 +559,7 @@ describe('caps', () => {
     const b = await createSiteDemo();
     const ca = await conversationFor(a.business.id, a.link.id);
     const cb = await conversationFor(b.business.id, b.link.id);
-    const limits = { visitorDailyMessages: 100, businessDailyMessages: 100, businessDailyCostMicroUsd: 600, globalDailyCostMicroUsd: 1_000 };
+    const limits = { visitorDailyMessages: 100, ipLinkDailyMessages: 100, ipAllDailyMessages: 100, businessDailyMessages: 100, businessDailyCostMicroUsd: 600, globalDailyCostMicroUsd: 1_000 };
     expect(await reserveSiteUsage(getDb(), { businessId: a.business.id, conversationId: ca.id, day, messages: 0, costMicroUsd: 700, limits })).toEqual({ ok: false, decidedBy: 'cap_business_cost' });
     expect((await reserveSiteUsage(getDb(), { businessId: a.business.id, conversationId: ca.id, day, messages: 0, costMicroUsd: 600, limits })).ok).toBe(true);
     expect(await reserveSiteUsage(getDb(), { businessId: b.business.id, conversationId: cb.id, day, messages: 0, costMicroUsd: 500, limits })).toEqual({ ok: false, decidedBy: 'cap_global_cost' });
@@ -362,6 +574,19 @@ describe('caps', () => {
     const res = await send(token, { client_message_id: randomUUID(), text: 'What areas do you serve?' });
     expect(res.status).toBe(429);
     expect(res.data.error.code).toBe('daily_limit');
+    expectRetryAfterMidnight(res.res);
+  });
+
+  it('gives the visitor, IP and business message counts back when the cost cap refuses', async () => {
+    const { token, business, link } = await createSiteDemo({ dailyCostCapMicroUsd: 1 });
+    const ip = `test-${randomUUID()}`;
+    const res = await send(token, { client_message_id: randomUUID(), text: 'What areas do you serve?' }, undefined, { 'x-forwarded-for': ip });
+    expect(res.status).toBe(429);
+    expect(res.data.error.details.reason).toBe('cap_business_cost');
+    const conversations = (await linkConversations(link.id)).map((c) => c.id);
+    expect(await usageCounts(business.id, conversations)).toMatchObject({ businessMessages: 0, reserved: 0, visitorMessages: 0 });
+    expect(await ipCount(ip, link.id)).toEqual({ link: 0, all: 0 });
+    expect(await getDb().select().from(siteMessageRequests).where(eq(siteMessageRequests.demoLinkId, link.id))).toHaveLength(0);
   });
 });
 
@@ -450,7 +675,7 @@ describe('import', () => {
     expect((await info(token)).data.suggested_questions).toHaveLength(1);
   });
 
-  it("reads RedBot's real layout: array index, screenshots object, Language line, desktop fallback to context/<slug>.png", () => {
+  it("reads RedBot's file layout: array index, screenshots object, Language line, desktop fallback to context/<slug>.png", () => {
     const root = mkdtempSync(join(tmpdir(), 'site-redbot-'));
     const context = join(root, 'context');
     const shots = join(root, 'shots');
@@ -458,15 +683,15 @@ describe('import', () => {
     mkdirSync(shots);
     const md = (title: string, lang: string, q: string) =>
       `# ${title}\nSource: https://${title.toLowerCase().replace(/[^a-z]+/g, '-')}.example/\nScraped: 2026-10-30\nLanguage: ${lang}\n\n## Suggested questions\n1. ${q}\n\n## About\nText.\n`;
-    writeFileSync(join(context, 'alpha.md'), md('Alpha Roofing', 'en', 'Do metal roofs make noise?'));
-    writeFileSync(join(context, 'beta.md'), md('Beta Peinture', 'fr', 'Faites-vous les plafonds?'));
-    writeFileSync(join(context, 'gamma.md'), md('Gamma Movers', 'en', 'Do you move pianos?'));
+    writeFileSync(join(context, 'alpha.md'), md('Alpha Services', 'en', 'What are your hours?'));
+    writeFileSync(join(context, 'beta.md'), md('Beta Atelier', 'fr', 'Êtes-vous ouverts le samedi?'));
+    writeFileSync(join(context, 'gamma.md'), md('Gamma Company', 'en', 'Do you offer gift cards?'));
     writeFileSync(
       join(context, 'index.json'),
       JSON.stringify([
-        { slug: 'alpha', name: 'Alpha Roofing', site: 'https://alpha.example/', language: 'en', screenshots: { desktop_1440: 'shots/alpha-desktop.png', mobile_390: 'shots/alpha-mobile.png' } },
-        { slug: 'beta', name: 'Beta Peinture', site: 'https://beta.example/', screenshots: { desktop_1440: 'shots/beta-desktop.png' } },
-        { slug: 'gamma', name: 'Gamma Movers', site: 'https://gamma.example/', language: 'fr' },
+        { slug: 'alpha', name: 'Alpha Services', site: 'https://alpha.example/', language: 'en', screenshots: { desktop_1440: 'shots/alpha-desktop.png', mobile_390: 'shots/alpha-mobile.png' } },
+        { slug: 'beta', name: 'Beta Atelier', site: 'https://beta.example/', screenshots: { desktop_1440: 'shots/beta-desktop.png' } },
+        { slug: 'gamma', name: 'Gamma Company', site: 'https://gamma.example/', language: 'fr' },
       ]),
     );
     const png = join(FIXTURE_DIR, 'shots', 'maple-ridge-landscaping-desktop.png');
@@ -477,7 +702,7 @@ describe('import', () => {
     copyFileSync(png, join(shots, 'gamma-desktop.png'));
 
     const [alpha, beta, gamma] = loadRedbotBusinesses(context);
-    expect(alpha).toMatchObject({ slug: 'alpha', displayName: 'Alpha Roofing', sourceUrl: 'https://alpha.example/', language: 'en', suggestedQuestions: ['Do metal roofs make noise?'] });
+    expect(alpha).toMatchObject({ slug: 'alpha', displayName: 'Alpha Services', sourceUrl: 'https://alpha.example/', language: 'en', suggestedQuestions: ['What are your hours?'] });
     expect(alpha!.desktopShotPath).toBe(join(shots, 'alpha-desktop.png'));
     expect(alpha!.mobileShotPath).toBe(join(shots, 'alpha-mobile.png'));
     // No language in the index: the file's Language line decides. Desktop falls back to context/<slug>.png.

@@ -28,7 +28,7 @@ export function currentSiteLlmTransport(): SiteLlmTransport {
 export type SiteLlmCallResult =
   | { kind: 'ok'; outputText: string; inputTokens: number; outputTokens: number }
   | { kind: 'invalid'; detail: string; inputTokens: number; outputTokens: number }
-  | { kind: 'error'; detail: string; inputTokens: number; outputTokens: number }
+  | { kind: 'error'; detail: string; inputTokens: number; outputTokens: number; httpStatus?: number; errorCode?: string }
   | { kind: 'timeout' };
 
 export function buildResponsesBody(config: SiteLlmConfig, instructions: string, input: string): Record<string, unknown> {
@@ -47,7 +47,7 @@ type ResponsesPayload = {
   status?: string;
   output?: { type?: string; content?: { type?: string; text?: string }[] }[];
   usage?: { input_tokens?: number; output_tokens?: number };
-  error?: { message?: string } | null;
+  error?: { message?: string; code?: string | null; type?: string | null } | null;
 };
 
 function usageOf(payload: ResponsesPayload | null): { inputTokens: number; outputTokens: number } {
@@ -100,7 +100,8 @@ export async function callSiteLlm(
   }
   const usage = usageOf(payload);
   if (res.status < 200 || res.status >= 300) {
-    return { kind: 'error', detail: `http ${res.status}`, ...usage };
+    const code = payload?.error?.code ?? payload?.error?.type ?? undefined;
+    return { kind: 'error', detail: `http ${res.status}`, ...usage, httpStatus: res.status, ...(code ? { errorCode: String(code) } : {}) };
   }
   if (!payload) return { kind: 'invalid', detail: 'response is not JSON', ...usage };
   if (payload.status !== 'completed') return { kind: 'invalid', detail: `status ${payload.status ?? 'missing'}`, ...usage };
@@ -114,4 +115,10 @@ export async function callSiteLlm(
     .join('');
   if (!text) return { kind: 'invalid', detail: 'no output_text', ...usage };
   return { kind: 'ok', outputText: text, ...usage };
+}
+
+/** The primary model is missing or the provider failed on its side: worth one try on the fallback model. */
+export function shouldTryFallback(result: SiteLlmCallResult): boolean {
+  if (result.kind !== 'error' || result.httpStatus === undefined) return false;
+  return result.httpStatus >= 500 || result.errorCode === 'model_not_found';
 }
