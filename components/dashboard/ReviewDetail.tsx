@@ -330,7 +330,7 @@ export function ReviewDetail({ taskId }: { taskId: string }) {
             }}
           >
             <div className="dash-field">
-              <label htmlFor="rv-note">{panel === 'send_back' ? 'What should your bot change?' : 'Note for your bot (optional)'}</label>
+              <label htmlFor="rv-note">{panel === 'send_back' ? 'What should your bot change?' : 'Why are you declining? (optional)'}</label>
               <textarea
                 id="rv-note"
                 rows={3}
@@ -344,7 +344,7 @@ export function ReviewDetail({ taskId }: { taskId: string }) {
               <p className="dash-hint" id="rv-note-hint">
                 {panel === 'send_back'
                   ? `Your bot gets this note and tries again. ${customer.charAt(0).toUpperCase() + customer.slice(1)} doesn’t see it.`
-                  : `${customer.charAt(0).toUpperCase() + customer.slice(1)} sees only that the request was declined, not your note.`}
+                  : `Kept for you and your bot. ${customer.charAt(0).toUpperCase() + customer.slice(1)} sees only that the request was declined, not this note.`}
               </p>
               {noteError ? <p className="dash-field-err">{noteError}</p> : null}
             </div>

@@ -10,7 +10,7 @@ import { Button } from '../_ui/button';
 import { EmailSignIn, SignInCard, retryText } from '../_components/EmailSignIn';
 import { CenteredFrame } from '../_components/Frame';
 import { Notice } from '../_components/Notice';
-import { Loading, useEmail } from './common';
+import { Loading, homeAfterSignIn, useEmail } from './common';
 
 const linkErrors: Record<string, { title: string; body: string }> = {
   invite_not_found: { title: "This link doesn't work anymore", body: 'Ask the business that sent it for a new one.' },
@@ -57,7 +57,7 @@ function DeadLink({ code, branding = null }: { code: string; branding?: Branding
 
 /**
  * Personal links work once. Someone who already joined with one gets back in with an email code and lands on
- * their businesses list (/c); someone still signed in just gets a way there.
+ * their business (or their businesses list when they have several); someone still signed in just gets a way there.
  */
 function UsedUpLink({ title, branding }: { title: string; branding: Branding | null }) {
   const business = branding?.display_name ?? 'this business';
@@ -71,7 +71,7 @@ function UsedUpLink({ title, branding }: { title: string; branding: Branding | n
           <EmailSignIn
             title="Sign in with your email"
             intro={`Enter the email you used with ${business}. We'll send you a 6-digit code.`}
-            onSignedIn={() => router.push('/c')}
+            onSignedIn={async () => router.push(await homeAfterSignIn())}
           />
         </SignInCard>
       </CenteredFrame>

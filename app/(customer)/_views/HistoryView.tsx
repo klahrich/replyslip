@@ -9,7 +9,7 @@ import { Button } from '../_ui/button';
 import { BrandFrame } from '../_components/Frame';
 import { usePoll } from '../_components/usePoll';
 import { cn } from '../_lib/utils';
-import { Account, ConnectError, Loading, NotFound, loadFailure, type LoadFailure } from './common';
+import { Account, ConnectError, Loading, NotFound, loadFailure, retryable, type LoadFailure } from './common';
 import { RequestRow } from './BotView';
 
 type Filter = 'all' | RequestListFilter;
@@ -67,9 +67,10 @@ export function HistoryView({ agentId }: { agentId: string }) {
 
   if (failure === 'missing') return <NotFound />;
   // A failed poll keeps the list on screen; only a first load that fails shows the retry screen.
-  if (failure === 'connect' && (!branding || !rows))
+  if (retryable(failure) && (!branding || !rows))
     return (
       <ConnectError
+        failure={failure}
         onRetry={() => {
           setFailure(null);
           if (!branding) void loadBot();

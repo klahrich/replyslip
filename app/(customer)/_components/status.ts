@@ -12,7 +12,7 @@ export function statusCopy(status: RequestStatus, name: string): { badge: string
     case 'needs_info':
       return { badge: 'Needs your answer', title: `${name} has a question`, body: 'Answer below so they can finish your request.', tone: 'attention' };
     case 'awaiting_release':
-      return { badge: 'Answer in review', title: 'Your answer is being reviewed', body: `${name} checks each answer before you see it.`, tone: 'neutral' };
+      return { badge: 'Answer in review', title: `${name} is checking the answer`, body: `${name} checks each answer before you see it. You can close this page.`, tone: 'neutral' };
     case 'done':
       return { badge: 'Done', title: 'Done', body: '', tone: 'success' };
     case 'failed':
