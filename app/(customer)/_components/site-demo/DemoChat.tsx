@@ -204,8 +204,9 @@ export function DemoChat({
                 </div>
               )}
               {demo && it.role === 'assistant' && it.status === 'needs_owner' && (
-                <p data-testid="demo-note" className="mr-8 rounded-lg bg-muted px-3 py-2 text-[13px] leading-snug text-muted-foreground animate-in fade-in duration-300 motion-reduce:animate-none">
-                  {it.note || t.demoNote}
+                <p data-testid="demo-note" className="mr-8 rounded-lg bg-muted px-3 py-2 text-[13px] leading-snug text-muted-foreground [overflow-wrap:anywhere] animate-in fade-in duration-300 motion-reduce:animate-none">
+                  <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide">{t.demoLabel}</span>
+                  <span data-testid="demo-note-text">{it.note || t.demoNote(business.name)}</span>
                 </p>
               )}
             </div>
