@@ -61,7 +61,13 @@ export function brandStyle(b: Branding): CSSProperties {
   return vars as CSSProperties;
 }
 
+/** Up to two letters or digits for the logo tile; symbols and punctuation ("&", "—", emoji) are skipped. */
 export function initials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  return (words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? 'V').slice(0, 2)).toUpperCase();
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.match(/[\p{L}\p{N}]/gu) ?? [])
+    .filter((chars) => chars.length > 0);
+  const picked = words.length > 1 ? [words[0][0], words[1][0]] : (words[0] ?? ['V']).slice(0, 2);
+  return picked.join('').toUpperCase();
 }

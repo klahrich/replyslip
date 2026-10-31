@@ -2,8 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LogOut } from 'lucide-react';
+import { LogOut, WifiOff } from 'lucide-react';
 import { getMe, signOut } from '../_lib/api';
+import { ApiError } from '../_lib/types';
 import { Button } from '../_ui/button';
 import { Skeleton } from '../_ui/skeleton';
 import { PlainFrame } from '../_components/Frame';
@@ -55,6 +56,38 @@ export function NotFound({ message }: { message?: string }) {
     <PlainFrame>
       <Notice title="We couldn't find that page">
         <p>{message ?? 'Check the link, or ask the business that sent it.'}</p>
+      </Notice>
+    </PlainFrame>
+  );
+}
+
+/**
+ * How a page load failed. 404 → NotFound; 401 → nothing here (SessionGate already swapped the page for the
+ * sign-in form); 403/410 (not yours, gone) also read as not found. A failed fetch, 5xx, 429 or anything
+ * unexpected → ConnectError with a retry.
+ */
+export type LoadFailure = 'missing' | 'signed_out' | 'connect';
+
+export function loadFailure(e: unknown): LoadFailure {
+  if (!(e instanceof ApiError)) return 'connect';
+  if (e.status === 401) return 'signed_out';
+  if (e.status === 404 || e.status === 403 || e.status === 410) return 'missing';
+  return 'connect';
+}
+
+export function ConnectError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <PlainFrame>
+      <Notice
+        icon={<WifiOff />}
+        title="Couldn't connect"
+        action={
+          <Button type="button" onClick={onRetry} className="h-12 w-full rounded-xl text-base font-semibold">
+            Try again
+          </Button>
+        }
+      >
+        <p>Check your connection and try again.</p>
       </Notice>
     </PlainFrame>
   );

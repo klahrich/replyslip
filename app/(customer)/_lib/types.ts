@@ -90,7 +90,7 @@ export type Job = {
   result_fields: ResultField[];
 };
 
-export type ApprovedShare = { status: 'approved'; daily_cap: number; used_today: number; resets_at: string };
+export type ApprovedShare = { status: 'approved'; daily_cap: number; used_today: number; resets_at: string | null };
 export type PendingShare = { status: 'pending'; requested_at: string };
 export type RevokedShare = { status: 'revoked' };
 
@@ -131,12 +131,16 @@ export type Answer = { question: string; answer: string; asked_at: string; answe
 export type CustomerRequest = {
   id: string;
   bot: { agent_id: string };
-  offer: string;
+  /** The job's slug. Null when the job was deleted. */
+  offer: string | null;
+  /** The job's current display title (null when the job was deleted). Show `offer_title ?? title` as the job name. */
+  offer_title: string | null;
+  /** The request's heading: the job title, or for a form request the owner's or form's title. */
   title: string;
   status: RequestStatus;
   input: InputObject | null;
   input_display: DisplayRow[];
-  notes: string;
+  notes: string | null;
   question: string | null;
   answers: Answer[];
   result: unknown;
@@ -153,7 +157,7 @@ export type CustomerRequest = {
 export type RequestResponse = { request: CustomerRequest };
 
 /** R6 rows: R7 without `input` and `result`, plus `summary`. The spec's example row is shown trimmed. */
-export type RequestListRow = Pick<CustomerRequest, 'id' | 'offer' | 'title' | 'status' | 'created_at' | 'updated_at'> & { summary: string };
+export type RequestListRow = Pick<CustomerRequest, 'id' | 'offer' | 'offer_title' | 'title' | 'status' | 'created_at' | 'updated_at'> & { summary: string };
 
 /** R6 `GET /api/v1/c/bots/:agent_id/requests` */
 export type RequestListResponse = { requests: RequestListRow[]; next_cursor: string | null; etag: string };
