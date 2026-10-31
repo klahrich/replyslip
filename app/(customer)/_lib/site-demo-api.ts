@@ -1,11 +1,5 @@
-/**
- * The demo page's only door to the server. One flag picks the mock: VALETTO_MOCK=1 in a dev build.
- * To switch to the real routes for good, delete site-demo-mock.ts and the two MOCK lines below.
- */
+/** The demo page's only door to the server (PR #112's routes). */
 import { DemoApiError, type DemoConversation, type SendBody, type SendResponse } from './site-demo-types';
-import { mockDemoApi } from './site-demo-mock';
-
-const MOCK = process.env.VALETTO_MOCK === '1' && process.env.NODE_ENV !== 'production';
 
 export type DemoApi = {
   load(token: string): Promise<DemoConversation>;
@@ -29,7 +23,7 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
   return json as T;
 }
 
-const realDemoApi: DemoApi = {
+export const demoApi: DemoApi = {
   load: (token) => call<DemoConversation>(base(token), { headers: { accept: 'application/json' } }),
   send: (token, body) =>
     call<SendResponse>(`${base(token)}/messages`, {
@@ -38,8 +32,6 @@ const realDemoApi: DemoApi = {
       body: JSON.stringify(body),
     }),
 };
-
-export const demoApi: DemoApi = MOCK ? mockDemoApi : realDemoApi;
 
 /** Screenshot routes (served by PlumberBot from the database, under /s so the noindex header covers them). */
 export const shotUrl = (token: string, kind: 'desktop' | 'mobile') => `/s/demo/${encodeURIComponent(token)}/shot/${kind}`;

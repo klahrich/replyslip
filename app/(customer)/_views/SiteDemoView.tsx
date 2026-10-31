@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * /s/demo/<token>: the private site assistant demo (spec Story 1 and 3, slim story 0 cut).
+ * /s/demo/<token>: the private site assistant demo (spec Story 1 and 3, slim story 0 cut; PR #112's routes).
  * Mobile first: banner, a strip of the business's site, then the chat. From 768px the site fills
  * the screen and the chat docks on the right. The page scrolls normally; nothing locks scrolling.
  */
@@ -19,40 +19,57 @@ type State =
   | { kind: 'gone'; why: GoneKind }
   | { kind: 'error'; rateLimited: boolean };
 
-const LANG_KEY = 'vt-demo-lang';
+// The visitor's own language choice, kept per demo link. Without one, the page follows the business's site language.
+const langKey = (token: string) => `vt-demo-lang:${token}`;
+const savedLang = (token: string): Lang | null => {
+  const saved = localStorage.getItem(langKey(token));
+  return saved === 'en' || saved === 'fr' ? saved : null;
+};
+
+/** One load of the demo, as the next screen state. Never throws. */
+async function fetchDemo(token: string): Promise<{ next: State; pageLang: Lang | null }> {
+  try {
+    const conversation = await demoApi.load(token);
+    return { next: { kind: 'ready', conversation }, pageLang: conversation.business.language === 'fr' ? 'fr' : 'en' };
+  } catch (e) {
+    const err = e instanceof DemoApiError ? e : null;
+    if (err?.status === 410) return { next: { kind: 'gone', why: 'expired' }, pageLang: null };
+    if (err?.status === 404) return { next: { kind: 'gone', why: 'dead' }, pageLang: null };
+    return { next: { kind: 'error', rateLimited: err?.status === 429 }, pageLang: null };
+  }
+}
 
 export function SiteDemoView({ token, initialLang }: { token: string; initialLang: Lang }) {
   const [lang, setLang] = useState<Lang>(initialLang);
   const [state, setState] = useState<State>({ kind: 'loading' });
   const t = SITE_STRINGS[lang];
 
-  useEffect(() => {
-    const saved = localStorage.getItem(LANG_KEY);
-    if (saved === 'en' || saved === 'fr') setLang(saved);
-  }, []);
-  const changeLang = useCallback((l: Lang) => {
-    setLang(l);
-    localStorage.setItem(LANG_KEY, l);
-  }, []);
+  const changeLang = useCallback(
+    (l: Lang) => {
+      setLang(l);
+      localStorage.setItem(langKey(token), l);
+    },
+    [token],
+  );
 
   // Only the latest load may set state, so a slow first request can't overwrite a retry.
   const loadSeq = useRef(0);
-  const load = useCallback(async () => {
+  const load = useCallback(() => {
     const seq = ++loadSeq.current;
-    setState({ kind: 'loading' });
-    try {
-      const conversation = await demoApi.load(token);
-      if (seq === loadSeq.current) setState({ kind: 'ready', conversation });
-    } catch (e) {
+    fetchDemo(token).then(({ next, pageLang }) => {
       if (seq !== loadSeq.current) return;
-      const err = e instanceof DemoApiError ? e : null;
-      if (err?.status === 410) setState({ kind: 'gone', why: 'expired' });
-      else if (err?.status === 404) setState({ kind: 'gone', why: 'dead' });
-      else setState({ kind: 'error', rateLimited: err?.status === 429 });
-    }
+      // The visitor's own choice wins; else the business's site language; else the browser's (initialLang).
+      const chosen = savedLang(token) ?? pageLang;
+      if (chosen) setLang(chosen);
+      setState(next);
+    });
   }, [token]);
+  const retry = useCallback(() => {
+    setState({ kind: 'loading' });
+    load();
+  }, [load]);
   useEffect(() => {
-    void load();
+    load();
   }, [load]);
 
   const name = state.kind === 'ready' ? state.conversation.business.name : null;
@@ -73,7 +90,7 @@ export function SiteDemoView({ token, initialLang }: { token: string; initialLan
             {title && <h1 className="mb-2 text-[20px] leading-snug font-semibold tracking-tight">{title}</h1>}
             <p className="text-[15px] text-muted-foreground">{body}</p>
             {state.kind === 'error' && (
-              <button type="button" onClick={() => void load()} className="mt-5 inline-flex h-11 items-center rounded-xl bg-primary px-5 text-[15px] font-medium text-primary-foreground active:scale-[0.98]">
+              <button type="button" onClick={retry} className="mt-5 inline-flex h-11 items-center rounded-xl bg-primary px-5 text-[15px] font-medium text-primary-foreground active:scale-[0.98]">
                 {t.tryAgain}
               </button>
             )}

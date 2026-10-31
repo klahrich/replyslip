@@ -4,13 +4,14 @@
  * Site assistant demo chat (spec Story 3, slim story 0 cut). Self-contained: give it the loaded
  * conversation and the token; it sends through `demoApi` and keeps its own state.
  * No contact capture anywhere in the demo. Replies aren't streamed: one checked reply per message.
+ * Message text, the banner and the notice are always React text nodes, never HTML.
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { ArrowUp, RotateCw } from 'lucide-react';
 import { LogoTile } from '../Frame';
 import { brandStyle } from '../../_lib/brand';
 import { demoApi } from '../../_lib/site-demo-api';
-import { DemoApiError, type DemoConversation, type Lang, type ReplyStatus, type SuggestedQuestion } from '../../_lib/site-demo-types';
+import { DemoApiError, type DemoConversation, type DemoMessage, type Lang, type ReplyStatus, type SuggestedQuestion } from '../../_lib/site-demo-types';
 import { SITE_STRINGS } from '../../_lib/site-strings';
 import { cn } from '../../_lib/utils';
 
@@ -25,9 +26,15 @@ type Item = {
   failed?: boolean;
   /** New in this visit: animate in. Restored rows don't. */
   fresh?: boolean;
+  /** needs_owner only: the server's demo note (why it went to the owner). */
+  note?: string | null;
 };
 
-const MAX = 1000;
+const DEFAULT_MAX = 1000;
+
+function toItem(m: DemoMessage, fresh?: boolean): Item {
+  return { key: m.id, role: m.role, body: m.body, status: m.status, note: m.demo_note ?? null, fresh };
+}
 
 function pickSuggestions(all: SuggestedQuestion[], lang: Lang): SuggestedQuestion[] {
   const own = all.filter((s) => s.language === lang);
@@ -52,9 +59,9 @@ export function DemoChat({
   const t = SITE_STRINGS[lang];
   const { business } = conversation;
   const demo = business.status === 'unclaimed';
-  const [items, setItems] = useState<Item[]>(() =>
-    conversation.messages.map((m) => ({ key: m.id, role: m.role, body: m.body, status: m.status })),
-  );
+  const max = conversation.message_max_chars && conversation.message_max_chars > 0 ? conversation.message_max_chars : DEFAULT_MAX;
+  const notice = conversation.notice?.[lang] ?? null;
+  const [items, setItems] = useState<Item[]>(() => conversation.messages.map((m) => toItem(m)));
   const [text, setText] = useState('');
   const [thinking, setThinking] = useState(false);
   const [capped, setCapped] = useState(false);
@@ -87,8 +94,8 @@ export function DemoChat({
     const err = e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', '');
     if (err.status === 410) return onGone('expired');
     if (err.status === 404) return onGone('dead');
-    if (err.status === 429 && err.code !== 'rate_limited') {
-      // Daily cap: drop the unsent question, close the input, explain.
+    if (err.status === 429 && err.code === 'daily_limit') {
+      // Daily cap: the server kept nothing, so drop the unsent question, close the input, explain.
       setItems((xs) => xs.filter((x) => x.key !== clientId));
       return setCapped(true);
     }
@@ -103,7 +110,7 @@ export function DemoChat({
     setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: false } : x)));
     try {
       const { message } = await demoApi.send(token, { client_message_id: clientId, text: body });
-      setItems((xs) => [...xs, { key: message.id, role: message.role, body: message.body, status: message.status, fresh: true }]);
+      setItems((xs) => [...xs, toItem(message, true)]);
     } catch (e) {
       fail(e, clientId);
     } finally {
@@ -117,7 +124,7 @@ export function DemoChat({
     if (disabled) return;
     const body = text.trim();
     if (!body) return;
-    if (body.length > MAX) return setInline('tooLong');
+    if (body.length > max) return setInline('tooLong');
     const clientId = crypto.randomUUID();
     setItems((xs) => [...xs, { key: clientId, role: 'visitor', body, status: null, fresh: true }]);
     setText('');
@@ -127,7 +134,7 @@ export function DemoChat({
   function tap(sq: SuggestedQuestion) {
     if (disabled) return;
     const clientId = crypto.randomUUID();
-    // The stored answer is already checked by Karim: show it at once, record the tap in the background.
+    // The stored answer is already checked: show it at once, record the tap in the background (no model call).
     setItems((xs) => [
       ...xs,
       { key: clientId, role: 'visitor', body: sq.question, status: null, fresh: true },
@@ -191,7 +198,7 @@ export function DemoChat({
               )}
               {demo && it.role === 'assistant' && it.status === 'needs_owner' && (
                 <p data-testid="demo-note" className="mr-8 rounded-lg bg-muted px-3 py-2 text-[13px] leading-snug text-muted-foreground animate-in fade-in duration-300 motion-reduce:animate-none">
-                  {t.demoNote}
+                  {it.note || t.demoNote}
                 </p>
               )}
             </div>
@@ -234,7 +241,7 @@ export function DemoChat({
         {capped && <p className="mb-2 px-1 text-[13px] text-muted-foreground">{t.demoCap}</p>}
         {inline && (
           <p role="alert" className="mb-2 px-1 text-[13px] text-destructive">
-            {inline === 'tooLong' ? t.tooLong : t.rateLimited}
+            {inline === 'tooLong' ? t.tooLong(max) : t.rateLimited}
           </p>
         )}
         <div className="flex items-end gap-2">
@@ -250,10 +257,10 @@ export function DemoChat({
             placeholder={t.inputLabel}
             onChange={(e) => {
               setText(e.target.value);
-              if (inline === 'tooLong' && e.target.value.trim().length <= MAX) setInline(null);
+              if (inline === 'tooLong' && e.target.value.trim().length <= max) setInline(null);
             }}
             onKeyDown={onKey}
-            aria-describedby={text.length > 900 ? 'vt-demo-count' : undefined}
+            aria-describedby={[notice && items.length === 0 ? 'vt-demo-notice' : null, text.length > max - 100 ? 'vt-demo-count' : null].filter(Boolean).join(' ') || undefined}
             className="max-h-[7.5rem] min-h-11 flex-1 resize-none rounded-xl border border-input bg-background px-3.5 py-2.5 text-base leading-6 [field-sizing:content] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
@@ -265,9 +272,15 @@ export function DemoChat({
             <ArrowUp className="size-5" aria-hidden />
           </button>
         </div>
-        {text.length > 900 && (
-          <p id="vt-demo-count" className={cn('mt-1 px-1 text-right text-[12px]', text.length > MAX ? 'text-destructive' : 'text-muted-foreground')}>
-            {t.chars(text.length)}
+        {text.length > max - 100 && (
+          <p id="vt-demo-count" className={cn('mt-1 px-1 text-right text-[12px]', text.length > max ? 'text-destructive' : 'text-muted-foreground')}>
+            {t.chars(text.length, max)}
+          </p>
+        )}
+        {/* The server's notice, as a plain text node, until the first message. */}
+        {notice && items.length === 0 && (
+          <p id="vt-demo-notice" data-testid="notice" className="mt-2 px-1 text-[12px] leading-snug text-muted-foreground">
+            {notice}
           </p>
         )}
       </form>

@@ -7,12 +7,12 @@ const en = {
   inputLabel: 'Your question',
   send: 'Send',
   thinking: 'Looking for the answer…',
-  demoNote:
-    'On your live site, the visitor leaves an email or phone here and the question comes to you. Your assistant leaves prices, availability, bookings and complaints to you.',
+  /** Only when the server sends no demo note of its own. */
+  demoNote: 'Demo: on the live site, this question would go to the team.',
   demoCap: "This demo has reached today's message limit. Come back tomorrow.",
   notSent: 'Not sent.',
   tryAgain: 'Try again',
-  tooLong: 'Keep your question under 1,000 characters.',
+  tooLong: (max: number) => `Keep your question under ${max.toLocaleString('en-CA')} characters.`,
   rateLimited: 'Too many tries. Wait a few minutes, then try again.',
   deadTitle: 'This link no longer works',
   deadBody: 'Ask the person who sent it for a new one.',
@@ -21,7 +21,7 @@ const en = {
   loadFailed: "We couldn't load this demo. Check your connection and try again.",
   you: 'You',
   loading: 'Loading',
-  chars: (n: number) => `${n} of 1,000 characters`,
+  chars: (n: number, max: number) => `${n.toLocaleString('en-CA')} of ${max.toLocaleString('en-CA')} characters`,
 };
 
 const fr: typeof en = {
@@ -30,12 +30,11 @@ const fr: typeof en = {
   inputLabel: 'Votre question',
   send: 'Envoyer',
   thinking: 'Je cherche la réponse…',
-  demoNote:
-    'Sur votre site, le visiteur laisse ici son courriel ou son numéro, et la question vous arrive. Votre assistant vous laisse les questions de prix, de disponibilités, de réservations et de plaintes.',
+  demoNote: 'Démo : sur le vrai site, cette question irait à l’équipe.',
   demoCap: 'Cette démo a atteint la limite de messages du jour. Revenez demain.',
   notSent: 'Non envoyé.',
   tryAgain: 'Réessayer',
-  tooLong: 'Votre question doit faire moins de 1 000 caractères.',
+  tooLong: (max) => `Votre question doit faire moins de ${max.toLocaleString('fr-CA')} caractères.`,
   rateLimited: "Trop d'essais. Attendez quelques minutes, puis réessayez.",
   deadTitle: 'Ce lien ne fonctionne plus',
   deadBody: "Demandez-en un nouveau à la personne qui vous l'a envoyé.",
@@ -44,7 +43,7 @@ const fr: typeof en = {
   loadFailed: "Nous n'avons pas pu charger cette démo. Vérifiez votre connexion, puis réessayez.",
   you: 'Vous',
   loading: 'Chargement',
-  chars: (n) => `${n} sur 1 000 caractères`,
+  chars: (n, max) => `${n.toLocaleString('fr-CA')} sur ${max.toLocaleString('fr-CA')} caractères`,
 };
 
 export const SITE_STRINGS: Record<Lang, typeof en> = { en, fr };
