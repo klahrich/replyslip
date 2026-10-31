@@ -18,10 +18,10 @@ const REPLYSLIP_ONLY_PAGES = ['/', '/privacy', '/terms'];
 const toValettoHome = (source: string, has: typeof VALETTO_HOST) => ({ source, has, destination: 'https://valetto.tech/', statusCode: 301 as const });
 
 const noReferrer = { key: 'Referrer-Policy', value: 'no-referrer' };
-/** Page routes: /i and /i/:token (invite and link landing), /claim, /c… (customer), /sign-in. */
-const CUSTOMER_PAGES = ['/i', '/i/:path*', '/claim', '/c', '/c/:path*', '/sign-in', '/sign-in/:path*'];
-/** R1–R8 (/api/v1/c/*) and the auth routes the customer page calls (request-code, verify-code, me, logout). */
-const CUSTOMER_API = ['/api/v1/c/:path*', '/api/v1/auth/:path*'];
+/** Page routes: /i and /i/:token (invite and link landing), /claim, /c… (customer), /sign-in, /s… (site assistant demo). */
+const CUSTOMER_PAGES = ['/i', '/i/:path*', '/claim', '/c', '/c/:path*', '/sign-in', '/sign-in/:path*', '/s', '/s/:path*'];
+/** R1–R8 (/api/v1/c/*), the auth routes the customer page calls (request-code, verify-code, me, logout), and the site assistant demo API (/api/v1/s/*). */
+const CUSTOMER_API = ['/api/v1/c/:path*', '/api/v1/auth/:path*', '/api/v1/s/:path*'];
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['postgres', 'ajv'],

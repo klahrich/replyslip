@@ -1,0 +1,6 @@
+{
+  "businesses": [
+    { "slug": "maple-ridge-landscaping", "name": "Maple Ridge Landscaping", "context_file": "maple-ridge-landscaping.md", "tile_color": "#2F5D50" },
+    { "slug": "peinture-boreale", "name": "Peinture Boréale", "context_file": "peinture-boreale.md", "url": "https://peinture-boreale.example/" }
+  ]
+}

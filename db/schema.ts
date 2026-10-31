@@ -1,8 +1,12 @@
 import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
+  bigint,
   boolean,
   check,
+  customType,
+  date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -10,6 +14,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -586,6 +591,254 @@ export const wakes = pgTable(
   ],
 );
 
+/** Raw bytes (screenshots). Drizzle has no built-in bytea. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => 'bytea',
+});
+
+/**
+ * Site assistant demo (story 0b). One row per business Karim picked. Not tied to a workspace: Valetto holds it
+ * until a claim (later stories). The context markdown and the suggested questions are separate columns, so the
+ * suggested questions never count as a source in the verbatim quote check.
+ */
+export const siteBusinesses = pgTable(
+  'site_businesses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    displayName: text('display_name').notNull(),
+    sourceUrl: text('source_url').notNull(),
+    scrapedAt: ts('scraped_at'),
+    /** RedBot's markdown with the "Suggested questions" section removed. This is the only answer source. */
+    contextMd: text('context_md').notNull(),
+    /** Plain strings from the "Suggested questions" section, in order. Never a source. */
+    suggestedQuestions: jsonb('suggested_questions').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    desktopShot: bytea('desktop_shot'),
+    desktopShotType: text('desktop_shot_type'),
+    mobileShot: bytea('mobile_shot'),
+    mobileShotType: text('mobile_shot_type'),
+    /** Main language of the business's pages (RedBot's `language`, else detected). */
+    language: text('language').notNull().default('en'),
+    /** Chat tile colour (#rrggbb). Null: the server picks one from the slug. */
+    tileColor: text('tile_color'),
+    visitorDailyMessageCap: integer('visitor_daily_message_cap').notNull().default(20),
+    dailyMessageCap: integer('daily_message_cap').notNull().default(30),
+    dailyCostCapMicroUsd: bigint('daily_cost_cap_micro_usd', { mode: 'number' }).notNull().default(250_000),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('site_businesses_slug_unique').on(table.slug),
+    check('site_businesses_slug_check', sql`${table.slug} ~ '^[a-z0-9][a-z0-9-]{1,62}$'`),
+    check('site_businesses_display_name_check', sql`char_length(${table.displayName}) between 1 and 120`),
+    check('site_businesses_source_url_check', sql`${table.sourceUrl} ~ '^https?://'`),
+    check('site_businesses_context_check', sql`char_length(${table.contextMd}) <= 200000`),
+    check('site_businesses_suggested_check', sql`jsonb_typeof(${table.suggestedQuestions}) = 'array'`),
+    check(
+      'site_businesses_desktop_shot_check',
+      sql`(${table.desktopShot} is null) = (${table.desktopShotType} is null) and (${table.desktopShotType} is null or ${table.desktopShotType} in ('image/png', 'image/jpeg', 'image/webp'))`,
+    ),
+    check(
+      'site_businesses_mobile_shot_check',
+      sql`(${table.mobileShot} is null) = (${table.mobileShotType} is null) and (${table.mobileShotType} is null or ${table.mobileShotType} in ('image/png', 'image/jpeg', 'image/webp'))`,
+    ),
+    check('site_businesses_language_check', sql`${table.language} in ('en', 'fr')`),
+    check('site_businesses_tile_color_check', sql`${table.tileColor} is null or ${table.tileColor} ~ '^#[0-9a-f]{6}$'`),
+    check(
+      'site_businesses_caps_check',
+      sql`${table.visitorDailyMessageCap} >= 0 and ${table.dailyMessageCap} >= 0 and ${table.dailyCostCapMicroUsd} >= 0`,
+    ),
+  ],
+);
+
+/** Private demo link. Only the sha256 of the random token is stored. */
+export const siteDemoLinks = pgTable(
+  'site_demo_links',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: uuid('business_id')
+      .notNull()
+      .references(() => siteBusinesses.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: ts('expires_at').notNull().default(sql`now() + interval '30 days'`),
+    revokedAt: ts('revoked_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('site_demo_links_token_hash_unique').on(table.tokenHash),
+    unique('site_demo_links_id_business_unique').on(table.id, table.businessId),
+    index('site_demo_links_business_idx').on(table.businessId, table.createdAt),
+  ],
+);
+
+/** One conversation per visitor cookie per demo link. */
+export const siteConversations = pgTable(
+  'site_conversations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: uuid('business_id').notNull(),
+    demoLinkId: uuid('demo_link_id').notNull(),
+    visitorTokenHash: text('visitor_token_hash').notNull(),
+    mode: text('mode').notNull().default('demo'),
+    language: text('language'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    lastMessageAt: ts('last_message_at').notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'site_conversations_demo_link_fk',
+      columns: [table.demoLinkId, table.businessId],
+      foreignColumns: [siteDemoLinks.id, siteDemoLinks.businessId],
+    }).onDelete('cascade'),
+    unique('site_conversations_id_business_unique').on(table.id, table.businessId),
+    uniqueIndex('site_conversations_visitor_unique').on(table.demoLinkId, table.visitorTokenHash),
+    index('site_conversations_last_message_idx').on(table.lastMessageAt),
+    check('site_conversations_mode_check', sql`${table.mode} in ('demo')`),
+    check('site_conversations_language_check', sql`${table.language} is null or ${table.language} in ('en', 'fr', 'other')`),
+  ],
+);
+
+/**
+ * Pre-generated answers to a business's suggested questions. Karim checks each one (checked_at) before a demo
+ * link goes out; unchecked rows never reach the page. Re-generating clears checked_at.
+ */
+export const siteSuggestedAnswers = pgTable(
+  'site_suggested_answers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: uuid('business_id')
+      .notNull()
+      .references(() => siteBusinesses.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    question: text('question').notNull(),
+    answer: text('answer').notNull(),
+    status: text('status').notNull(),
+    topic: text('topic'),
+    language: text('language').notNull(),
+    decidedBy: text('decided_by').notNull(),
+    sourcesKept: jsonb('sources_kept').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    rawOutput: jsonb('raw_output'),
+    model: text('model'),
+    generatedAt: ts('generated_at').notNull().defaultNow(),
+    checkedAt: ts('checked_at'),
+  },
+  (table) => [
+    unique('site_suggested_answers_id_business_unique').on(table.id, table.businessId),
+    uniqueIndex('site_suggested_answers_question_unique').on(table.businessId, table.question),
+    check('site_suggested_answers_question_check', sql`char_length(${table.question}) between 1 and 1000`),
+    check(
+      'site_suggested_answers_status_check',
+      sql`${table.status} in ('answered', 'needs_owner', 'off_topic', 'capped')`,
+    ),
+    check('site_suggested_answers_language_check', sql`${table.language} in ('en', 'fr', 'other')`),
+  ],
+);
+
+export const siteMessages = pgTable(
+  'site_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: uuid('business_id').notNull(),
+    conversationId: uuid('conversation_id').notNull(),
+    role: text('role').notNull(),
+    body: text('body').notNull(),
+    /** Assistant rows only. */
+    status: text('status'),
+    topic: text('topic'),
+    language: text('language'),
+    /** Which server rule decided the status (spec 4.2 rule 10). */
+    decidedBy: text('decided_by'),
+    sourcesKept: jsonb('sources_kept').$type<string[]>(),
+    sourcesDropped: jsonb('sources_dropped').$type<string[]>(),
+    ownerQuestion: text('owner_question'),
+    /** Raw model output, for review. Never sent to the visitor. */
+    rawOutput: jsonb('raw_output'),
+    suggestedAnswerId: uuid('suggested_answer_id'),
+    clientMessageId: uuid('client_message_id'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    costMicroUsd: bigint('cost_micro_usd', { mode: 'number' }),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'site_messages_conversation_fk',
+      columns: [table.conversationId, table.businessId],
+      foreignColumns: [siteConversations.id, siteConversations.businessId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'site_messages_suggested_answer_fk',
+      columns: [table.suggestedAnswerId, table.businessId],
+      foreignColumns: [siteSuggestedAnswers.id, siteSuggestedAnswers.businessId],
+    }),
+    uniqueIndex('site_messages_client_unique')
+      .on(table.conversationId, table.role, table.clientMessageId)
+      .where(sql`${table.clientMessageId} is not null`),
+    index('site_messages_conversation_idx').on(table.conversationId, table.createdAt),
+    check('site_messages_role_check', sql`${table.role} in ('visitor', 'assistant')`),
+    check('site_messages_body_check', sql`char_length(${table.body}) <= 4000`),
+    check(
+      'site_messages_status_check',
+      sql`${table.status} is null or ${table.status} in ('answered', 'needs_owner', 'off_topic', 'capped')`,
+    ),
+    check('site_messages_language_check', sql`${table.language} is null or ${table.language} in ('en', 'fr', 'other')`),
+  ],
+);
+
+/** Per-business daily usage. reserved_micro_usd holds in-flight worst-case costs (reserve, then settle). */
+export const siteUsageDaily = pgTable(
+  'site_usage_daily',
+  {
+    businessId: uuid('business_id')
+      .notNull()
+      .references(() => siteBusinesses.id, { onDelete: 'cascade' }),
+    day: date('day', { mode: 'string' }).notNull(),
+    messages: integer('messages').notNull().default(0),
+    llmCalls: integer('llm_calls').notNull().default(0),
+    inputTokens: bigint('input_tokens', { mode: 'number' }).notNull().default(0),
+    outputTokens: bigint('output_tokens', { mode: 'number' }).notNull().default(0),
+    costMicroUsd: bigint('cost_micro_usd', { mode: 'number' }).notNull().default(0),
+    reservedMicroUsd: bigint('reserved_micro_usd', { mode: 'number' }).notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.businessId, table.day] }),
+    check('site_usage_daily_nonneg_check', sql`${table.messages} >= 0 and ${table.reservedMicroUsd} >= 0 and ${table.costMicroUsd} >= 0`),
+  ],
+);
+
+/** Global daily LLM spend across every business. */
+export const siteUsageGlobalDaily = pgTable(
+  'site_usage_global_daily',
+  {
+    day: date('day', { mode: 'string' }).primaryKey(),
+    llmCalls: integer('llm_calls').notNull().default(0),
+    costMicroUsd: bigint('cost_micro_usd', { mode: 'number' }).notNull().default(0),
+    reservedMicroUsd: bigint('reserved_micro_usd', { mode: 'number' }).notNull().default(0),
+  },
+  (table) => [
+    check('site_usage_global_daily_nonneg_check', sql`${table.reservedMicroUsd} >= 0 and ${table.costMicroUsd} >= 0`),
+  ],
+);
+
+/** Per-visitor (conversation) daily message count. */
+export const siteVisitorUsageDaily = pgTable(
+  'site_visitor_usage_daily',
+  {
+    conversationId: uuid('conversation_id').notNull(),
+    businessId: uuid('business_id').notNull(),
+    day: date('day', { mode: 'string' }).notNull(),
+    messages: integer('messages').notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.conversationId, table.day] }),
+    foreignKey({
+      name: 'site_visitor_usage_conversation_fk',
+      columns: [table.conversationId, table.businessId],
+      foreignColumns: [siteConversations.id, siteConversations.businessId],
+    }).onDelete('cascade'),
+  ],
+);
+
 export type AgentRow = typeof agents.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
@@ -597,3 +850,8 @@ export type AgentShareRow = typeof agentShares.$inferSelect;
 export type CustomerInviteRow = typeof customerInvites.$inferSelect;
 export type AgentBrandingRow = typeof agentBranding.$inferSelect;
 export type TaskAnswerRow = typeof taskAnswers.$inferSelect;
+export type SiteBusinessRow = typeof siteBusinesses.$inferSelect;
+export type SiteDemoLinkRow = typeof siteDemoLinks.$inferSelect;
+export type SiteConversationRow = typeof siteConversations.$inferSelect;
+export type SiteMessageRow = typeof siteMessages.$inferSelect;
+export type SiteSuggestedAnswerRow = typeof siteSuggestedAnswers.$inferSelect;

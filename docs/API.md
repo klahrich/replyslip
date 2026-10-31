@@ -644,6 +644,24 @@ Not an agent API. The Valetto early-access form posts here. Nothing is stored ex
 
 `400` `{ "ok": false, "errors": { "<field>": "<message>" } }` has one message per bad field. A body that is not a JSON object is `400` without `errors`, and a non-JSON Content-Type is `415`. Each IP gets 10 requests per 60 minutes, valid or not; then `429` with `Retry-After`. A present `Origin` must exactly equal one of the comma-separated `APP_ORIGIN` entries (or the request's own origin when `APP_ORIGIN` is unset), and `Sec-Fetch-Site: cross-site` is refused; both are `403` `bad_origin`. Responses set `Cache-Control: no-store`.
 
+## Valetto site assistant demo
+
+Not an agent API. The private demo page `/s/demo/<token>` (story 0b) calls these. Off (`404`) unless `VALETTO_SITE_ASSISTANT=1`. The token is at least 22 base64url characters in the path; only its SHA-256 is stored, and the business always comes from the token. Every `/s/*` and `/api/v1/s/*` response, errors included, has `Cache-Control: private, no-store`, `X-Robots-Tag: noindex, nofollow`, and `Referrer-Policy: no-referrer`, and none is in a sitemap. Links expire after 30 days. An unknown, malformed or revoked token is `404` `demo_not_found`; an expired one is `410` `demo_expired` (the screenshot routes say `404` for that too). Errors use `{ "error": { "code", "message", "details"? } }`. The demo takes no visitor contact details, and no reply asks for them.
+
+### GET `/api/v1/s/demo/:token`
+
+`200` `{ "business": { "name", "status": "unclaimed", "tile": { "color", "logo_url": null }, "language": "en" | "fr" }, "banner": { "en", "fr" }, "suggested_questions": [{ "id", "question", "answer", "language", "checked_at" }], "messages": [...], "notice": { "en", "fr" }, "expires_at", "message_max_chars": 1000 }`. `business.language` is the main language of the business's own site. `suggested_questions` has only answers an operator has checked. `messages` is this visitor's conversation, oldest first, found by the visitor cookie; without the cookie it is empty and no cookie is set. Each message is `{ "id", "role", "body", "status", "created_at", "language", "client_message_id", "suggested_question_id", "handoff_reason", "demo_note" }`; `status` is `answered`, `needs_owner`, or `off_topic` on assistant rows and `null` on visitor rows. Each IP gets 300 reads per 15 minutes across these routes, then `429` `rate_limited`.
+
+### POST `/api/v1/s/demo/:token/messages`
+
+`Content-Type: application/json`. Body: `{ "client_message_id", "text" }` (`body` is accepted for `text`), or `{ "suggested_question_id", "client_message_id"? }`. `client_message_id` is a UUID and makes the call idempotent: the same id again returns the stored reply with no second model call, and `409` `message_in_progress` while the first is still running. Text is trimmed; over 1000 characters is `400` `message_too_long`. Unknown keys are `400`. A tapped suggested question saves the question and its checked answer and returns it with no model call; an unchecked or other business's id is `404` `suggested_question_not_found`.
+
+`200` `{ "message" }`, the assistant reply in the message shape above. No streaming. The first message sets an `HttpOnly`, `Secure`, `SameSite=Lax` visitor cookie scoped to `/api/v1/s/demo/<token>`, kept 30 days. The server, not the model, decides the status: quotes not found word for word in the business's pages are dropped; no surviving quote, a price, availability, booking or complaint topic or keyword, another language, or a URL, email or phone not in the pages sends the fixed "I'll check with the team" reply (`needs_owner`, with `handoff_reason` and a demo note); an off-topic question gets a fixed reply too; a model error, timeout or bad output is `needs_owner`. Each IP gets 30 posts per 15 minutes, then `429` `rate_limited`. The daily caps (20 messages per visitor, 30 per business, $0.25 of model use per business, $5 overall) are `429` `daily_limit`; that attempt keeps no messages. A present `Origin` must match `APP_ORIGIN`, and `Sec-Fetch-Site: cross-site` is `403` `bad_origin`.
+
+### GET `/s/demo/:token/shot/desktop`, `/s/demo/:token/shot/mobile`
+
+The stored homepage screenshot behind the chat, from the database (`image/webp`, `image/png` or `image/jpeg`, `X-Content-Type-Options: nosniff`). `404` for a bad, revoked or expired token or a missing screenshot.
+
 ## Admin
 
 Not an agent API. `GET /api/admin/stats` is counts for the operator. The route is off unless `STATS_API_KEY` is set.

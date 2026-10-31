@@ -1,0 +1,504 @@
+import { randomUUID } from 'node:crypto';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { and, eq, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import sharp from 'sharp';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getDb } from '@/db';
+import * as schema from '@/db/schema';
+import {
+  siteBusinesses,
+  siteConversations,
+  siteDemoLinks,
+  siteMessages,
+  siteSuggestedAnswers,
+  siteUsageDaily,
+  siteUsageGlobalDaily,
+  siteVisitorUsageDaily,
+} from '@/db/schema';
+import { GET as demoRoute } from '@/app/api/v1/s/demo/[token]/route';
+import { POST as messagesRoute } from '@/app/api/v1/s/demo/[token]/messages/route';
+import { GET as shotRoute } from '@/app/(customer)/s/demo/[token]/shot/[kind]/route';
+import { capLimitsFor, reserveSiteUsage, settleSiteUsage, usageDay } from '@/lib/site-assistant/caps';
+import { createDemoLink, deleteOldDemoConversations } from '@/lib/site-assistant/demo';
+import {
+  importRedbotBusinesses,
+  listUncheckedSuggestedAnswers,
+  loadRedbotBusinesses,
+  revokeDemoLinks,
+  setSuggestedAnswerChecked,
+} from '@/lib/site-assistant/import';
+import { setSiteLlmTransportForTests } from '@/lib/site-assistant/llm';
+import { cappedReply, needsOwnerReply } from '@/lib/site-assistant/replies';
+import { call } from './helpers';
+import { answer, createSiteBusiness, createSiteDemo, FIXTURE_DIR, fakeModel, NO_MODEL, TEST_LLM_CONFIG } from './site-fixtures';
+
+const URL_BASE = 'http://localhost';
+
+beforeEach(() => {
+  vi.stubEnv('VALETTO_SITE_ASSISTANT', '1');
+  vi.stubEnv('SITE_LLM_API_KEY', 'test-not-a-real-key');
+  vi.stubEnv('SITE_LLM_BASE_URL', 'https://llm.invalid/v1');
+  setSiteLlmTransportForTests(NO_MODEL);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  setSiteLlmTransportForTests(null);
+});
+
+function info(token: string, cookie?: string) {
+  return call(demoRoute as never, `${URL_BASE}/api/v1/s/demo/${token}`, { params: { token }, cookie });
+}
+const conversation = info;
+function send(token: string, body: unknown, cookie?: string, headers?: Record<string, string>) {
+  return call(messagesRoute as never, `${URL_BASE}/api/v1/s/demo/${token}/messages`, { params: { token }, body, cookie, headers });
+}
+function shot(token: string, kind: string) {
+  return call(shotRoute as never, `${URL_BASE}/s/demo/${token}/shot/${kind}`, { params: { token, kind } });
+}
+
+function expectSiteHeaders(res: Response) {
+  expect(res.headers.get('x-robots-tag')).toBe('noindex, nofollow');
+  expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+  expect(res.headers.get('cache-control')).toBe('private, no-store');
+}
+
+async function addSuggestion(businessId: string, checked: boolean, question = 'What areas do you serve?') {
+  const [row] = await getDb()
+    .insert(siteSuggestedAnswers)
+    .values({
+      businessId,
+      position: 0,
+      question,
+      answer: 'We serve Ottawa, Kanata and Orleans.',
+      status: 'answered',
+      topic: 'general',
+      language: 'en',
+      decidedBy: 'answered',
+      sourcesKept: ['serving Ottawa, Kanata and Orleans'],
+      checkedAt: checked ? new Date() : null,
+    })
+    .returning();
+  return row!;
+}
+
+describe('demo info and conversation', () => {
+  it('returns the banner, notice and only checked suggested questions', async () => {
+    const { business, token } = await createSiteDemo();
+    const checked = await addSuggestion(business.id, true);
+    await addSuggestion(business.id, false, 'Do you do snow removal?');
+    const res = await info(token);
+    expect(res.status).toBe(200);
+    expectSiteHeaders(res.res);
+    expect(res.data.business).toEqual({ name: 'Maple Ridge Landscaping', status: 'unclaimed', tile: { color: expect.stringMatching(/^#[0-9a-f]{6}$/), logo_url: null }, language: 'en' });
+    expect(Object.keys(res.data)).toEqual(expect.arrayContaining(['business', 'banner', 'suggested_questions', 'messages']));
+    expect(res.data.messages).toEqual([]);
+    expect(res.data.banner.en).toBe(
+      "Demo built by Valetto from Maple Ridge Landscaping's public pages. Not operated by Maple Ridge Landscaping. Answers may be wrong.",
+    );
+    expect(res.data.banner.fr).toBe(
+      'Démo créée par Valetto à partir des pages publiques de Maple Ridge Landscaping. Non exploitée par Maple Ridge Landscaping. Les réponses peuvent être erronées.',
+    );
+    expect(res.data.notice.en).toMatch(/demo/i);
+    expect(res.data.suggested_questions).toEqual([
+      { id: checked.id, question: checked.question, answer: checked.answer, language: 'en', checked_at: checked.checkedAt!.toISOString() },
+    ]);
+    expect(JSON.stringify(res.data)).not.toContain(business.id);
+  });
+
+  it('is 404 for unknown, malformed and revoked tokens, and 410 demo_expired when expired', async () => {
+    const { business, token, link } = await createSiteDemo();
+    expect((await info('short')).status).toBe(404);
+    expect((await info('A'.repeat(32))).status).toBe(404);
+    await getDb().update(siteDemoLinks).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(siteDemoLinks.id, link.id));
+    const expired = await info(token);
+    expect(expired.status).toBe(410);
+    expect(expired.data.error.code).toBe('demo_expired');
+    expectSiteHeaders(expired.res);
+    expect((await conversation(token)).status).toBe(410);
+    expect((await send(token, { client_message_id: randomUUID(), text: 'Hi' })).status).toBe(410);
+    const fresh = await createDemoLink(getDb(), business.id);
+    await revokeDemoLinks(getDb(), business.slug);
+    const revoked = await info(fresh.token);
+    expect(revoked.status).toBe(404);
+    expect(revoked.data.error.code).toBe('demo_not_found');
+  });
+
+  it('defaults links to 30 days', async () => {
+    const { link } = await createSiteDemo();
+    const days = (link.expiresAt.getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(29.9);
+    expect(days).toBeLessThan(30.1);
+  });
+
+  it('is 404 everywhere while the feature flag is off', async () => {
+    const { token } = await createSiteDemo();
+    vi.stubEnv('VALETTO_SITE_ASSISTANT', '');
+    const res = await info(token);
+    expect(res.status).toBe(404);
+    expectSiteHeaders(res.res);
+    expect((await shot(token, 'desktop')).status).toBe(404);
+  });
+
+  it('returns no messages and sets no cookie without a visitor cookie', async () => {
+    const { token } = await createSiteDemo();
+    const res = await conversation(token);
+    expect(res.status).toBe(200);
+    expect(res.data.messages).toEqual([]);
+    expect(res.res.headers.get('set-cookie')).toBeNull();
+  });
+});
+
+describe('messages', () => {
+  it('answers, sets a demo-scoped visitor cookie, and lists the conversation', async () => {
+    const { token } = await createSiteDemo();
+    const model = fakeModel(() => answer({}));
+    setSiteLlmTransportForTests(model.transport);
+    const res = await send(token, { client_message_id: randomUUID(), text: 'What areas do you serve?' });
+    expect(res.status).toBe(200);
+    expectSiteHeaders(res.res);
+    expect(Object.keys(res.data)).toEqual(['message']);
+    expect(res.data.message).toMatchObject({ role: 'assistant', status: 'answered', body: 'We serve Ottawa, Kanata and Orleans.' });
+    expect(res.data.message).toHaveProperty('id');
+    expect(res.data.message).toHaveProperty('created_at');
+    const setCookie = res.res.headers.get('set-cookie')!;
+    expect(setCookie).toMatch(/HttpOnly/);
+    expect(setCookie).toMatch(/Secure/);
+    expect(setCookie).toContain(`Path=/api/v1/s/demo/${token}`);
+    expect(model.calls).toHaveLength(1);
+
+    const list = await conversation(token, res.cookie!);
+    expect(list.data.messages.map((m: { role: string; status: string | null }) => [m.role, m.status])).toEqual([
+      ['visitor', null],
+      ['assistant', 'answered'],
+    ]);
+    // The cookie is scoped to this demo: another demo's load doesn't see this conversation.
+    const other = await createSiteDemo();
+    expect((await info(other.token, res.cookie!)).data.messages).toEqual([]);
+  });
+
+  it('sends prior messages of this conversation only', async () => {
+    const { token } = await createSiteDemo();
+    const model = fakeModel(() => answer({}));
+    setSiteLlmTransportForTests(model.transport);
+    const first = await send(token, { client_message_id: randomUUID(), text: 'Do you do snow removal?' });
+    await send(token, { client_message_id: randomUUID(), text: 'Other visitor secret question about lawns' });
+    await send(token, { client_message_id: randomUUID(), text: 'And in Kanata?' }, first.cookie!);
+    const third = JSON.parse(model.calls[2]!.body).input[0].content[0].text as string;
+    expect(third).toContain('Do you do snow removal?');
+    expect(third).not.toContain('Other visitor secret');
+  });
+
+  it('is idempotent on client_message_id', async () => {
+    const { token } = await createSiteDemo();
+    const model = fakeModel(() => answer({}));
+    setSiteLlmTransportForTests(model.transport);
+    const id = randomUUID();
+    const a = await send(token, { client_message_id: id, text: 'What areas do you serve?' });
+    const b = await send(token, { client_message_id: id, text: 'What areas do you serve?' }, a.cookie!);
+    expect(b.status).toBe(200);
+    expect(b.data.message.id).toBe(a.data.message.id);
+    expect((await info(token, a.cookie!)).data.messages).toHaveLength(2);
+    expect(model.calls).toHaveLength(1);
+  });
+
+  it('answers a tapped checked suggestion from storage with zero model calls', async () => {
+    const { business, token } = await createSiteDemo();
+    const suggestion = await addSuggestion(business.id, true);
+    const unchecked = await addSuggestion(business.id, false, 'Unchecked?');
+    const res = await send(token, { client_message_id: randomUUID(), suggested_question_id: suggestion.id });
+    expect(res.status).toBe(200);
+    expect(res.data.message).toMatchObject({ body: suggestion.answer, status: 'answered', suggested_question_id: suggestion.id });
+    const saved = (await info(token, res.cookie!)).data.messages;
+    expect(saved.map((m: { role: string; body: string }) => [m.role, m.body])).toEqual([
+      ['visitor', suggestion.question],
+      ['assistant', suggestion.answer],
+    ]);
+    const again = await send(token, { client_message_id: res.data.message.client_message_id, suggested_question_id: suggestion.id }, res.cookie!);
+    expect(again.data.message.id).toBe(res.data.message.id);
+    // client_message_id is optional on a tap.
+    expect((await send(token, { suggested_question_id: suggestion.id }, res.cookie!)).status).toBe(200);
+    expect((await send(token, { client_message_id: randomUUID(), suggested_question_id: unchecked.id })).status).toBe(404);
+    const other = await createSiteDemo();
+    expect((await send(other.token, { client_message_id: randomUUID(), suggested_question_id: suggestion.id })).status).toBe(404);
+  });
+
+  it('sends keyword questions to the owner without a call, with a demo note', async () => {
+    const { token } = await createSiteDemo();
+    const res = await send(token, { client_message_id: randomUUID(), text: 'How much for a patio?' });
+    expect(res.data.message).toMatchObject({ status: 'needs_owner', body: needsOwnerReply('en'), handoff_reason: 'owner_topic' });
+    expect(res.data.message.demo_note).toMatch(/always go to the owner/);
+  });
+
+  it('rejects bad bodies, long text and cross-site posts', async () => {
+    const { token } = await createSiteDemo();
+    const long = await send(token, { client_message_id: randomUUID(), text: 'x'.repeat(1001) });
+    expect(long.status).toBe(400);
+    expect(long.data.error.code).toBe('message_too_long');
+    expect((await send(token, { client_message_id: randomUUID(), text: 'x'.repeat(1000) })).status).toBe(200);
+    expect((await send(token, { client_message_id: randomUUID(), body: 'What areas?' })).status).toBe(200);
+    expect((await send(token, { text: 'no id' })).status).toBe(400);
+    expect((await send(token, { client_message_id: randomUUID() })).status).toBe(400);
+    expect((await send(token, { client_message_id: randomUUID(), text: 'a', suggested_question_id: randomUUID() })).status).toBe(400);
+    expect((await send(token, { client_message_id: 'nope', text: 'a' })).status).toBe(400);
+    expect((await send(token, { client_message_id: randomUUID(), text: 'a', email: 'x' })).status).toBe(400);
+    const cross = await send(token, { client_message_id: randomUUID(), text: 'Hi' }, undefined, { 'sec-fetch-site': 'cross-site' });
+    expect(cross.status).toBe(403);
+    expectSiteHeaders(cross.res);
+  });
+
+  it('stops at the visitor cap with the fixed message', async () => {
+    const { token } = await createSiteDemo({ visitorDailyMessageCap: 2 });
+    setSiteLlmTransportForTests(fakeModel(() => answer({})).transport);
+    const a = await send(token, { client_message_id: randomUUID(), text: 'Areas?' });
+    await send(token, { client_message_id: randomUUID(), text: 'Areas?' }, a.cookie!);
+    const id = randomUUID();
+    const c = await send(token, { client_message_id: id, text: 'Areas?' }, a.cookie!);
+    expect(c.status).toBe(429);
+    expect(c.data.error).toMatchObject({ code: 'daily_limit', message: cappedReply('en') });
+    expectSiteHeaders(c.res);
+    // Nothing kept for the capped attempt; the same id is free to retry later.
+    expect((await info(token, a.cookie!)).data.messages).toHaveLength(4);
+    expect(await getDb().select().from(siteMessages).where(eq(siteMessages.clientMessageId, id))).toHaveLength(0);
+    // Another visitor still gets through.
+    expect((await send(token, { client_message_id: randomUUID(), text: 'Areas?' })).data.message.status).toBe('answered');
+  });
+});
+
+describe('screenshots', () => {
+  it('serves the stored image, private and noindex, and 404s for bad, revoked or expired tokens', async () => {
+    const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#336699' } }).png().toBuffer();
+    const { token, link } = await createSiteDemo({ desktopShot: png, desktopShotType: 'image/png' });
+    const res = await shot(token, 'desktop');
+    expect(res.status).toBe(200);
+    expect(res.res.headers.get('content-type')).toBe('image/png');
+    expectSiteHeaders(res.res);
+    expect(res.res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect((await shot(token, 'mobile')).status).toBe(404);
+    expect((await shot(token, 'tablet')).status).toBe(404);
+    expect((await shot('B'.repeat(32), 'desktop')).status).toBe(404);
+    await getDb().update(siteDemoLinks).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(siteDemoLinks.id, link.id));
+    const expired = await shot(token, 'desktop');
+    expect(expired.status).toBe(404);
+    expectSiteHeaders(expired.res);
+  });
+});
+
+describe('caps', () => {
+  const clients: ReturnType<typeof postgres>[] = [];
+  afterAll(async () => {
+    await Promise.all(clients.map((c) => c.end()));
+  });
+  function separateDb() {
+    const client = postgres(process.env.DATABASE_URL!, { max: 1, prepare: false, onnotice: () => {} });
+    clients.push(client);
+    return drizzle(client, { schema });
+  }
+  async function conversationFor(businessId: string, linkId: string) {
+    const [row] = await getDb()
+      .insert(siteConversations)
+      .values({ businessId, demoLinkId: linkId, visitorTokenHash: randomUUID() })
+      .returning();
+    return row!;
+  }
+
+  it('lets exactly the cap through when requests race on separate connections', async () => {
+    const { business, link } = await createSiteDemo({ dailyMessageCap: 5, visitorDailyMessageCap: 100 });
+    const convo = await conversationFor(business.id, link.id);
+    const day = usageDay();
+    const limits = capLimitsFor({ ...business, dailyMessageCap: 5 });
+    const dbs = Array.from({ length: 12 }, () => separateDb());
+    const results = await Promise.all(
+      dbs.map((db) => reserveSiteUsage(db, { businessId: business.id, conversationId: convo.id, day, messages: 1, costMicroUsd: 0, limits })),
+    );
+    expect(results.filter((r) => r.ok)).toHaveLength(5);
+    expect(results.filter((r) => !r.ok).every((r) => !r.ok && r.decidedBy === 'cap_business_messages')).toBe(true);
+    const [usage] = await getDb().select().from(siteUsageDaily).where(and(eq(siteUsageDaily.businessId, business.id), eq(siteUsageDaily.day, day)));
+    expect(usage!.messages).toBe(5);
+  });
+
+  it('reserves worst-case cost atomically against the business cap, then settles to actual', async () => {
+    const { business, link } = await createSiteDemo({ dailyCostCapMicroUsd: 1_000 });
+    const convo = await conversationFor(business.id, link.id);
+    const day = usageDay();
+    const limits = { ...capLimitsFor(business), businessDailyCostMicroUsd: 1_000, globalDailyCostMicroUsd: 10_000_000_000 };
+    const dbs = Array.from({ length: 8 }, () => separateDb());
+    const results = await Promise.all(
+      dbs.map((db) => reserveSiteUsage(db, { businessId: business.id, conversationId: convo.id, day, messages: 0, costMicroUsd: 300, limits })),
+    );
+    expect(results.filter((r) => r.ok)).toHaveLength(3);
+    expect(results.find((r) => !r.ok)).toEqual({ ok: false, decidedBy: 'cap_business_cost' });
+    await settleSiteUsage(getDb(), { businessId: business.id, day, reservedMicroUsd: 300, actualMicroUsd: 50, inputTokens: 100, outputTokens: 10, llmCalled: true });
+    const [usage] = await getDb().select().from(siteUsageDaily).where(and(eq(siteUsageDaily.businessId, business.id), eq(siteUsageDaily.day, day)));
+    expect(usage).toMatchObject({ reservedMicroUsd: 600, costMicroUsd: 50, llmCalls: 1, inputTokens: 100 });
+    // Freed room: one more 300 fits (50 + 600 + 300 <= 1000), the next doesn't.
+    expect((await reserveSiteUsage(getDb(), { businessId: business.id, conversationId: convo.id, day, messages: 0, costMicroUsd: 300, limits })).ok).toBe(true);
+    expect((await reserveSiteUsage(getDb(), { businessId: business.id, conversationId: convo.id, day, messages: 0, costMicroUsd: 300, limits })).ok).toBe(false);
+  });
+
+  it('checks the business cap before the global one, and the global cap across businesses', async () => {
+    const day = '2099-01-01';
+    await getDb().delete(siteUsageGlobalDaily).where(eq(siteUsageGlobalDaily.day, day));
+    const a = await createSiteDemo();
+    const b = await createSiteDemo();
+    const ca = await conversationFor(a.business.id, a.link.id);
+    const cb = await conversationFor(b.business.id, b.link.id);
+    const limits = { visitorDailyMessages: 100, businessDailyMessages: 100, businessDailyCostMicroUsd: 600, globalDailyCostMicroUsd: 1_000 };
+    expect(await reserveSiteUsage(getDb(), { businessId: a.business.id, conversationId: ca.id, day, messages: 0, costMicroUsd: 700, limits })).toEqual({ ok: false, decidedBy: 'cap_business_cost' });
+    expect((await reserveSiteUsage(getDb(), { businessId: a.business.id, conversationId: ca.id, day, messages: 0, costMicroUsd: 600, limits })).ok).toBe(true);
+    expect(await reserveSiteUsage(getDb(), { businessId: b.business.id, conversationId: cb.id, day, messages: 0, costMicroUsd: 500, limits })).toEqual({ ok: false, decidedBy: 'cap_global_cost' });
+    // The failed global check rolled back b's business reservation.
+    const [rowB] = await getDb().select().from(siteUsageDaily).where(and(eq(siteUsageDaily.businessId, b.business.id), eq(siteUsageDaily.day, day)));
+    expect(rowB?.reservedMicroUsd ?? 0).toBe(0);
+    await getDb().delete(siteUsageGlobalDaily).where(eq(siteUsageGlobalDaily.day, day));
+  });
+
+  it('caps a business through the route with no model call past the cap', async () => {
+    const { token } = await createSiteDemo({ dailyCostCapMicroUsd: 1 });
+    const res = await send(token, { client_message_id: randomUUID(), text: 'What areas do you serve?' });
+    expect(res.status).toBe(429);
+    expect(res.data.error.code).toBe('daily_limit');
+  });
+});
+
+describe('business isolation (composite foreign keys)', () => {
+  it('rejects a conversation, message or usage row that points at another business', async () => {
+    const a = await createSiteDemo();
+    const b = await createSiteBusiness();
+    const db = getDb();
+    await expect(
+      db.insert(siteConversations).values({ businessId: b.id, demoLinkId: a.link.id, visitorTokenHash: randomUUID() }),
+    ).rejects.toThrow();
+    const [convo] = await db.insert(siteConversations).values({ businessId: a.business.id, demoLinkId: a.link.id, visitorTokenHash: randomUUID() }).returning();
+    await expect(db.insert(siteMessages).values({ businessId: b.id, conversationId: convo!.id, role: 'visitor', body: 'x' })).rejects.toThrow();
+    await expect(db.insert(siteVisitorUsageDaily).values({ businessId: b.id, conversationId: convo!.id, day: usageDay(), messages: 1 })).rejects.toThrow();
+    const suggestionB = await addSuggestion(b.id, true);
+    await expect(
+      db.insert(siteMessages).values({ businessId: a.business.id, conversationId: convo!.id, role: 'visitor', body: 'x', suggestedAnswerId: suggestionB.id }),
+    ).rejects.toThrow();
+  });
+});
+
+describe('retention', () => {
+  it('deletes conversations idle for 30 days with their messages', async () => {
+    const { business, link } = await createSiteDemo();
+    const db = getDb();
+    const [old] = await db.insert(siteConversations).values({ businessId: business.id, demoLinkId: link.id, visitorTokenHash: randomUUID() }).returning();
+    const [recent] = await db.insert(siteConversations).values({ businessId: business.id, demoLinkId: link.id, visitorTokenHash: randomUUID() }).returning();
+    await db.insert(siteMessages).values({ businessId: business.id, conversationId: old!.id, role: 'visitor', body: 'old' });
+    await db.update(siteConversations).set({ lastMessageAt: sql`now() - interval '31 days'` }).where(eq(siteConversations.id, old!.id));
+    expect(await deleteOldDemoConversations(db)).toBeGreaterThanOrEqual(1);
+    expect(await db.select().from(siteConversations).where(eq(siteConversations.id, old!.id))).toHaveLength(0);
+    expect(await db.select().from(siteMessages).where(eq(siteMessages.conversationId, old!.id))).toHaveLength(0);
+    expect(await db.select().from(siteConversations).where(eq(siteConversations.id, recent!.id))).toHaveLength(1);
+  });
+});
+
+describe('import', () => {
+  it('loads RedBot files, stores shots, writes links to a private file, and pre-generates unchecked answers', async () => {
+    const db = getDb();
+    for (const slug of ['maple-ridge-landscaping', 'peinture-boreale']) await db.delete(siteBusinesses).where(eq(siteBusinesses.slug, slug));
+    const businesses = loadRedbotBusinesses(join(FIXTURE_DIR, 'context'), join(FIXTURE_DIR, 'shots'));
+    expect(businesses.map((b) => b.slug)).toEqual(['maple-ridge-landscaping', 'peinture-boreale']);
+    expect(businesses[0]).toMatchObject({ displayName: 'Maple Ridge Landscaping', sourceUrl: 'https://maple-ridge-landscaping.example/' });
+    expect(businesses[0]!.suggestedQuestions).toEqual(['What areas do you serve?', 'Do you offer a warranty on interlock?', 'Do you do snow removal?']);
+    expect(businesses[1]!.suggestedQuestions[0]).toBe('Faites-vous la peinture extérieure ?');
+    expect(businesses[0]!.contextMd).not.toContain('Suggested questions');
+
+    const dir = mkdtempSync(join(tmpdir(), 'site-import-'));
+    const linkFile = join(dir, 'links.txt');
+    const model = fakeModel((req) => {
+      const text = JSON.parse(req.body).input[0].content[0].text as string;
+      return text.includes('Peinture') ? answer({ reply: 'Oui.', language: 'fr', sources: ['Peinture extérieure : revêtement, galeries et clôtures'] }) : answer({});
+    });
+    const logs: string[] = [];
+    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', transport: model.transport, config: TEST_LLM_CONFIG, log: (l) => logs.push(l) });
+
+    expect(statSync(linkFile).mode & 0o777).toBe(0o600);
+    const lines = readFileSync(linkFile, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^maple-ridge-landscaping\thttps:\/\/valetto\.test\/s\/demo\/[A-Za-z0-9_-]{32}\texpires /);
+    expect(logs.join('\n')).not.toMatch(/\/s\/demo\//);
+
+    const [maple] = await db.select().from(siteBusinesses).where(eq(siteBusinesses.slug, 'maple-ridge-landscaping'));
+    expect(maple!.desktopShotType).toBe('image/webp');
+    expect(maple!.tileColor).toBe('#2f5d50');
+    expect(maple!.language).toBe('en');
+    const [boreale] = await db.select({ language: siteBusinesses.language }).from(siteBusinesses).where(eq(siteBusinesses.slug, 'peinture-boreale'));
+    expect(boreale!.language).toBe('fr');
+    const meta = await sharp(maple!.desktopShot!).metadata();
+    expect(meta.width).toBe(1440);
+    expect(meta.height).toBeLessThanOrEqual(2000);
+    expect(model.calls).toHaveLength(6);
+    const unchecked = await listUncheckedSuggestedAnswers(db, 'maple-ridge-landscaping');
+    expect(unchecked).toHaveLength(3);
+
+    // The page shows nothing until Karim checks one.
+    const token = lines[0]!.split('\t')[1]!.split('/').pop()!;
+    expect((await info(token)).data.suggested_questions).toEqual([]);
+    expect(await setSuggestedAnswerChecked(db, unchecked[0]!.id, true)).toBe(true);
+    expect((await info(token)).data.suggested_questions).toHaveLength(1);
+
+    // Re-run: no new link, checked answers kept, unchecked ones regenerated.
+    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', transport: model.transport, config: TEST_LLM_CONFIG, log: () => {} });
+    expect(readFileSync(linkFile, 'utf8').trim().split('\n')).toHaveLength(2);
+    expect(model.calls).toHaveLength(6 + 5);
+    expect((await info(token)).data.suggested_questions).toHaveLength(1);
+  });
+
+  it("reads RedBot's real layout: array index, screenshots object, Language line, desktop fallback to context/<slug>.png", () => {
+    const root = mkdtempSync(join(tmpdir(), 'site-redbot-'));
+    const context = join(root, 'context');
+    const shots = join(root, 'shots');
+    mkdirSync(context);
+    mkdirSync(shots);
+    const md = (title: string, lang: string, q: string) =>
+      `# ${title}\nSource: https://${title.toLowerCase().replace(/[^a-z]+/g, '-')}.example/\nScraped: 2026-10-30\nLanguage: ${lang}\n\n## Suggested questions\n1. ${q}\n\n## About\nText.\n`;
+    writeFileSync(join(context, 'alpha.md'), md('Alpha Roofing', 'en', 'Do metal roofs make noise?'));
+    writeFileSync(join(context, 'beta.md'), md('Beta Peinture', 'fr', 'Faites-vous les plafonds?'));
+    writeFileSync(join(context, 'gamma.md'), md('Gamma Movers', 'en', 'Do you move pianos?'));
+    writeFileSync(
+      join(context, 'index.json'),
+      JSON.stringify([
+        { slug: 'alpha', name: 'Alpha Roofing', site: 'https://alpha.example/', language: 'en', screenshots: { desktop_1440: 'shots/alpha-desktop.png', mobile_390: 'shots/alpha-mobile.png' } },
+        { slug: 'beta', name: 'Beta Peinture', site: 'https://beta.example/', screenshots: { desktop_1440: 'shots/beta-desktop.png' } },
+        { slug: 'gamma', name: 'Gamma Movers', site: 'https://gamma.example/', language: 'fr' },
+      ]),
+    );
+    const png = join(FIXTURE_DIR, 'shots', 'maple-ridge-landscaping-desktop.png');
+    copyFileSync(png, join(shots, 'alpha-desktop.png'));
+    copyFileSync(join(FIXTURE_DIR, 'shots', 'maple-ridge-landscaping-mobile.png'), join(shots, 'alpha-mobile.png'));
+    copyFileSync(png, join(context, 'beta.png'));
+    copyFileSync(png, join(context, 'gamma.png'));
+    copyFileSync(png, join(shots, 'gamma-desktop.png'));
+
+    const [alpha, beta, gamma] = loadRedbotBusinesses(context);
+    expect(alpha).toMatchObject({ slug: 'alpha', displayName: 'Alpha Roofing', sourceUrl: 'https://alpha.example/', language: 'en', suggestedQuestions: ['Do metal roofs make noise?'] });
+    expect(alpha!.desktopShotPath).toBe(join(shots, 'alpha-desktop.png'));
+    expect(alpha!.mobileShotPath).toBe(join(shots, 'alpha-mobile.png'));
+    // No language in the index: the file's Language line decides. Desktop falls back to context/<slug>.png.
+    expect(beta).toMatchObject({ language: 'fr', desktopShotPath: join(context, 'beta.png'), mobileShotPath: null });
+    // shots/ wins over context/<slug>.png, and the index's language wins over the file.
+    expect(gamma).toMatchObject({ language: 'fr', desktopShotPath: join(shots, 'gamma-desktop.png') });
+  });
+
+  it('skips the suggested answers without a key, and says so', async () => {
+    const db = getDb();
+    await db.delete(siteBusinesses).where(eq(siteBusinesses.slug, 'maple-ridge-landscaping'));
+    const businesses = loadRedbotBusinesses(join(FIXTURE_DIR, 'context'), join(FIXTURE_DIR, 'shots')).slice(0, 1);
+    const logs: string[] = [];
+    const dir = mkdtempSync(join(tmpdir(), 'site-import-'));
+    await importRedbotBusinesses(db, businesses, {
+      linkFile: join(dir, 'links.txt'),
+      baseUrl: 'https://valetto.test',
+      transport: NO_MODEL,
+      config: { ...TEST_LLM_CONFIG, apiKey: null },
+      log: (l) => logs.push(l),
+    });
+    expect(logs[0]).toMatch(/suggested answers skipped \(SITE_LLM_API_KEY is not set\)/);
+  });
+});
