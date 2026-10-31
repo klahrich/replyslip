@@ -65,7 +65,7 @@ export function DemoChat({
   const [text, setText] = useState('');
   const [thinking, setThinking] = useState(false);
   const [capped, setCapped] = useState(false);
-  const [inline, setInline] = useState<'tooLong' | 'rateLimited' | null>(null);
+  const [inline, setInline] = useState<'tooLong' | 'rateLimited' | 'busy' | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const suggestions = useMemo(() => pickSuggestions(conversation.suggested_questions, lang), [conversation.suggested_questions, lang]);
@@ -101,7 +101,11 @@ export function DemoChat({
     }
     if (err.status === 429) setInline('rateLimited');
     if (err.status === 400 && err.code === 'message_too_long') setInline('tooLong');
-    setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: true } : x)));
+    if (err.status === 409) setInline('busy');
+    // Each message has its own client_message_id and Try again reuses it. If the server says the id
+    // already belongs to another question, Try again sends this one under a fresh id instead.
+    const key = err.status === 409 && err.code === 'client_message_id_reused' ? crypto.randomUUID() : clientId;
+    setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, key, failed: true } : x)));
   }
 
   async function post(clientId: string, body: string) {
@@ -141,7 +145,10 @@ export function DemoChat({
       { key: `${clientId}-a`, role: 'assistant', body: sq.answer, status: 'answered', fresh: true },
     ]);
     demoApi.send(token, { client_message_id: clientId, suggested_question_id: sq.id }).catch((e: unknown) => {
-      if (e instanceof DemoApiError && (e.status === 404 || e.status === 410)) onGone(e.status === 410 ? 'expired' : 'dead');
+      if (!(e instanceof DemoApiError)) return;
+      if (e.status === 410) onGone('expired');
+      // Only a dead link ends the page; a suggestion withdrawn since the page loaded keeps the answer on screen.
+      else if (e.status === 404 && e.code !== 'suggested_question_not_found') onGone('dead');
     });
   }
 
@@ -241,7 +248,7 @@ export function DemoChat({
         {capped && <p className="mb-2 px-1 text-[13px] text-muted-foreground">{t.demoCap}</p>}
         {inline && (
           <p role="alert" className="mb-2 px-1 text-[13px] text-destructive">
-            {inline === 'tooLong' ? t.tooLong(max) : t.rateLimited}
+            {inline === 'tooLong' ? t.tooLong(max) : inline === 'busy' ? t.busy : t.rateLimited}
           </p>
         )}
         <div className="flex items-end gap-2">
