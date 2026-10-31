@@ -8,6 +8,8 @@ export const dynamic = 'force-dynamic';
 
 const bodySchema = z.object({
   name: z.string().optional(),
+  // Readable job title for customers; null or "" clears it. Any type is passed through so normalizeOfferTitle answers invalid_offer_title.
+  title: z.unknown().optional(),
   description: z.string().optional(),
   result_schema: z.record(z.string(), z.json()).optional(),
   // null clears the form and reopens free text; the response then carries a warning.
@@ -22,6 +24,7 @@ export function PATCH(req: Request, context: { params: Promise<{ id: string; off
     const body = parseBody(bodySchema, await readJson(req));
     const updated = await updateOffer(user.workspace.id, requireUuid(id, 'agent'), requireUuid(offerId, 'offer'), {
       name: body.name,
+      title: body.title,
       description: body.description,
       resultSchema: body.result_schema,
       inputSchema: body.input_schema,

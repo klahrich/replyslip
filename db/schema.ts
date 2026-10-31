@@ -216,6 +216,8 @@ export const agentOffers = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    /** Owner-set readable job title shown to customers. Null = the humanized name. */
+    title: text('title'),
     description: text('description').notNull(),
     resultSchema: jsonb('result_schema').$type<Record<string, unknown>>().notNull(),
     /** Optional form a guest fills in (normalized profile schema). Null = free-text offer. */

@@ -178,7 +178,7 @@ export const TOOL_DOCS: ToolDoc[] = [
     name: 'get_agent_card',
     title: 'Get agent card',
     description:
-      'Read the offers a shared agent grants this workspace. address is @handle/agentname. The card lists only the offers your grant includes, each with the owner result_schema, input_schema (null for a free-text offer), notes_enabled, and notes_max (max notes characters on a form offer, 0 when notes are off, null for a free-text offer). It does not list the owner’s other agents.',
+      'Read the offers a shared agent grants this workspace. address is @handle/agentname. The card lists only the offers your grant includes, each with name (the key you pass as offer), title (readable: the owner’s title, else the name humanized), the owner result_schema, input_schema (null for a free-text offer), notes_enabled, and notes_max (max notes characters on a form offer, 0 when notes are off, null for a free-text offer). It does not list the owner’s other agents.',
     args: [
       {
         name: 'address',
@@ -213,6 +213,13 @@ export const TOOL_DOCS: ToolDoc[] = [
     args: [
       { name: 'agent', required: true, type: 'string', description: 'Agent name in this workspace.' },
       { name: 'name', required: true, type: 'string', description: 'Offer name. Lowercase letter, then letters, numbers, underscores, or hyphens.' },
+      {
+        name: 'title',
+        required: false,
+        type: 'string | null',
+        description:
+          'Readable job title customers see, at most 60 characters, no control, bidi, or zero-width characters, and nothing that reads as "Valetto". Omit to keep the current one; null or "" clears it, and customers then see the name humanized ("ring-quote" becomes "Ring quote").',
+      },
       { name: 'description', required: true, type: 'string', description: 'What the guest is asking the agent to do.' },
       {
         name: 'result_schema',
@@ -344,6 +351,12 @@ export const toolInputs = {
   upsert_offer: z.object({
     agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),
     name: z.string().min(1).max(64).describe('Offer name.'),
+    title: z
+      .string()
+      .max(1_000)
+      .nullable()
+      .optional()
+      .describe('Readable job title customers see, at most 60 characters. Omit to keep, null or "" to clear.'),
     description: z.string().min(1).max(4_000).describe('What the guest is asking the agent to do.'),
     result_schema: jsonObject.describe('JSON Schema the owner requires back.'),
     input_schema: jsonObject.nullable().optional().describe('Form guests fill in. Omit to keep, null to clear.'),

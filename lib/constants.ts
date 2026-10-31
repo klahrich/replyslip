@@ -12,6 +12,8 @@ export const SHARE_CAP_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const GUEST_TASK_RATE_KIND = 'guest_task';
 export const ACCESS_REVOKED_REASON = 'access revoked';
 export const OFFER_DESCRIPTION_MAX = 4_000;
+/** Owner-set readable offer title, in characters after trimming. */
+export const OFFER_TITLE_MAX = 60;
 export const PANE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 /** Short id for a local nudge driver. The server accepts any id that matches. herdr and orca are the built-in ones. */
 export const DRIVER_ID_PATTERN = /^[a-z0-9-]{1,32}$/;

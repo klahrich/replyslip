@@ -358,6 +358,7 @@ export const mcpHandler = createMcpHandler(
           return ok(
             await upsertOfferByName(principal.workspaceId, agent.id, {
               name: args.name,
+              title: args.title,
               description: args.description,
               resultSchema: args.result_schema,
               inputSchema: args.input_schema,

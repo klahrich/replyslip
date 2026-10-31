@@ -25,6 +25,7 @@ import {
 } from './constants';
 import { brandingFor, brandingForMany, type Branding } from './customer-branding';
 import { consumeOrThrow, ensureSenderAgent } from './customer-invites';
+import { offerDisplayTitle } from './offer-title';
 import { HttpError, isUniqueViolation } from './errors';
 import { validateInput, type InputError, type InputSchema } from './input-schema';
 import { weakEtag } from './http';
@@ -177,6 +178,7 @@ async function jobsFor(db: Db, shareId: string, agentId: string) {
   const offers = await db
     .select({
       name: agentOffers.name,
+      title: agentOffers.title,
       description: agentOffers.description,
       resultSchema: agentOffers.resultSchema,
       inputSchema: agentOffers.inputSchema,
@@ -191,7 +193,7 @@ async function jobsFor(db: Db, shareId: string, agentId: string) {
     const notesEnabled = offer.inputSchema ? offer.notesEnabled : true;
     return {
       name: offer.name,
-      title: offer.name,
+      title: offerDisplayTitle(offer),
       description: offer.description,
       input_schema: offer.inputSchema ?? null,
       notes_enabled: notesEnabled,
@@ -326,9 +328,9 @@ function notesOf(task: TaskRow): string | null {
   return task.description ? task.description : null;
 }
 
-function summaryOf(task: TaskRow): string {
-  // A free-text request's title is the offer name, so its notes say more.
-  const text = !task.inputSchema && task.description ? task.description : task.title;
+function summaryOf(task: TaskRow, title: string): string {
+  // A free-text request's title is the job title, so its notes say more.
+  const text = !task.inputSchema && task.description ? task.description : title;
   return [...text].slice(0, 120).join('');
 }
 
@@ -336,6 +338,7 @@ type RequestCore = {
   id: string;
   bot: { agent_id: string };
   offer: string | null;
+  offer_title: string | null;
   title: string;
   status: string;
   notes: string | null;
@@ -347,14 +350,22 @@ type RequestCore = {
   completed_at: string | null;
 };
 
-function requestCore(task: TaskRow, offerName: string | null): RequestCore {
+type OfferLabel = { name: string; displayTitle: string };
+
+/** The request's heading. Older requests stored the raw offer name as their title; show the job title instead. */
+function requestTitle(task: TaskRow, offer: OfferLabel | null): string {
+  return offer && task.title === offer.name ? offer.displayTitle : task.title;
+}
+
+function requestCore(task: TaskRow, offer: OfferLabel | null): RequestCore {
   // 17.8: a pending bot question stays hidden while the request is awaiting_release.
   const question = task.status === 'needs_info' ? task.question : null;
   return {
     id: task.id,
     bot: { agent_id: task.toAgentId },
-    offer: offerName,
-    title: task.title,
+    offer: offer?.name ?? null,
+    offer_title: offer?.displayTitle ?? null,
+    title: requestTitle(task, offer),
     status: task.status,
     notes: notesOf(task),
     question,
@@ -365,25 +376,26 @@ function requestCore(task: TaskRow, offerName: string | null): RequestCore {
   };
 }
 
-async function offerNames(db: Db, rows: TaskRow[]): Promise<Map<string, string>> {
+async function offerLabels(db: Db, rows: TaskRow[]): Promise<Map<string, OfferLabel>> {
   const ids = [...new Set(rows.map((row) => row.offerId).filter((id): id is string => !!id))];
   if (ids.length === 0) return new Map();
   const found = await db
-    .select({ id: agentOffers.id, name: agentOffers.name })
+    .select({ id: agentOffers.id, name: agentOffers.name, title: agentOffers.title })
     .from(agentOffers)
     .where(inArray(agentOffers.id, ids));
-  return new Map(found.map((row) => [row.id, row.name]));
+  return new Map(found.map((row) => [row.id, { name: row.name, displayTitle: offerDisplayTitle(row) }]));
 }
 
 export async function serializeRequest(db: Db, task: TaskRow) {
-  const names = await offerNames(db, [task]);
-  const core = requestCore(task, task.offerId ? (names.get(task.offerId) ?? null) : null);
+  const labels = await offerLabels(db, [task]);
+  const core = requestCore(task, task.offerId ? (labels.get(task.offerId) ?? null) : null);
   const showResult = task.status === 'done';
   const answers = await taskAnswersFor(db, task.id);
   return {
     id: core.id,
     bot: core.bot,
     offer: core.offer,
+    offer_title: core.offer_title,
     title: core.title,
     status: core.status,
     input: task.input ?? null,
@@ -489,14 +501,14 @@ export async function listCustomerRequests(user: SessionUser, agentId: string, q
     .orderBy(desc(tasks.createdAt), desc(tasks.id))
     .limit(query.limit + 1);
   const page = rows.slice(0, query.limit);
-  const names = await offerNames(
+  const labels = await offerLabels(
     db,
     page.map((row) => row.task),
   );
-  const requests = page.map(({ task }) => ({
-    ...requestCore(task, task.offerId ? (names.get(task.offerId) ?? null) : null),
-    summary: summaryOf(task),
-  }));
+  const requests = page.map(({ task }) => {
+    const core = requestCore(task, task.offerId ? (labels.get(task.offerId) ?? null) : null);
+    return { ...core, summary: summaryOf(task, core.title) };
+  });
   const last = page[page.length - 1];
   const nextCursor = rows.length > query.limit && last ? encodeCursor(last.cursorTime, last.task.id) : null;
   const body = { requests, next_cursor: nextCursor };
@@ -673,7 +685,12 @@ export async function createCustomerRequest(user: SessionUser, agentId: string, 
   if (share.status === 'revoked') throw new HttpError(403, 'share_revoked', SHARE_REVOKED);
   if (share.status !== 'approved') throw new HttpError(403, 'pending_approval', PENDING_APPROVAL);
   const [offer] = await db
-    .select({ name: agentOffers.name, inputSchema: agentOffers.inputSchema, notesEnabled: agentOffers.notesEnabled })
+    .select({
+      name: agentOffers.name,
+      title: agentOffers.title,
+      inputSchema: agentOffers.inputSchema,
+      notesEnabled: agentOffers.notesEnabled,
+    })
     .from(agentShareOffers)
     .innerJoin(agentOffers, eq(agentOffers.id, agentShareOffers.offerId))
     .where(and(eq(agentShareOffers.shareId, share.id), eq(agentOffers.agentId, agent.id), eq(agentOffers.name, body.offer)))
@@ -701,7 +718,7 @@ export async function createCustomerRequest(user: SessionUser, agentId: string, 
     }
     if (!notes) throw notesError('Required.');
     if ([...notes].length > CUSTOMER_NOTES_MAX) throw notesError(`Use ${formatNumber(CUSTOMER_NOTES_MAX)} characters or fewer.`);
-    title = offer.name;
+    title = offerDisplayTitle(offer);
   }
   const [owner] = await db.select({ handle: workspaces.handle }).from(workspaces).where(eq(workspaces.id, agent.workspaceId)).limit(1);
   if (!owner?.handle) throw notFound();

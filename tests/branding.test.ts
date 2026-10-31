@@ -126,6 +126,17 @@ const VALETTO_VARIANTS = [
   'VaLeT\u0442O', // Cyrillic т
   '\u24CB\u24D0\u24DB\u24D4\u24E3\u24E3\u24DE', // circled letters
   '\uD835\uDC15aletto', // mathematical bold V
+  'Va\u029Fetto', // small capital ʟ
+  '\u1D20aletto', // small capital ᴠ
+  '\u1D20\u1D00\u029F\u1D07\u1D1B\u1D1B\u1D0F', // all small capitals ᴠᴀʟᴇᴛᴛᴏ
+  'valett\u0585', // Armenian օ
+  'VALETT\u0555', // Armenian capital Օ
+  'v-a-l-e-t-t-o',
+  'v.a.l.e.t.t.o',
+  'Shop V A L E T T O now',
+  'Chevaletto Shop', // inside a word, as before
+  'v.a l.e t.t.o', // 1-2 letter pieces joined
+  'Va le tt o',
 ];
 
 describe('reserved name', () => {
@@ -139,8 +150,25 @@ describe('reserved name', () => {
     for (const name of VALETTO_VARIANTS) expect(looksLikeValetto(name), JSON.stringify(name)).toBe(true);
   });
 
+  it('keeps word boundaries for real names but catches small capitals and Armenian', () => {
+    expect(looksLikeValetto('Valet Toronto')).toBe(false);
+    expect(looksLikeValetto('Chevalet Tobacco')).toBe(false);
+    expect(looksLikeValetto('Va\u029Fetto')).toBe(true); // Vaʟetto
+    expect(looksLikeValetto('\u1D20aletto')).toBe(true); // ᴠaletto
+    expect(looksLikeValetto('valett\u0585')).toBe(true); // valettօ
+    for (const spaced of ['v a l e t t o', 'v.a.l.e.t.t.o', 'v-a-l-e-t-t-o']) expect(looksLikeValetto(spaced), spaced).toBe(true);
+  });
+
+  it('joins runs of 1- and 2-letter pieces', () => {
+    expect(looksLikeValetto('v.a l.e t.t.o')).toBe(true);
+    expect(looksLikeValetto('Va le tt o')).toBe(true);
+    expect(looksLikeValetto('Valet Toronto')).toBe(false);
+    expect(looksLikeValetto('Chevalet Tobacco')).toBe(false);
+    expect(looksLikeValetto('Le Valet T O')).toBe(false);
+  });
+
   it('leaves ordinary names alone', () => {
-    for (const name of ['Acme Tables', 'Valley Toys', 'Violet', 'Let it go', 'Velvet Tot', 'Wallet Co', 'Palette', 'Valencia', 'Vale Totem', 'Valet Services']) {
+    for (const name of ['Acme Tables', 'Valley Toys', 'Violet', 'Let it go', 'Velvet Tot', 'Wallet Co', 'Palette', 'Valencia', 'Vale Totem', 'Valet Services', 'Valet Toronto', 'Chevalet Tobacco', 'V A L E T Toronto', 'Le Valet T O']) {
       expect(looksLikeValetto(name), name).toBe(false);
     }
   });
@@ -195,7 +223,11 @@ describe('PUT /api/v1/agents/:id/branding', () => {
       expect(res.status, JSON.stringify(display_name)).toBe(400);
       expect(res.data.error.code).toBe('invalid_display_name');
     }
-    expect((await putBranding(o, { display_name: 'Vale Totem' })).status).toBe(200);
+    for (const display_name of ['Vale Totem', 'Valet Toronto', 'Chevalet Tobacco']) {
+      const res = await putBranding(o, { display_name });
+      expect(res.status, display_name).toBe(200);
+      expect(res.data.branding.custom.display_name).toBe(display_name);
+    }
     expect((await putBranding(o, { display_name: 'é'.repeat(60) })).status).toBe(200);
     expect((await putBranding(o, { logo_url: 'https://evil.example/x.png' })).status).toBe(400);
   });

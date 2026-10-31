@@ -32,6 +32,7 @@ import {
 } from './constants';
 import { brandingFor, cardBranding } from './customer-branding';
 import { HttpError, isForeignKeyViolation, isUniqueViolation } from './errors';
+import { assertOfferNameNotValetto, normalizeOfferTitle, offerDisplayTitle } from './offer-title';
 import { assertInputSchema, validateInput, type InputSchema } from './input-schema';
 import { assertGuestWorkspaceLimit, PlanLimitError } from './plans';
 import { consumeKeyedRateLimit } from './rate-limit';
@@ -265,6 +266,10 @@ export function serializeOffer(offer: typeof agentOffers.$inferSelect) {
   return {
     id: offer.id,
     name: offer.name,
+    /** What the owner set, or null. */
+    title: offer.title,
+    /** What customers see: title, else the humanized name. */
+    display_title: offerDisplayTitle(offer),
     description: offer.description,
     result_schema: offer.resultSchema,
     input_schema: offer.inputSchema ?? null,
@@ -311,9 +316,18 @@ export async function listOffers(workspaceId: string, agentId: string) {
 export async function createOffer(
   workspaceId: string,
   agentId: string,
-  input: { name: string; description: string; resultSchema: unknown; inputSchema?: unknown; notesEnabled?: boolean },
+  input: {
+    name: string;
+    title?: unknown;
+    description: string;
+    resultSchema: unknown;
+    inputSchema?: unknown;
+    notesEnabled?: boolean;
+  },
 ) {
   const name = assertOfferName(input.name);
+  assertOfferNameNotValetto(name);
+  const title = normalizeOfferTitle(input.title) ?? null;
   const description = assertOfferDescription(input.description);
   const resultSchema = assertResultSchema(input.resultSchema);
   const inputSchema = parseInputSchemaArg(input.inputSchema) ?? null;
@@ -324,7 +338,7 @@ export async function createOffer(
       const agent = await lockOwnerAgent(tx, workspaceId, agentId);
       const rows = await tx
         .insert(agentOffers)
-        .values({ agentId: agent.id, name, description, resultSchema, inputSchema, notesEnabled })
+        .values({ agentId: agent.id, name, title, description, resultSchema, inputSchema, notesEnabled })
         .returning();
       if (rows[0]) await grantToAllOffersCustomers(tx, agent.id, rows[0].id);
       return rows;
@@ -384,18 +398,27 @@ export async function updateOffer(
   workspaceId: string,
   agentId: string,
   offerId: string,
-  input: { name?: string; description?: string; resultSchema?: unknown; inputSchema?: unknown; notesEnabled?: boolean },
+  input: {
+    name?: string;
+    title?: unknown;
+    description?: string;
+    resultSchema?: unknown;
+    inputSchema?: unknown;
+    notesEnabled?: boolean;
+  },
 ) {
   if (
     input.name === undefined &&
+    input.title === undefined &&
     input.description === undefined &&
     input.resultSchema === undefined &&
     input.inputSchema === undefined &&
     input.notesEnabled === undefined
   ) {
-    throw new HttpError(400, 'validation_error', 'Send a name, description, result_schema, input_schema, or notes_enabled to update.');
+    throw new HttpError(400, 'validation_error', 'Send a name, title, description, result_schema, input_schema, or notes_enabled to update.');
   }
   const name = input.name === undefined ? undefined : assertOfferName(input.name);
+  const title = normalizeOfferTitle(input.title);
   const description = input.description === undefined ? undefined : assertOfferDescription(input.description);
   const resultSchema = input.resultSchema === undefined ? undefined : assertResultSchema(input.resultSchema);
   const inputSchema = parseInputSchemaArg(input.inputSchema);
@@ -409,6 +432,7 @@ export async function updateOffer(
         .where(and(eq(agentOffers.id, offerId), eq(agentOffers.agentId, agent.id)))
         .limit(1);
       if (!existing) throw new HttpError(404, 'not_found', 'No offer was found.');
+      if (name !== undefined && name !== existing.name) assertOfferNameNotValetto(name);
       assertNotesSetting(
         inputSchema === undefined ? existing.inputSchema : inputSchema,
         notesEnabled ?? existing.notesEnabled,
@@ -417,6 +441,7 @@ export async function updateOffer(
         .update(agentOffers)
         .set({
           ...(name !== undefined ? { name } : {}),
+          ...(title !== undefined ? { title } : {}),
           ...(description !== undefined ? { description } : {}),
           ...(resultSchema !== undefined ? { resultSchema } : {}),
           ...(inputSchema !== undefined ? { inputSchema } : {}),
@@ -456,9 +481,18 @@ export async function deleteOffer(workspaceId: string, agentId: string, offerId:
 export async function upsertOfferByName(
   workspaceId: string,
   agentId: string,
-  input: { name: string; description: string; resultSchema: unknown; inputSchema?: unknown; notesEnabled?: boolean },
+  input: {
+    name: string;
+    title?: unknown;
+    description: string;
+    resultSchema: unknown;
+    inputSchema?: unknown;
+    notesEnabled?: boolean;
+  },
 ) {
   const name = assertOfferName(input.name);
+  // Omitting title keeps the stored one; null or "" clears it.
+  const title = normalizeOfferTitle(input.title);
   const description = assertOfferDescription(input.description);
   const resultSchema = assertResultSchema(input.resultSchema);
   // Omitting input_schema keeps the stored shape; only an explicit null reopens free text.
@@ -472,12 +506,21 @@ export async function upsertOfferByName(
       .where(and(eq(agentOffers.agentId, agent.id), eq(agentOffers.name, name)))
       .limit(1);
     if (!existing) {
+      assertOfferNameNotValetto(name);
       const finalSchema = inputSchema ?? null;
       const finalNotes = notesEnabled ?? true;
       assertNotesSetting(finalSchema, finalNotes);
       const [created] = await tx
         .insert(agentOffers)
-        .values({ agentId: agent.id, name, description, resultSchema, inputSchema: finalSchema, notesEnabled: finalNotes })
+        .values({
+          agentId: agent.id,
+          name,
+          title: title ?? null,
+          description,
+          resultSchema,
+          inputSchema: finalSchema,
+          notesEnabled: finalNotes,
+        })
         .returning();
       if (!created) throw new HttpError(500, 'internal_error', 'Something went wrong.');
       await grantToAllOffersCustomers(tx, agent.id, created.id);
@@ -489,6 +532,7 @@ export async function upsertOfferByName(
       .set({
         description,
         resultSchema,
+        ...(title !== undefined ? { title } : {}),
         ...(inputSchema !== undefined ? { inputSchema } : {}),
         ...(notesEnabled !== undefined ? { notesEnabled } : {}),
       })
@@ -925,7 +969,7 @@ export function assertFreeTextFields(fields: GuestTaskFields): { title: string; 
  * offer's schema. Runs after the grant lookup and before the daily cap, inside the same transaction.
  */
 function assertFormFields(
-  offer: { name: string; inputSchema: Record<string, unknown>; notesEnabled: boolean },
+  offer: { name: string; title: string | null; inputSchema: Record<string, unknown>; notesEnabled: boolean },
   fields: GuestTaskFields,
 ): { title: string; description: string; input: Record<string, unknown> } {
   if (fields.title !== undefined) {
@@ -958,7 +1002,9 @@ function assertFormFields(
   }
   const schemaTitle = typeof offer.inputSchema.title === 'string' ? offer.inputSchema.title.trim() : '';
   return {
-    title: (schemaTitle || offer.name).slice(0, TASK_TITLE_MAX),
+    // The owner's offer title, else the form's own title, else the offer name. Customer views humanize
+    // a stored raw name (customer-api requestTitle), so agent guests keep seeing the name they sent.
+    title: (offer.title || schemaTitle || offer.name).slice(0, TASK_TITLE_MAX),
     description: notes,
     input: fields.input as Record<string, unknown>,
   };
@@ -1010,6 +1056,7 @@ export async function resolveSharedTask(
     .select({
       id: agentOffers.id,
       name: agentOffers.name,
+      title: agentOffers.title,
       resultSchema: agentOffers.resultSchema,
       inputSchema: agentOffers.inputSchema,
       notesEnabled: agentOffers.notesEnabled,
@@ -1022,7 +1069,10 @@ export async function resolveSharedTask(
   // Input checks come after the grant lookup (an ungranted offer stays offer_not_found) and before the
   // cap, so a rejected input never uses the guest's daily cap.
   const accepted = menu.inputSchema
-    ? assertFormFields({ name: menu.name, inputSchema: menu.inputSchema, notesEnabled: menu.notesEnabled }, fields)
+    ? assertFormFields(
+        { name: menu.name, title: menu.title, inputSchema: menu.inputSchema, notesEnabled: menu.notesEnabled },
+        fields,
+      )
     : { ...assertFreeTextFields(fields), input: null };
   const cap = await consumeKeyedRateLimit(tx, {
     kind: GUEST_TASK_RATE_KIND,
@@ -1093,6 +1143,7 @@ export async function getAgentCard(caller: AgentPrincipal, to: string) {
   const offers = await db
     .select({
       name: agentOffers.name,
+      title: agentOffers.title,
       description: agentOffers.description,
       resultSchema: agentOffers.resultSchema,
       inputSchema: agentOffers.inputSchema,
@@ -1110,6 +1161,7 @@ export async function getAgentCard(caller: AgentPrincipal, to: string) {
     branding,
     offers: offers.map((offer) => ({
       name: offer.name,
+      title: offerDisplayTitle(offer),
       description: offer.description,
       result_schema: offer.resultSchema,
       input_schema: offer.inputSchema ?? null,
