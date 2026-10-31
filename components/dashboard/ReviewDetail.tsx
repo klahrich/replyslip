@@ -286,6 +286,26 @@ export function ReviewDetail({ taskId }: { taskId: string }) {
         </section>
       ) : null}
 
+      {r.stage === null && r.released_at && (r.result_display.length || r.question || r.fail_message) ? (
+        <section className="dash-card" aria-labelledby="rv-got-h">
+          <h2 id="rv-got-h">What {customer} got</h2>
+          {r.result_display.length ? (
+            <Rows rows={r.result_display} label="Released answer" />
+          ) : r.question ? (
+            <>
+              <h3 className="dash-review-sub">A question from your bot</h3>
+              <p className="dash-pre-text dash-review-held">{r.question}</p>
+            </>
+          ) : (
+            <>
+              <h3 className="dash-review-sub">Your bot couldn’t do this</h3>
+              <p className="dash-pre-text dash-review-held">{r.fail_message}</p>
+            </>
+          )}
+          <p className="dash-muted dash-review-help">You released this {formatTime(r.released_at)}.</p>
+        </section>
+      ) : null}
+
       {r.owner_note ? (
         <section className="dash-card" aria-labelledby="rv-note-h">
           <h2 id="rv-note-h">Your note to your bot</h2>
