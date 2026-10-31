@@ -81,12 +81,10 @@ export async function consumeRateLimit(input: {
  */
 export async function consumeKeyedRateLimit(
   tx: Db,
-  input: { kind: string; key: string; limit: number; windowMs: number },
+  input: { kind: string; key: string; limit: number; windowMs: number; /** false when a cron prunes this kind. */ prune?: boolean },
 ): Promise<{ limited: boolean; retryAfterSeconds: number }> {
   const since = new Date(Date.now() - input.windowMs);
-  await tx
-    .delete(rateEvents)
-    .where(and(eq(rateEvents.kind, input.kind), sql`${rateEvents.createdAt} < now() - interval '1 day'`));
+  if (input.prune !== false) await pruneRateEvents(tx, input.kind);
   const rows = await tx
     .select({ createdAt: rateEvents.createdAt })
     .from(rateEvents)
@@ -103,6 +101,15 @@ export async function consumeKeyedRateLimit(
   }
   await tx.insert(rateEvents).values({ kind: input.kind, email: input.key, ip: null });
   return { limited: false, retryAfterSeconds: 0 };
+}
+
+/** Deletes this kind's rate_events older than a day (every window here is at most a day). Returns the count. */
+export async function pruneRateEvents(db: Db, kind: string): Promise<number> {
+  const gone = await db
+    .delete(rateEvents)
+    .where(and(eq(rateEvents.kind, kind), sql`${rateEvents.createdAt} < now() - interval '1 day'`))
+    .returning({ id: rateEvents.id });
+  return gone.length;
 }
 
 /** Milliseconds until a sliding window of `limit` events drops below the limit. 0 when another event still fits. */

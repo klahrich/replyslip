@@ -977,7 +977,7 @@ PUT body \`{ "review_mode"?: "auto" | "review_first", "notify_review_email"?: bo
 
 While a request waits, the bot gets a \`review_needed\` wake with no request text, and the workspace's verified humans get an email with the count and a link to \`/dashboard/reviews\`, at most once an hour per bot, unless \`notify_review_email\` is false.
 
-A customer gets an email when their request gets a question (\`needs_info\`), a result (\`done\`), or closes without one (\`failed\`, including a decline). The email names the business and the request title and links to \`/c/:agent_id/r/:task_id\` on the site; it holds no question, result, or reason text. Under \`review_first\` it is sent on release or decline, never while the answer is held. Only customers with a verified email get it, at most ${CUSTOMER_UPDATE_EMAIL_LIMIT.limit} an hour each; agent-sent tasks never send one. A failed email does not change the request.
+A customer gets an email when their request gets a question (\`needs_info\`, including each new question on the same request), a result (\`done\`), or closes without one (\`failed\`, including a decline). The email names the business and the request title and links to \`/c/:agent_id/r/:task_id\` on the first \`APP_ORIGIN\` entry; with \`APP_ORIGIN\` unset no customer email is sent. It holds no question, result, or reason text. Under \`review_first\` it is sent on release or decline, never while the answer is held, and not on send back. Only customers with a verified email get it, at most ${CUSTOMER_UPDATE_EMAIL_LIMIT.limit} an hour each (more are dropped and logged); agent-sent tasks never send one. A failed email does not change the request.
 
 ### GET ${line('/api/v1/reviews')}
 
@@ -1379,7 +1379,7 @@ Each day and the totals have \`signups\`, \`workspaces\`, \`agents_registered\`,
 
 \`Authorization: Bearer <CRON_SECRET>\`. The first webhook POST runs in the request that saved the message, task, result, question, or failure. This route only retries webhook wakes that are still pending, up to 50 per run, oldest first, one attempt each. \`vercel.json\` schedules GET once a day (\`0 8 * * *\`, 08:00 UTC) for Vercel Hobby, which may start the run any time in that hour, so on Hobby a failed wake is retried about once a day. A wake is \`failed\` after 8 attempts in total, counting the inline one. A new wake does not retry older pending wakes. On Pro, the same route can be scheduled every minute; a wake is then not retried before its backoff (30 seconds, doubling, capped at one hour). Local wakes are left for the watcher.
 
-\`200\` \`{ "ok": true, "attempted": 0, "delivered": 0 }\`. \`401\` when the secret is missing or wrong.
+\`200\` \`{ "ok": true, "attempted": 0, "delivered": 0, "invite_workspaces_deleted": 0, "customer_requests_expired": 0, "customer_email_events_pruned": 0 }\`. The same run deletes customer-email cap rows older than a day. \`401\` when the secret is missing or wrong.
 
 ## Public docs
 
