@@ -9,7 +9,7 @@ const en = {
   thinking: 'Looking for the answer…',
   /** Only when the server sends no demo note of its own. */
   demoLabel: 'Demo',
-  demoNote: (name: string) => `I'd pass this one to ${name}. On the live site, you'd leave your email or phone here and ${name} would get back to you.`,
+  demoNote: (name: string) => `I'd pass this one to ${name}. On the live site, you could leave your email or phone and they'd get back to you.`,
   demoCap: "This demo has reached today's message limit. Come back tomorrow.",
   notSent: 'Not sent.',
   tryAgain: 'Try again',
@@ -33,7 +33,7 @@ const fr: typeof en = {
   send: 'Envoyer',
   thinking: 'Je cherche la réponse…',
   demoLabel: 'Démo',
-  demoNote: (name) => `Je transmettrais cette question à ${name}. Sur le vrai site, vous laisseriez ici votre courriel ou votre numéro, et ${name} vous répondrait.`,
+  demoNote: (name) => `Je transmettrais cette question à ${name}. Sur le vrai site, vous pourriez laisser votre courriel ou votre numéro, et l’entreprise vous répondrait.`,
   demoCap: 'Cette démo a atteint la limite de messages du jour. Revenez demain.',
   notSent: 'Non envoyé.',
   tryAgain: 'Réessayer',
