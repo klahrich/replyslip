@@ -90,13 +90,15 @@ export function DemoChat({
 
   const disabled = thinking || capped;
 
-  function fail(e: unknown, clientId: string) {
+  function fail(e: unknown, clientId: string, body: string) {
     const err = e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', '');
     if (err.status === 410) return onGone('expired');
     if (err.status === 404) return onGone('dead');
     if (err.status === 429 && err.code === 'daily_limit') {
-      // Daily cap: the server kept nothing, so drop the unsent question, close the input, explain.
+      // Daily cap: the server kept nothing, so drop the unsent bubble, put the visitor's words back in
+      // the (now closed) input so they aren't lost, and explain.
       setItems((xs) => xs.filter((x) => x.key !== clientId));
+      setText((cur) => cur || body);
       return setCapped(true);
     }
     if (err.status === 429) setInline('rateLimited');
@@ -116,7 +118,7 @@ export function DemoChat({
       const { message } = await demoApi.send(token, { client_message_id: clientId, text: body });
       setItems((xs) => [...xs, toItem(message, true)]);
     } catch (e) {
-      fail(e, clientId);
+      fail(e, clientId, body);
     } finally {
       setThinking(false);
       requestAnimationFrame(() => inputRef.current?.focus());
