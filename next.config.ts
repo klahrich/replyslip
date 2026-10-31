@@ -17,8 +17,16 @@ const REPLYSLIP_MARKETING_PAGES = ['/how-it-works', '/compare/agent-relay', '/co
 const REPLYSLIP_ONLY_PAGES = ['/', '/privacy', '/terms'];
 const toValettoHome = (source: string, has: typeof VALETTO_HOST) => ({ source, has, destination: 'https://valetto.tech/', statusCode: 301 as const });
 
+const noReferrer = { key: 'Referrer-Policy', value: 'no-referrer' };
+/** Page routes: /i and /i/:token (invite and link landing), /claim, /c… (customer), /sign-in. */
+const CUSTOMER_PAGES = ['/i', '/i/:path*', '/claim', '/c', '/c/:path*', '/sign-in', '/sign-in/:path*'];
+/** R1–R8 (/api/v1/c/*) and the auth routes the customer page calls (request-code, verify-code, me, logout). */
+const CUSTOMER_API = ['/api/v1/c/:path*', '/api/v1/auth/:path*'];
+
 const nextConfig: NextConfig = {
   serverExternalPackages: ['postgres', 'ajv'],
+  // Customer page mock switch (app/(customer)/_lib/api.ts). The page also ignores it in production builds.
+  env: { VALETTO_MOCK: process.env.VALETTO_MOCK === '1' ? '1' : '' },
   async redirects() {
     return [
       // Old ReplySlip marketing pages still reachable on valetto.tech go home. Listed before the www rule so
@@ -52,11 +60,11 @@ const nextConfig: NextConfig = {
       { source: '/dashboard', headers: noindex },
       { source: '/dashboard/:path*', headers: noindex },
       { source: '/api/:path*', headers: noindex },
-      // Invite, claim, customer and sign-in pages carry tokens in the URL: never indexed, never sent as a referrer.
-      ...['/i', '/i/:path*', '/claim', '/c', '/c/:path*', '/sign-in', '/api/v1/c/:path*'].map((source) => ({
-        source,
-        headers: [...noindex, { key: 'Referrer-Policy', value: 'no-referrer' }],
-      })),
+      // Valetto and invite pages carry tokens in the URL (/i/:token, /claim?token=…) or sign people in:
+      // never indexed, never sent as a referrer (spec 14, 17.11).
+      ...CUSTOMER_PAGES.map((source) => ({ source, headers: [...noindex, noReferrer] })),
+      // The customer API (R1–R7) and email-code auth: /api/:path* above already sends X-Robots-Tag.
+      ...CUSTOMER_API.map((source) => ({ source, headers: [noReferrer] })),
       // MCP Registry HTTP domain verification (public key only); serve as plain text.
       { source: '/.well-known/mcp-registry-auth', headers: [{ key: 'Content-Type', value: 'text/plain; charset=utf-8' }] },
       { source: '/assets/:path*', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },

@@ -1,0 +1,42 @@
+/* Scoped base for the Valetto customer pages. Imported first by customer.css so Tailwind utilities,
+   which come later at equal or higher specificity, always win. Nothing here matches outside .vt-root
+   except the two :has(.vt-root) rules, which only exist on customer pages. */
+/* Page chrome on customer routes: light, neutral, overriding the dark site palette on <html>/<body>. */
+:root:has(.vt-root) { background: #f6f6f4; color-scheme: light; }
+body:has(.vt-root) { background: #f6f6f4; }
+
+/* Scoped reset (a slim Tailwind preflight). :where() keeps specificity at the element level,
+   so utilities still win. */
+:where(.vt-root), :where(.vt-root) *, :where(.vt-root) ::before, :where(.vt-root) ::after {
+  box-sizing: border-box;
+  border: 0 solid var(--border);
+  margin: 0;
+  padding: 0;
+}
+:where(.vt-root) {
+  min-height: 100dvh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-vt), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  letter-spacing: normal;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+:where(.vt-root) :is(h1, h2, h3, h4) { font-size: inherit; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+:where(.vt-root) p { text-wrap: pretty; }
+:where(.vt-root) a { color: inherit; text-decoration: inherit; }
+:where(.vt-root) :is(ol, ul) { list-style: none; }
+:where(.vt-root) :is(img, svg) { display: block; max-width: 100%; }
+:where(.vt-root) :is(button, input, select, textarea) {
+  font: inherit; color: inherit; background: transparent; letter-spacing: inherit;
+}
+:where(.vt-root) :is(button, [role="button"], [role="radio"], [role="checkbox"], [role="switch"], label) { cursor: pointer; }
+:where(.vt-root) :disabled { cursor: not-allowed; }
+:where(.vt-root) textarea { resize: vertical; }
+:where(.vt-root) ::placeholder { color: var(--muted-foreground); opacity: 1; }
+:where(.vt-root) :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+:where(.vt-root) ::selection { background: color-mix(in oklab, var(--primary) 22%, white); color: var(--foreground); }
+:where(.vt-root) pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+:where(.vt-root) [hidden]:where(:not([hidden="until-found"])) { display: none !important; }
