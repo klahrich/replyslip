@@ -120,7 +120,7 @@ function fixedOwner(
 ): SiteAnswerResult {
   return {
     status: 'needs_owner',
-    body: needsOwnerReply(replyLanguage(language)),
+    body: needsOwnerReply(replyLanguage(language, input.businessLanguage)),
     topic: null,
     language,
     decidedBy,
@@ -237,12 +237,12 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
     return { ...base, status: 'answered', body: answer.reply, ownerQuestion: null };
   }
   if (outcome.status === 'off_topic') {
-    return { ...base, status: 'off_topic', body: offTopicReply(replyLanguage(language), input.businessName), ownerQuestion: null };
+    return { ...base, status: 'off_topic', body: offTopicReply(replyLanguage(language, input.businessLanguage), input.businessName), ownerQuestion: null };
   }
   return {
     ...base,
     status: 'needs_owner',
-    body: needsOwnerReply(replyLanguage(language)),
+    body: needsOwnerReply(replyLanguage(language, input.businessLanguage)),
     ownerQuestion: answer.owner_question?.trim() || input.visitorMessage,
   };
 }

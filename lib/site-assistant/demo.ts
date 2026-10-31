@@ -197,7 +197,7 @@ export function tileColor(business: Pick<DemoBusiness, 'slug' | 'tileColor'>): s
  * page may ignore: language, client_message_id, suggested_question_id, handoff_reason and demo_note (the page
  * shows its own demo note today).
  */
-export function publicMessage(row: SiteMessageRow, businessName: string) {
+export function publicMessage(row: SiteMessageRow, business: { displayName: string; language: string | null }) {
   const reason = row.role === 'assistant' && row.status === 'needs_owner' ? handoffReason(row.decidedBy) : null;
   return {
     id: row.id,
@@ -209,7 +209,7 @@ export function publicMessage(row: SiteMessageRow, businessName: string) {
     client_message_id: row.clientMessageId,
     suggested_question_id: row.suggestedAnswerId,
     handoff_reason: reason,
-    demo_note: reason ? demoNote(reason, replyLanguage(row.language), businessName) : null,
+    demo_note: reason ? demoNote(reason, replyLanguage(row.language, business.language), business.displayName) : null,
   };
 }
 
@@ -246,7 +246,7 @@ export async function demoView(demo: ResolvedDemo, visitorValue: string | null) 
     },
     banner: bannerText(business.displayName),
     suggested_questions: await checkedSuggestions(business.id),
-    messages: rows.map((row) => publicMessage(row, business.displayName)),
+    messages: rows.map((row) => publicMessage(row, business)),
     notice: noticeText(),
     expires_at: link.expiresAt.toISOString(),
     message_max_chars: SITE_MESSAGE_MAX_CHARS,
@@ -294,8 +294,8 @@ function dailyLimit(decidedBy: string): HttpError {
 
 function replyBody(demo: ResolvedDemo, visitor: SiteMessageRow, assistant: SiteMessageRow, replayed: boolean) {
   return {
-    message: publicMessage(assistant, demo.business.displayName),
-    visitor: publicMessage(visitor, demo.business.displayName),
+    message: publicMessage(assistant, demo.business),
+    visitor: publicMessage(visitor, demo.business),
     replayed,
   };
 }

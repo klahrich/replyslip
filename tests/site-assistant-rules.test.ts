@@ -122,6 +122,23 @@ describe('server rules (spec 4.2)', () => {
     expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'owner_topic' });
   });
 
+  it('gives an other-language question the fixed reply in the business language, keeping language other', async () => {
+    const german = 'Was kostet eine Fassadenreinigung und wann haben Sie Zeit?';
+    const chinese = '你们提供免费估价吗？';
+    for (const [businessLanguage, reply] of [['fr', 'fr'], ['en', 'en']] as const) {
+      for (const text of [german, chinese]) {
+        const { result, calls } = await ask(text, answer({ language: 'en' }), { businessLanguage });
+        expect(calls, text).toHaveLength(0);
+        expect(result, `${businessLanguage}: ${text}`).toMatchObject({
+          status: 'needs_owner', decidedBy: 'language_other', language: 'other', body: needsOwnerReply(reply),
+        });
+      }
+      // Undecided on the server, "other" from the model: same fixed reply in the business language.
+      const { result } = await ask('Grazie mille', answer({ language: 'other' }), { businessLanguage });
+      expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'language_other', language: 'other', body: needsOwnerReply(reply) });
+    }
+  });
+
   it('sends language other to the owner, in English, before any model call', async () => {
     const { result, calls } = await ask('¿Hacen ustedes trabajos de nieve en invierno?', answer({ language: 'other' }));
     expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'language_other', body: needsOwnerReply('en'), language: 'other', llmCalled: false });

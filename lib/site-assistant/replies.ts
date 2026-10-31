@@ -7,7 +7,12 @@ export type ReplyLanguage = 'en' | 'fr';
 /** Why a question went to the owner. Public: the page shows the matching demo note. */
 export type HandoffReason = 'owner_topic' | 'not_in_context' | 'other_language' | 'check_failed';
 
-export function replyLanguage(language: string | null | undefined): ReplyLanguage {
+/**
+ * Language of a fixed reply or demo note. A message in another language ('other') gets the business's language
+ * (fr for a French business, en otherwise); the stored language stays 'other'.
+ */
+export function replyLanguage(language: string | null | undefined, businessLanguage?: string | null): ReplyLanguage {
+  if (language === 'other') return businessLanguage === 'fr' ? 'fr' : 'en';
   return language === 'fr' ? 'fr' : 'en';
 }
 

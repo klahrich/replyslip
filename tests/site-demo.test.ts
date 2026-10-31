@@ -322,6 +322,22 @@ describe('messages', () => {
     expect(model.calls).toHaveLength(0);
   });
 
+  it('gives other-language questions the reply and note in the business language', async () => {
+    const model = fakeModel(() => answer({ language: 'en' }));
+    setSiteLlmTransportForTests(model.transport);
+    for (const [language, reply, note] of [['fr', 'fr', /^Je peux discuter en français et en anglais\./], ['en', 'en', /^I can chat in English and French\./]] as const) {
+      const { token } = await createSiteDemo({ language });
+      for (const text of ['Was kostet eine Fassadenreinigung und wann haben Sie Zeit?', '你们提供免费估价吗？']) {
+        const res = await send(token, { client_message_id: randomUUID(), text });
+        expect(res.data.message, `${language}: ${text}`).toMatchObject({
+          status: 'needs_owner', body: needsOwnerReply(reply), handoff_reason: 'other_language', language: 'other',
+        });
+        expect(res.data.message.demo_note, `${language}: ${text}`).toMatch(note);
+      }
+    }
+    expect(model.calls).toHaveLength(0);
+  });
+
   it('sends every non-English, non-French probe to the owner through the route, whatever the model says', async () => {
     const { probes } = JSON.parse(readFileSync(join(FIXTURE_DIR, 'language-probes.json'), 'utf8')) as { probes: { language: string; text: string }[] };
     expect(probes.length).toBeGreaterThanOrEqual(22);
