@@ -3,14 +3,15 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Store } from 'lucide-react';
 import { listBots } from '../_lib/api';
 import { brandStyle } from '../_lib/brand';
 import { useRememberedBranding } from '../_lib/brandMemory';
 import type { BotsResponse } from '../_lib/types';
 import { EmailSignIn, SignInCard } from '../_components/EmailSignIn';
 import { CenteredFrame, LogoTile, PlainFrame } from '../_components/Frame';
-import { ConnectError, Loading, loadFailure } from './common';
+import { Notice } from '../_components/Notice';
+import { ConnectError, Loading, homeAfterSignIn, loadFailure, retryable, type LoadFailure } from './common';
 
 const shareLabel = { approved: '', pending: 'Waiting for approval', revoked: 'Access turned off' } as const;
 
@@ -19,13 +20,14 @@ export function BotsView({ signedOut, from = null }: { signedOut: boolean; from?
   /** The business they signed out from, if this tab saw it. */
   const fromBranding = useRememberedBranding(signedOut ? from : null);
   const [data, setData] = useState<BotsResponse | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
   const load = useCallback(async () => {
     try {
       setData(await listBots());
     } catch (e) {
-      // 401 is SessionGate's (it shows the sign-in form); a failed fetch or 5xx gets a retry.
-      if (loadFailure(e) === 'connect') setFailed(true);
+      // 401 is SessionGate's (it shows the sign-in form); a failed fetch, 5xx or 429 gets a retry.
+      const f = loadFailure(e);
+      if (retryable(f)) setFailure(f);
     }
   }, []);
   useEffect(() => {
@@ -41,17 +43,18 @@ export function BotsView({ signedOut, from = null }: { signedOut: boolean; from?
           <EmailSignIn
             title="You're signed out"
             intro={`To come back, enter the email you used with ${fromBranding?.display_name ?? 'this business'}. We'll send you a 6-digit code.`}
-            onSignedIn={() => router.replace('/c')}
+            onSignedIn={async () => router.replace(await homeAfterSignIn(from))}
           />
         </SignInCard>
       </CenteredFrame>
     );
   }
-  if (failed)
+  if (failure)
     return (
       <ConnectError
+        failure={failure}
         onRetry={() => {
-          setFailed(false);
+          setFailure(null);
           void load();
         }}
       />
@@ -60,6 +63,11 @@ export function BotsView({ signedOut, from = null }: { signedOut: boolean; from?
   return (
     <PlainFrame>
       <h1 className="text-[26px] leading-tight font-semibold tracking-tight">Your businesses</h1>
+      {data.bots.length === 0 && (
+        <Notice icon={<Store />} title="No businesses yet" level="h2" className="mt-6">
+          <p>When a business sends you a link, open it and sign in. The business then shows up here.</p>
+        </Notice>
+      )}
       <ul className="mt-6 grid gap-3">
         {data.bots.map((b) => (
           <li key={b.agent_id} style={brandStyle(b.branding)}>

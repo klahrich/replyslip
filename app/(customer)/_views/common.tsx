@@ -2,8 +2,8 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LogOut, WifiOff } from 'lucide-react';
-import { getMe, signOut } from '../_lib/api';
+import { Hourglass, LogOut, WifiOff } from 'lucide-react';
+import { getMe, listBots, signOut } from '../_lib/api';
 import { agentIdFromPath } from '../_lib/brandMemory';
 import { ApiError } from '../_lib/types';
 import { Button } from '../_ui/button';
@@ -17,6 +17,20 @@ export function useEmail(): string | null {
     getMe().then((m) => setEmail(m.user.email), () => setEmail(null));
   }, []);
   return email;
+}
+
+/**
+ * Where to go after signing back in: the business they came from (if it's still theirs), else their only
+ * business, else the list.
+ */
+export async function homeAfterSignIn(from: string | null = null): Promise<string> {
+  try {
+    const { bots } = await listBots();
+    const pick = bots.find((b) => b.agent_id === from) ?? (bots.length === 1 ? bots[0] : undefined);
+    return pick ? `/c/${encodeURIComponent(pick.agent_id)}` : '/c';
+  } catch {
+    return '/c';
+  }
 }
 
 export function Account() {
@@ -66,31 +80,36 @@ export function NotFound({ message }: { message?: string }) {
 
 /**
  * How a page load failed. 404 → NotFound; 401 → nothing here (SessionGate already swapped the page for the
- * sign-in form); 403/410 (not yours, gone) also read as not found. A failed fetch, 5xx, 429 or anything
- * unexpected → ConnectError with a retry.
+ * sign-in form); 403/410 (not yours, gone) also read as not found. 429 → a rate-limit message with a retry.
+ * A failed fetch, 5xx or anything unexpected → ConnectError with a retry.
  */
-export type LoadFailure = 'missing' | 'signed_out' | 'connect';
+export type LoadFailure = 'missing' | 'signed_out' | 'connect' | 'rate_limited';
+
+/** Failures that show the retry screen (ConnectError). */
+export const retryable = (f: LoadFailure | null): f is 'connect' | 'rate_limited' => f === 'connect' || f === 'rate_limited';
 
 export function loadFailure(e: unknown): LoadFailure {
   if (!(e instanceof ApiError)) return 'connect';
   if (e.status === 401) return 'signed_out';
   if (e.status === 404 || e.status === 403 || e.status === 410) return 'missing';
+  if (e.status === 429) return 'rate_limited';
   return 'connect';
 }
 
-export function ConnectError({ onRetry }: { onRetry: () => void }) {
+export function ConnectError({ onRetry, failure = 'connect' }: { onRetry: () => void; failure?: LoadFailure | null }) {
+  const limited = failure === 'rate_limited';
   return (
     <PlainFrame>
       <Notice
-        icon={<WifiOff />}
-        title="Couldn't connect"
+        icon={limited ? <Hourglass /> : <WifiOff />}
+        title={limited ? 'Too many tries' : "Couldn't connect"}
         action={
           <Button type="button" onClick={onRetry} className="h-12 w-full rounded-xl text-base font-semibold">
             Try again
           </Button>
         }
       >
-        <p>Check your connection and try again.</p>
+        <p>{limited ? 'Wait a few minutes, then try again.' : 'Check your connection and try again.'}</p>
       </Notice>
     </PlainFrame>
   );

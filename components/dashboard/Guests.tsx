@@ -247,7 +247,7 @@ export function Guests({
       return (
         <p className="dash-muted">
           {lead}
-          {s.daily_cap.toLocaleString('en-US')} tasks a day{' '}
+          {s.daily_cap.toLocaleString('en-US')} {s.daily_cap === 1 ? 'task' : 'tasks'} a day{' '}
           <button
             type="button"
             className="dash-textbtn"
@@ -280,7 +280,7 @@ export function Guests({
             const r = await api<{ share: Share }>(`${base}/shares/${s.id}`, { method: 'PATCH', body: { daily_cap: cap } });
             put(r.share);
             setEditing(null);
-            setSaved({ id: s.id, text: `Daily limit saved: ${r.share.daily_cap.toLocaleString('en-US')} tasks a day.` });
+            setSaved({ id: s.id, text: `Daily limit saved: ${r.share.daily_cap.toLocaleString('en-US')} ${r.share.daily_cap === 1 ? 'task' : 'tasks'} a day.` });
           });
         }}
       >

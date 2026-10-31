@@ -15,6 +15,18 @@ export function senderText(r: Review): string {
   return r.sender.workspace_handle ? `@${r.sender.workspace_handle}/${name}` : name;
 }
 
+/**
+ * One short line so list rows for the same job differ: the held question, else what the customer filled in
+ * and their note. Plain text; the row clips it with CSS.
+ */
+export function previewText(r: Review, max = 140): string {
+  const parts = r.question
+    ? [`Your bot asks: ${r.question}`]
+    : [...r.input_display.map((f) => `${f.label}: ${f.value}`), ...(r.notes ? [`Note: ${r.notes}`] : [])];
+  const text = parts.join(' · ').replace(/\s+/g, ' ').trim();
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
+
 /** Where an item stands once nobody needs to act on it. */
 export function settledText(r: Review): string {
   switch (r.status) {

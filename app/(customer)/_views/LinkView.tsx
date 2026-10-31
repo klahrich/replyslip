@@ -10,7 +10,7 @@ import { Button } from '../_ui/button';
 import { EmailSignIn, SignInCard, retryText } from '../_components/EmailSignIn';
 import { CenteredFrame } from '../_components/Frame';
 import { Notice } from '../_components/Notice';
-import { Loading, useEmail } from './common';
+import { Loading, homeAfterSignIn, useEmail } from './common';
 
 const linkErrors: Record<string, { title: string; body: string }> = {
   invite_not_found: { title: "This link doesn't work anymore", body: 'Ask the business that sent it for a new one.' },
@@ -71,7 +71,7 @@ function UsedUpLink({ title, branding }: { title: string; branding: Branding | n
           <EmailSignIn
             title="Sign in with your email"
             intro={`Enter the email you used with ${business}. We'll send you a 6-digit code.`}
-            onSignedIn={() => router.push('/c')}
+            onSignedIn={async () => router.push(await homeAfterSignIn())}
           />
         </SignInCard>
       </CenteredFrame>

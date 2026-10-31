@@ -6,16 +6,19 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, errorText, formatTime, SIGNED_OUT_EVENT } from './api';
 import { jobTitle, senderText } from './review-text';
 import type { Review, ReviewsResponse } from './types';
+import { previewText } from './review-text';
 
 /** The API caps a page at 100. Owners with more see the oldest 100 first, which are the ones to act on. */
 const LIMIT = 100;
 
 function ReviewRow({ r }: { r: Review }) {
+  const preview = previewText(r);
   return (
     <li>
       <Link className="dash-review" href={`/dashboard/reviews/${r.task_id}`}>
         <span className="dash-review-main">
           <span className="dash-review-title">{jobTitle(r)}</span>
+          {preview ? <span className="dash-review-preview">{preview}</span> : null}
           <span className="dash-muted">
             <span translate="no">{senderText(r)}</span> · to <span translate="no">{r.agent.name}</span>
           </span>

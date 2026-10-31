@@ -10,7 +10,7 @@ import { BrandFrame } from '../_components/Frame';
 import { Notice } from '../_components/Notice';
 import { StatusBadge } from '../_components/StatusBadge';
 import { usePoll } from '../_components/usePoll';
-import { Account, ConnectError, Loading, NotFound, loadFailure, useEmail, when, type LoadFailure } from './common';
+import { Account, ConnectError, Loading, NotFound, loadFailure, retryable, useEmail, when, type LoadFailure } from './common';
 
 export function BotView({ agentId }: { agentId: string }) {
   const [data, setData] = useState<BotResponse | null>(null);
@@ -38,9 +38,10 @@ export function BotView({ agentId }: { agentId: string }) {
 
   if (failure === 'missing') return <NotFound />;
   // A failed poll keeps the page it already has; only a first load that fails shows the retry screen.
-  if (failure === 'connect' && !data)
+  if (retryable(failure) && !data)
     return (
       <ConnectError
+        failure={failure}
         onRetry={() => {
           setFailure(null);
           void load();
@@ -97,7 +98,7 @@ export function BotView({ agentId }: { agentId: string }) {
       {capped && (
         <Notice icon={<Clock />} title="You've reached today's limit" level="h2" className="mt-6">
           <p>
-            You can send up to {share.daily_cap} requests a day to {name}. {resetText(share.resets_at)}
+            You can send up to {share.daily_cap} {share.daily_cap === 1 ? 'request' : 'requests'} a day to {name}. {resetText(share.resets_at)}
           </p>
         </Notice>
       )}

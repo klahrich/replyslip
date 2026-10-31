@@ -14,7 +14,7 @@ import { StatusBadge } from '../_components/StatusBadge';
 import { failCopy, statusCopy } from '../_components/status';
 import { usePoll } from '../_components/usePoll';
 import { cn } from '../_lib/utils';
-import { Account, ConnectError, Loading, NotFound, loadFailure, when, type LoadFailure } from './common';
+import { Account, ConnectError, Loading, NotFound, loadFailure, retryable, when, type LoadFailure } from './common';
 
 const WAITING = new Set(['in_review', 'open', 'awaiting_release']);
 
@@ -52,9 +52,10 @@ export function RequestView({ agentId, taskId }: { agentId: string; taskId: stri
 
   if (failure === 'missing') return <NotFound message="We couldn't find that request." />;
   // A failed poll keeps what's on screen; only a first load that fails shows the retry screen.
-  if (failure === 'connect' && (!branding || !req))
+  if (retryable(failure) && (!branding || !req))
     return (
       <ConnectError
+        failure={failure}
         onRetry={() => {
           setFailure(null);
           if (!branding) void loadBranding();

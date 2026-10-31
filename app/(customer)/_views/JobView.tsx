@@ -9,7 +9,7 @@ import type { BotResponse } from '../_lib/types';
 import { BrandFrame } from '../_components/Frame';
 import { JobForm } from '../_components/JobForm';
 import { usePoll } from '../_components/usePoll';
-import { Account, ConnectError, Loading, NotFound, loadFailure, type LoadFailure } from './common';
+import { Account, ConnectError, Loading, NotFound, loadFailure, retryable, type LoadFailure } from './common';
 
 export function JobView({ agentId, offer }: { agentId: string; offer: string }) {
   const router = useRouter();
@@ -35,9 +35,10 @@ export function JobView({ agentId, offer }: { agentId: string; offer: string }) 
 
   if (failure === 'missing') return <NotFound />;
   // A failed poll keeps the form on screen; only a first load that fails shows the retry screen.
-  if (failure === 'connect' && !data)
+  if (retryable(failure) && !data)
     return (
       <ConnectError
+        failure={failure}
         onRetry={() => {
           setFailure(null);
           void load();

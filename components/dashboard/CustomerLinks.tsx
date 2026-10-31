@@ -179,7 +179,7 @@ export function CustomerLinks({
       <h4 id={headingId}>Customer links</h4>
       <p className="dash-muted">
         Customers open the link and sign in with an email code. They show up under Guests.
-        {access ? ` ${access.customer_count} customers · ${access.pending_count} waiting.` : ''}
+        {access ? ` ${access.customer_count} ${access.customer_count === 1 ? 'customer' : 'customers'} · ${access.pending_count} waiting.` : ''}
       </p>
 
       {loadError ? (
