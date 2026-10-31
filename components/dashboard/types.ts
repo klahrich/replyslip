@@ -78,6 +78,15 @@ export type Task = {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  /** Owner view only. A customer is known by customer_email; an agent by workspace_handle and agent_name. */
+  sender?: TaskSender | null;
+};
+
+export type TaskSender = {
+  kind: 'customer' | 'agent';
+  customer_email: string | null;
+  workspace_handle: string | null;
+  agent_name: string | null;
 };
 
 export type Message = {

@@ -8,6 +8,7 @@ import { GET as listJoinCodes } from '@/app/api/v1/join-codes/route';
 import { getDb } from '@/db';
 import { tasks, workspaces } from '@/db/schema';
 import { planLimitMessage, usePlanLimitsForTests, utcMonthWindow } from '@/lib/plans';
+import { approvedCustomer, directRequest, owner } from './customer-fixtures';
 import { call, createAgent, createJoinCode, createKey, mcpTool, signIn } from './helpers';
 
 const resultSchema = {
@@ -130,9 +131,30 @@ describe('plan limits', () => {
     const identity = await mcpTool(fromKey, 'whoami', {});
     expect(identity.payload).toMatchObject({
       plan: 'free',
-      usage: { agents: 2, tasks_this_month: 1 },
+      usage: { agents: 2, tasks_this_month: 1, tasks_charged_this_month: 1 },
       limits: { agents: 5, tasks_per_month: 2 },
     });
+  });
+
+  it('whoami counts tasks a bot received from customers, while the cap still charges the sender', async () => {
+    const o = await owner();
+    const customer = await approvedCustomer(o);
+    for (let i = 0; i < 3; i += 1) await directRequest(o, customer, `Request ${i}`);
+
+    const identity = await mcpTool(o.agentKey, 'whoami', {});
+    expect(identity.payload.usage).toMatchObject({ tasks_this_month: 3, tasks_charged_this_month: 0 });
+    const who = await call(me, 'http://localhost/api/v1/auth/me', { cookie: o.cookie });
+    expect(who.data.workspace.usage).toMatchObject({ tasks_this_month: 3, tasks_charged_this_month: 0 });
+
+    // The owner still has its whole cap for tasks it sends itself.
+    usePlanLimitsForTests({ agents: 5, tasksPerMonth: 1 });
+    const helper = await createAgent(o.cookie, 'Helper');
+    const helperKey = await createKey(o.cookie, helper.id);
+    const own = await mcpTool(helperKey, 'create_task', { to: 'Grok', title: 'Own', description: 'x', result_schema: resultSchema });
+    expect(own.isError).toBe(false);
+    const capped = await mcpTool(helperKey, 'create_task', { to: 'Grok', title: 'Over', description: 'x', result_schema: resultSchema });
+    expect(capped.payload).toMatchObject({ error: 'plan_limit', used: 1, max: 1 });
+    expect((await mcpTool(o.agentKey, 'whoami', {})).payload.usage).toMatchObject({ tasks_this_month: 4, tasks_charged_this_month: 1 });
   });
 
   it('lets an unlimited workspace pass a free cap', async () => {

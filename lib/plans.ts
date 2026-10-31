@@ -88,7 +88,23 @@ async function countActiveAgents(db: Db, workspaceId: string): Promise<number> {
   return asCount(row?.count);
 }
 
-async function countTasksThisMonth(db: Db, workspaceId: string, now = new Date()): Promise<number> {
+/**
+ * Every task this workspace took part in this UTC month: ones it sent, plus ones its agents received from customers
+ * or guest agents (stored in this workspace, charged to the sender). This is what `usage.tasks_this_month` reports,
+ * so a bot that only serves customers does not read 0.
+ */
+async function countWorkspaceTasksThisMonth(db: Db, workspaceId: string, now = new Date()): Promise<number> {
+  const { start, next } = utcMonthWindow(now);
+  const touchesWorkspace = or(eq(tasks.fromWorkspaceId, workspaceId), eq(tasks.workspaceId, workspaceId));
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(tasks)
+    .where(and(touchesWorkspace, gte(tasks.createdAt, start), lt(tasks.createdAt, next)));
+  return asCount(row?.count);
+}
+
+/** Tasks charged to this workspace's monthly cap this UTC month: the ones it sent. */
+async function countChargedTasksThisMonth(db: Db, workspaceId: string, now = new Date()): Promise<number> {
   const { start, next } = utcMonthWindow(now);
   // Guest tasks are stored in the owner's workspace and charged to the sender via from_workspace_id.
   // Rows from before sharing have a null sender workspace and still count on workspace_id.
@@ -120,7 +136,11 @@ export async function assertGuestWorkspaceLimit(ownerWorkspaceId: string, used: 
 
 export type WorkspacePlanUsage = {
   plan: PlanName;
-  usage: { agents: number; tasks_this_month: number };
+  /**
+   * tasks_this_month: every task sent or received this month. tasks_charged_this_month: the ones that count toward
+   * limits.tasks_per_month (sent by this workspace; a customer's or guest's task counts on the sender).
+   */
+  usage: { agents: number; tasks_this_month: number; tasks_charged_this_month: number };
   limits: { agents: number | null; tasks_per_month: number | null };
 };
 
@@ -129,10 +149,11 @@ export async function workspacePlanUsage(workspaceId: string, db: Db = getDb()):
   const plan = asPlan(row?.plan);
   const caps = capsFor(plan);
   const agentCount = await countActiveAgents(db, workspaceId);
-  const taskCount = await countTasksThisMonth(db, workspaceId);
+  const taskCount = await countWorkspaceTasksThisMonth(db, workspaceId);
+  const chargedCount = await countChargedTasksThisMonth(db, workspaceId);
   return {
     plan,
-    usage: { agents: agentCount, tasks_this_month: taskCount },
+    usage: { agents: agentCount, tasks_this_month: taskCount, tasks_charged_this_month: chargedCount },
     limits: { agents: caps.agents, tasks_per_month: caps.tasksPerMonth },
   };
 }
@@ -146,7 +167,7 @@ export async function assertWithinLimit(workspaceId: string, resource: PlanResou
   const usage = await workspacePlanUsage(workspaceId, db);
   const max = resource === 'agents' ? usage.limits.agents : usage.limits.tasks_per_month;
   if (max === null) return;
-  const used = resource === 'agents' ? usage.usage.agents : usage.usage.tasks_this_month;
+  const used = resource === 'agents' ? usage.usage.agents : usage.usage.tasks_charged_this_month;
   if (used < max) return;
   if (resource === 'agents') {
     throw new PlanLimitError({

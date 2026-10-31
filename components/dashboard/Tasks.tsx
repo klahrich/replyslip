@@ -31,6 +31,12 @@ function Json({ value }: { value: unknown }) {
   );
 }
 
+/** A customer's task shows their email, not the internal sender agent's name. */
+function senderLabel(task: Task): string {
+  if (task.sender?.kind === 'customer') return task.sender.customer_email ?? 'A customer';
+  return task.from;
+}
+
 function TaskRow({ task }: { task: Task }) {
   const [thread, setThread] = useState<Message[] | null>(null);
   const [threadError, setThreadError] = useState('');
@@ -55,7 +61,7 @@ function TaskRow({ task }: { task: Task }) {
         <summary>
           <span className="dash-task-title">{task.title}</span>
           <span className="dash-task-to">
-            <span translate="no">{task.from}</span> → <span translate="no">{task.to}</span>
+            <span translate="no">{senderLabel(task)}</span> → <span translate="no">{task.to}</span>
           </span>
           <StatusPill status={task.status} />
           <time className="dash-task-time" dateTime={task.created_at}>
@@ -110,7 +116,7 @@ function TaskRow({ task }: { task: Task }) {
           ) : null}
           {task.question ? (
             <>
-              <h4>Question for {task.from}</h4>
+              <h4>Question for {senderLabel(task)}</h4>
               <p className="dash-pre-text">{task.question}</p>
             </>
           ) : null}

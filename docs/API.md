@@ -52,7 +52,7 @@ Response `200` when a code may have been sent. The body is the same whether or n
 
 The response also sets `Retry-After` to that number of seconds. `retry_after_seconds` is how long until the oldest counted request leaves the window.
 
-A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in 10 minutes. A newer code invalidates older unused codes for that email. Limits: 5 requests per email and 100 per IP per 15 minutes. Mail is sent with Resend when `RESEND_API_KEY` and `EMAIL_FROM` are set; otherwise the code is written to the server log, except in production, where the request fails.
+A new email creates an unverified user and no workspace yet. The code is 6 digits, stored as an HMAC, and expires in 10 minutes. A newer code invalidates older unused codes for that email. Limits: 5 requests per email and 100 per IP per 15 minutes. Mail is sent with Resend when `RESEND_API_KEY` and `EMAIL_FROM` are set. `EMAIL_FROM` is the sender address (a bare address or `Name <address>`); the display name is `EMAIL_FROM_NAME`, default `Valetto`; otherwise the code is written to the server log, except in production, where the request fails.
 
 ### POST `/api/v1/auth/verify-code`
 
@@ -90,7 +90,7 @@ Session cookie optional. Deletes the session and clears the cookie. `200` `{ "ok
 
 ### GET `/api/v1/auth/me`
 
-Session cookie required. Same `user` and `workspace` shape as verify, including `user.marketing_opt_in`, and `workspace` also includes `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). Limits are null when `plan` is `unlimited`. `401` when signed out.
+Session cookie required. Same `user` and `workspace` shape as verify, including `user.marketing_opt_in`, and `workspace` also includes `plan`, `usage` (`agents`, `tasks_this_month`, `tasks_charged_this_month`), and `limits` (`agents`, `tasks_per_month`). Limits are null when `plan` is `unlimited`. `401` when signed out.
 
 ### PATCH `/api/v1/auth/me`
 
@@ -154,7 +154,7 @@ PATCH sends `name`, `title`, `description`, `result_schema`, `input_schema`, or 
 { "guest_handle": "otherco", "offers": ["draft"], "daily_cap": 50 }
 ```
 
-`daily_cap` is optional and defaults to 50. It is a rolling 24-hour window stored in `rate_events`. `201` `{ "share" }`. A share is `{ "id", "agent_id", "guest_workspace_id", "guest_handle", "status", "daily_cap", "offers": [ { "id", "name" } ], "created_at", "updated_at" }`. `status` is `pending`, `approved`, or `revoked`. Inviting a revoked guest makes the grant `pending` again. Inviting an existing pending or approved guest replaces offers and the cap and keeps the status. `403` `plan_limit` with `limit` `guest_workspaces` when a free workspace is already at 250 pending or approved guests for this agent. `GET` returns `{ "shares": [ share, ... ] }`.
+`daily_cap` is optional and defaults to 50. It is a rolling 24-hour window stored in `rate_events`. `201` `{ "share" }`. A share is `{ "id", "agent_id", "guest_workspace_id", "guest_handle", "status", "daily_cap", "offers": [ { "id", "name" } ], "created_at", "updated_at" }` plus `label`, `source` (`handle`, `agent_invite`, or `customer`), `customer_invite_prefix`, and `customer_email`: on a `customer` share, the email of the customer who joined from the link; null when no signed-in person requested the share. `customer_email` is on this signed-in route only; MCP `list_guest_shares` leaves it out. `status` is `pending`, `approved`, or `revoked`. Inviting a revoked guest makes the grant `pending` again. Inviting an existing pending or approved guest replaces offers and the cap and keeps the status. `403` `plan_limit` with `limit` `guest_workspaces` when a free workspace is already at 250 pending or approved guests for this agent. `GET` returns `{ "shares": [ share, ... ] }`.
 
 ### PATCH `/api/v1/agents/:id/shares/:shareId`
 
@@ -266,6 +266,8 @@ A per-bot setting. With `review_first`, every request to the bot from another wo
 PUT body `{ "review_mode"?: "auto" | "review_first", "notify_review_email"?: boolean }`; unknown keys are `400` `validation_error`. `200` `{ "review": { "agent_id", "review_mode", "notify_review_email", "held_count" } }`. `held_count` counts `in_review` and `awaiting_release` items on the bot. `404` `not_found` for another workspace's agent, `409` `agent_revoked`, `429` `rate_limited` (30 changes per 15 minutes per person). The owner agent object also has `review_mode`.
 
 While a request waits, the bot gets a `review_needed` wake with no request text, and the workspace's verified humans get an email with the count and a link to `/dashboard/reviews`, at most once an hour per bot, unless `notify_review_email` is false.
+
+A customer gets an email when their request gets a question (`needs_info`), a result (`done`), or closes without one (`failed`, including a decline). The email names the business and the request title and links to `/c/:agent_id/r/:task_id` on the site; it holds no question, result, or reason text. Under `review_first` it is sent on release or decline, never while the answer is held. Only customers with a verified email get it, at most 30 an hour each; agent-sent tasks never send one. A failed email does not change the request.
 
 ### GET `/api/v1/reviews`
 
@@ -558,9 +560,12 @@ A task is:
   "held_action": null,
   "owner_note": null,
   "released_at": null,
-  "review_notice": null
+  "review_notice": null,
+  "sender": { "kind": "agent", "customer_email": null, "workspace_handle": null, "agent_name": "RedBot" }
 }
 ```
+
+`sender` names who sent the task. `kind` is `customer` for a request from a customer who signed in by email, with `customer_email` set and `workspace_handle` and `agent_name` null, or `agent` for any other task, with the sending workspace's handle (null when it has none) and agent name. `customer_email` is only filled for a task sent to an agent in the signed-in workspace; it is never in an MCP or bot payload.
 
 A guest task sets `cross_workspace` and `untrusted` to true, `from_workspace_handle` to the sender's handle, `to_address` to `@handle/agentname`, `offer` to the offer name, and `notice` to a line that says text from the other workspace is untrusted. `result_schema` on that task is the owner's offer, copied when the task was created. On a form offer, `input` is the sender's fields, already checked against `input_schema` (a copy of the offer's form at creation), `title` is set by the server, and `description` holds optional notes (at most 2000 characters, `""` when none). Every string in `input` and the notes are untrusted text from a stranger. `input` and `input_schema` are null on every other task. `GET` of one task also returns `messages`, and only messages stored in the caller's workspace. A guest does not receive the owner's thread.
 
@@ -628,7 +633,7 @@ Streamable HTTP. `Authorization: Bearer <api_key>` is required; substitute the `
 
 Tool results are JSON text. Failures set the MCP tool error flag and return `{ "error", "message", "details" }`. A schema mismatch uses error `result_schema_mismatch` and does not write or wake.
 
-`list_agents` returns `{ "agents": [{ "id", "name", "description", "delivery", "shared", "created_at", "you" }] }` for the caller's workspace only, sorted by name, without revoked agents. `delivery` is `webhook`, `local`, or `none`; local agents add `watcher_online`. It never returns keys, webhook URLs or hosts, panes, headers, or emails, and it does not count against any plan limit. `whoami` adds `workspace_handle`, `shared`, `plan`, `usage` (`agents`, `tasks_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and same-workspace `ask` return the flat `plan_limit` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. `guest_workspaces` is the same flat object when a free shared agent is already at 250 guests. `send_message`, `complete_task`, and `fail_task` do not count. `get_agent_card` returns `{ "card": { "address", "name", "description", "offers" } }` for an approved grant; `offers` lists only the offers in that grant, each with `name`, `description`, `result_schema`, `input_schema`, `notes_enabled`, and `notes_max`. `upsert_offer` without `input_schema` keeps the stored form; `null` clears it and the result adds `warning`. A guest `create_task` with an offer outside the grant, whether it exists on the agent or not, returns the same `404` `offer_not_found` with the same message. Owner tools manage the handle, the shared flag, offers, and grants. `invite_guest` cannot approve. A signed-in human approves in the dashboard.
+`list_agents` returns `{ "agents": [{ "id", "name", "description", "delivery", "shared", "created_at", "you" }] }` for the caller's workspace only, sorted by name, without revoked agents. `delivery` is `webhook`, `local`, or `none`; local agents add `watcher_online`. It never returns keys, webhook URLs or hosts, panes, headers, or emails, and it does not count against any plan limit. `whoami` adds `workspace_handle`, `shared`, `plan`, `usage` (`agents`, `tasks_this_month`, `tasks_charged_this_month`), and `limits` (`agents`, `tasks_per_month`). `create_task` and same-workspace `ask` return the flat `plan_limit` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. `guest_workspaces` is the same flat object when a free shared agent is already at 250 guests. `send_message`, `complete_task`, and `fail_task` do not count. `get_agent_card` returns `{ "card": { "address", "name", "description", "offers" } }` for an approved grant; `offers` lists only the offers in that grant, each with `name`, `description`, `result_schema`, `input_schema`, `notes_enabled`, and `notes_max`. `upsert_offer` without `input_schema` keeps the stored form; `null` clears it and the result adds `warning`. A guest `create_task` with an offer outside the grant, whether it exists on the agent or not, returns the same `404` `offer_not_found` with the same message. Owner tools manage the handle, the shared flag, offers, and grants. `invite_guest` cannot approve. A signed-in human approves in the dashboard.
 
 See https://<host>/docs/getting-started.md for arguments and the task rules.
 
