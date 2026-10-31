@@ -277,22 +277,58 @@ describe('customer links: resolve and accept', () => {
     }
   });
 
-  it('the public link preview never puts the agent id in the logo URL', async () => {
+  it('the link preview drops an old agent-id logo for outsiders and keeps it for the bot\'s own customers', async () => {
     const o = await owner();
-    const { token } = await createLink(o, { kind: 'personal' });
+    const { token } = await createLink(o, { kind: 'public' });
     const legacyPath = `branding/${o.agentId}/${'cd'.repeat(32)}-Qw34ErTy.webp`;
+    const legacyUrl = `https://store1.public.blob.vercel-storage.com/${legacyPath}`;
     await getDb().insert(agentBranding).values({
       agentId: o.agentId,
       logoBlobPath: legacyPath,
-      logoUrl: `https://store1.public.blob.vercel-storage.com/${legacyPath}`,
+      logoUrl: legacyUrl,
       logoWidth: 120,
       logoHeight: 120,
     });
-    const out = await resolve(token);
-    expect(out.status).toBe(200);
-    expect(out.data.bot.branding).toMatchObject({ logo_url: null, logo_width: null, logo_height: null });
-    // R1 still names the bot in bot.agent_id (the page needs it to open the bot); the logo URL must not add it again.
-    expect(out.text.split(o.agentId)).toHaveLength(2);
+    const stripped = { logo_url: null, logo_width: null, logo_height: null };
+    const full = { logo_url: legacyUrl, logo_width: 120, logo_height: 120 };
+    const expectStripped = (out: { status: number; text: string; data: any }) => {
+      expect(out.status).toBe(200);
+      expect(out.data.bot.branding).toMatchObject(stripped);
+      // R1 still names the bot in bot.agent_id (the page needs it to open the bot); the logo URL must not add it again.
+      expect(out.text.split(o.agentId)).toHaveLength(2);
+    };
+
+    // Signed out, and signed in without a share: the public form.
+    expectStripped(await resolve(token));
+    const outsider = await signIn(emailAddress('outsider'));
+    const asOutsider = await resolve(token, outsider.cookie);
+    expect(asOutsider.data.viewer).toEqual({ signed_in: true, share_status: null });
+    expectStripped(asOutsider);
+
+    // A customer who already has the bot, approved or still pending, sees the stored logo.
+    await setAccess(o, { mode: 'open_link' });
+    const approved = await signIn(emailAddress('approved'));
+    expect((await accept(token, approved)).data.share.status).toBe('approved');
+    const asApproved = await resolve(token, approved.cookie);
+    expect(asApproved.data.bot.branding).toMatchObject(full);
+    expect(asApproved.data.next).toBe('open_bot');
+
+    await setAccess(o, { mode: 'approve_each' });
+    const pending = await signIn(emailAddress('pending'));
+    expect((await accept(token, pending)).data.share.status).toBe('pending');
+    expect((await resolve(token, pending.cookie)).data.bot.branding).toMatchObject(full);
+
+    // Revoked is no longer a customer of the bot: back to the public form.
+    const share = (await shares(o)).find((x) => x.customer_email === approved.email);
+    const revoked = await call(revokeShare, `http://localhost/api/v1/agents/${o.agentId}/shares/${share.id}/revoke`, {
+      method: 'POST',
+      cookie: o.cookie,
+      params: { id: o.agentId, shareId: share.id },
+    });
+    expect(revoked.status).toBe(200);
+    const asRevoked = await resolve(token, approved.cookie);
+    expect(asRevoked.data.next).toBe('blocked');
+    expectStripped(asRevoked);
   });
 
   it('binds a personal link to its email', async () => {

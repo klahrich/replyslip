@@ -594,13 +594,17 @@ export async function resolveCustomerLink(token: string, viewer: CustomerViewer,
   }
   const shareStatus = (share?.status as ShareStatus | undefined) ?? null;
   const row = await brandingRow(db, agent.id);
+  const branding = serializeBranding(row, displayName);
+  // Someone who can already open the bot (approved or pending) gets the stored logo as is; anyone else, signed in or
+  // not, gets the public form, which drops an old logo whose URL names the agent.
+  const member = shareStatus === 'approved' || shareStatus === 'pending';
   return {
     link: {
       kind: invite.kind as CustomerInviteKind,
       email_bound: invite.email !== null,
       expires_at: invite.expiresAt?.toISOString() ?? null,
     },
-    bot: { agent_id: agent.id, branding: publicBranding(serializeBranding(row, displayName), agent.id) },
+    bot: { agent_id: agent.id, branding: member ? branding : publicBranding(branding, agent.id) },
     access_mode: (invite.kind === 'personal' ? 'open_link' : agent.customerAccessMode) as CustomerAccessMode,
     viewer: viewer ? { signed_in: true, share_status: shareStatus } : { signed_in: false },
     next: viewer ? nextFor(shareStatus) : ('sign_in' as CustomerNext),
