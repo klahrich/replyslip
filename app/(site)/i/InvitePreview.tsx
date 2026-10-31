@@ -35,7 +35,12 @@ type Kind = { kind: 'loading' } | { kind: 'invalid' } | { kind: 'agent'; token: 
 export function InvitePreview() {
   const [link, setLink] = useState<Kind>({ kind: 'loading' });
   useEffect(() => {
-    const token = decodeURIComponent(window.location.hash.slice(1));
+    let token = '';
+    try {
+      token = decodeURIComponent(window.location.hash.slice(1));
+    } catch {
+      // a malformed % escape falls through to the invalid-link message
+    }
     queueMicrotask(() =>
       setLink(
         token.startsWith('rsi_')
@@ -48,7 +53,7 @@ export function InvitePreview() {
   }, []);
   if (link.kind === 'loading') return <p className="lead">Loading invite…</p>;
   if (link.kind === 'agent') return <AgentInvitePreview token={link.token} />;
-  if (link.kind === 'customer') return <CustomerLinkPreview token={link.token} />;
+  if (link.kind === 'customer') return <CustomerLinkHandoff />;
   return (
     <>
       <h1>Invite link</h1>
@@ -57,77 +62,15 @@ export function InvitePreview() {
   );
 }
 
-type CustomerLink = {
-  bot: { branding: { display_name: string } };
-  access_mode: 'open_link' | 'approve_each';
-  viewer: { signed_in: boolean; share_status?: 'pending' | 'approved' | 'revoked' | null };
-  next: 'sign_in' | 'accept' | 'open_bot' | 'wait' | 'blocked';
-};
-
-type CustomerState =
-  | { kind: 'loading' }
-  | { kind: 'error'; message: string }
-  | { kind: 'ok'; link: CustomerLink };
-
-const NEXT_TEXT: Record<CustomerLink['next'], string> = {
-  sign_in: 'Sign in with your email to continue. We’ll send you a code; no password needed.',
-  accept: 'You’re signed in. The full page to send requests is coming soon.',
-  open_bot: 'You already have access.',
-  wait: 'Your request is waiting for the business to approve it.',
-  blocked: 'This business has turned off your access.',
-};
-
 /**
- * Placeholder for an rsl_ customer link until the hosted customer page ships. It reads R1 only:
- * who is sharing, how access works, and what to do next. It never accepts.
+ * rsl_ customer links open the hosted customer page (app/(customer)/c/link). The fragment is carried over
+ * as is, so the token still never reaches a server, a log, or a Referer.
  */
-function CustomerLinkPreview({ token }: { token: string }) {
-  const [state, setState] = useState<CustomerState>({ kind: 'loading' });
+function CustomerLinkHandoff() {
   useEffect(() => {
-    let cancelled = false;
-    const done = (next: CustomerState) => {
-      if (!cancelled) setState(next);
-    };
-    fetch(`/api/v1/c/links/${encodeURIComponent(token)}`, { cache: 'no-store', credentials: 'same-origin' })
-      .then(async (res) => {
-        const body = (await res.json().catch(() => null)) as (CustomerLink & { error?: { message?: string } }) | null;
-        if (!res.ok || !body) return done({ kind: 'error', message: body?.error?.message ?? INVALID });
-        done({ kind: 'ok', link: body });
-      })
-      .catch(() => done({ kind: 'error', message: 'We couldn’t reach ReplySlip. Check your connection and try again.' }));
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
-
-  if (state.kind === 'loading') return <p className="lead">Loading invite…</p>;
-  if (state.kind === 'error') {
-    return (
-      <>
-        <h1>Invite link</h1>
-        <p className="lead">{state.message}</p>
-      </>
-    );
-  }
-  const { link } = state;
-  return (
-    <>
-      <h1>{link.bot.branding.display_name} invited you</h1>
-      <p className="lead">
-        {link.access_mode === 'open_link'
-          ? 'Anyone with this link can send requests once they sign in.'
-          : 'The business approves each person who asks before they can send requests.'}
-      </p>
-      <p>{NEXT_TEXT[link.next]}</p>
-      {link.next === 'sign_in' ? (
-        <p>
-          <a className="btn" href="/sign-in">
-            Sign in with email
-          </a>
-        </p>
-      ) : null}
-    </>
-  );
+    window.location.replace(`/c/link${window.location.search}${window.location.hash}`);
+  }, []);
+  return <p className="lead">Opening your link…</p>;
 }
 
 /** Shows what an rsi_ agent invite grants. It never redeems. */
