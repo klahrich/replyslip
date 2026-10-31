@@ -265,7 +265,7 @@ export async function generateSuggestedAnswers(
       continue;
     }
     const result = await answerVisitorMessage(
-      { businessName: entry.displayName, contextMd: entry.contextMd, history: [], visitorMessage: question },
+      { businessName: entry.displayName, contextMd: entry.contextMd, history: [], visitorMessage: question, businessLanguage: entry.language },
       { transport: options.transport, config: options.config },
     );
     const values = {

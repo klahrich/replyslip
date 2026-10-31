@@ -3,15 +3,16 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { answerVisitorMessage, buildPromptInput, SITE_INSTRUCTIONS } from '@/lib/site-assistant/answer';
 import { parseContextMarkdown } from '@/lib/site-assistant/context';
-import { findOwnerKeyword, guessLanguage, SITE_KEYWORDS } from '@/lib/site-assistant/keywords';
+import { detectVisitorLanguage, findOwnerKeyword, guessLanguage, SITE_KEYWORDS } from '@/lib/site-assistant/keywords';
 import { buildResponsesBody } from '@/lib/site-assistant/llm';
+import { handoffReason } from '@/lib/site-assistant/rules';
 import { bannerText, cappedReply, demoNote, needsOwnerReply, noticeText, offTopicReply } from '@/lib/site-assistant/replies';
 import { SITE_ANSWER_JSON_SCHEMA } from '@/lib/site-assistant/schema';
 import { answer, FIXTURE_DIR, fakeModel, MAPLE_CONTEXT, NO_MODEL, responsesPayload, TEST_LLM_CONFIG } from './site-fixtures';
 
 const base = { businessName: 'Maple Ridge Landscaping', contextMd: MAPLE_CONTEXT, history: [] };
 
-async function ask(visitorMessage: string, out: unknown, extra: Partial<typeof base> = {}) {
+async function ask(visitorMessage: string, out: unknown, extra: Partial<typeof base & { businessLanguage: string }> = {}) {
   const model = fakeModel(() => out);
   const result = await answerVisitorMessage(
     { ...base, ...extra, visitorMessage },
@@ -121,9 +122,10 @@ describe('server rules (spec 4.2)', () => {
     expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'owner_topic' });
   });
 
-  it('sends language other to the owner, in English', async () => {
-    const { result } = await ask('¿Hacen nieve?', answer({ language: 'other' }));
-    expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'language_other', body: needsOwnerReply('en') });
+  it('sends language other to the owner, in English, before any model call', async () => {
+    const { result, calls } = await ask('¿Hacen ustedes trabajos de nieve en invierno?', answer({ language: 'other' }));
+    expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'language_other', body: needsOwnerReply('en'), language: 'other', llmCalled: false });
+    expect(calls).toHaveLength(0);
   });
 
   it('sends a model needs_owner to the owner with fixed text, never the model text', async () => {
@@ -287,7 +289,7 @@ describe('fixed text', () => {
       ...(['owner_topic', 'not_in_context', 'other_language', 'check_failed'] as const).flatMap((r) => [demoNote(r, 'en', 'M'), demoNote(r, 'fr', 'M')]),
     ];
     // A demo note may describe the live site's contact step in its last sentence; nothing else mentions contact.
-    const LIVE = /(On the live site, you'd leave your email or phone here and M would get back to you\.|Sur le vrai site, vous laisseriez ici votre courriel ou votre numéro, et M vous répondrait\.)$/;
+    const LIVE = /(On the live site, you could leave your email or phone and they'd get back to you\.|Sur le vrai site, vous pourriez laisser votre courriel ou votre numéro, et l’entreprise vous répondrait\.)$/;
     for (const text of texts) expect(text.replace(LIVE, ''), text).not.toMatch(/e-?mail|courriel|phone|téléphone|numéro|number|contact/i);
     for (const text of texts) expect(text.replace(LIVE, ''), text).not.toMatch(/please|leave (us )?your|laissez|indiquez|entrez/i);
     expect(noticeText().en).toMatch(/Don't type personal details/);
@@ -295,13 +297,16 @@ describe('fixed text', () => {
 
   it('writes the demo notes in plain words, each ending with what the live site would do', () => {
     expect(demoNote('check_failed', 'en', 'Maple')).toBe(
-      "I'm not sure about this one, so I'd pass it to Maple rather than guess. On the live site, you'd leave your email or phone here and Maple would get back to you.",
+      "I'm not sure about this one, so I'd pass it to Maple rather than guess. On the live site, you could leave your email or phone and they'd get back to you.",
     );
     for (const reason of ['owner_topic', 'not_in_context', 'other_language', 'check_failed'] as const) {
       const en = demoNote(reason, 'en', 'Maple');
       const fr = demoNote(reason, 'fr', 'Maple');
-      expect(en).toMatch(/On the live site, you'd leave your email or phone here and Maple would get back to you\.$/);
-      expect(fr).toMatch(/Sur le vrai site, vous laisseriez ici votre courriel ou votre numéro, et Maple vous répondrait\.$/);
+      // The live-site sentence describes (could / pourriez), it never asks.
+      expect(en).toMatch(/On the live site, you could leave your email or phone and they'd get back to you\.$/);
+      expect(fr).toMatch(/Sur le vrai site, vous pourriez laisser votre courriel ou votre numéro, et l’entreprise vous répondrait\.$/);
+      // The business is named once per note.
+      for (const text of [en, fr]) expect(text.split('Maple').length - 1, text).toBe(1);
       // No jargon in what the visitor reads.
       for (const text of [en, fr]) expect(text, text).not.toMatch(/\bDemo:|Démo :|assistant|context|contexte|pages|check|vérifi|model|modèle/i);
     }
@@ -310,6 +315,80 @@ describe('fixed text', () => {
   it('guesses French from accents and function words', () => {
     expect(guessLanguage('Faites-vous la peinture ?')).toBe('fr');
     expect(guessLanguage('Do you paint?')).toBe('en');
+  });
+});
+
+describe('server language check (spec 6b)', () => {
+  const GERMAN = 'Was kostet eine Fassadenreinigung und wann haben Sie Zeit?';
+  const SPANISH = 'Hola, ¿hacen trabajos de jardinería en Ottawa?';
+
+  it('detects English, French and other languages, and leaves short or close text undecided', () => {
+    expect(detectVisitorLanguage('What areas do you serve?')).toBe('en');
+    expect(detectVisitorLanguage('Do you offer free estimates?')).toBe('en');
+    expect(detectVisitorLanguage('Quels secteurs desservez-vous ?')).toBe('fr');
+    expect(detectVisitorLanguage('Est-ce que vous faites la peinture extérieure ?')).toBe('fr');
+    expect(detectVisitorLanguage(GERMAN)).toBe('other');
+    expect(detectVisitorLanguage('Wie lange dauert die Arbeit bei mir zu Hause?')).toBe('other');
+    expect(detectVisitorLanguage(SPANISH)).toBe('other');
+    expect(detectVisitorLanguage('¿Cuánto tiempo tarda el trabajo en una casa?')).toBe('other');
+    // Under 3 words, or nothing to go on, or a tie: undecided.
+    for (const text of ['hi', 'bonjour', 'Hallo danke', 'Interlock patios?', 'Ottawa Kanata Orleans', 'la de en']) {
+      expect(detectVisitorLanguage(text), text).toBeNull();
+    }
+    // Mixed English and French is never "other".
+    expect(detectVisitorLanguage('Bonjour, do you offer peinture extérieure?')).not.toBe('other');
+    expect(detectVisitorLanguage('Hi, est-ce que vous faites les patios?')).not.toBe('other');
+  });
+
+  it('routes German and Spanish to the owner with the other-language note, with no model call', async () => {
+    for (const text of [GERMAN, SPANISH]) {
+      const { result, calls } = await ask(text, answer({ language: 'fr' }), { businessLanguage: 'fr' });
+      expect(result, text).toMatchObject({ status: 'needs_owner', decidedBy: 'language_other', language: 'other', llmCalled: false, costMicroUsd: 0 });
+      expect(calls).toHaveLength(0);
+      expect(handoffReason(result.decidedBy)).toBe('other_language');
+    }
+  });
+
+  it('trusts a confident server detection over the model tag', async () => {
+    // The reported bug: German tagged fr no longer gets a French answer (it never reaches the model).
+    expect((await ask(GERMAN, answer({ language: 'fr' }))).result.decidedBy).toBe('language_other');
+    // English tagged fr or other: English, answered.
+    for (const tag of ['fr', 'other'] as const) {
+      const { result, calls } = await ask('What areas do you serve?', answer({ language: tag }));
+      expect(result, tag).toMatchObject({ status: 'answered', language: 'en' });
+      expect(calls).toHaveLength(1);
+    }
+    // French tagged en: French.
+    const fr = await ask('Quels secteurs desservez-vous ?', answer({ language: 'en' }), { businessLanguage: 'en' });
+    expect(fr.result).toMatchObject({ status: 'answered', language: 'fr' });
+    // The model's own tag stays in the raw output for the audit trail.
+    expect(fr.result.rawOutput).toMatchObject({ language: 'en' });
+  });
+
+  it('answers English and French normally', async () => {
+    expect((await ask('What areas do you serve?', answer({ language: 'en' }))).result).toMatchObject({ status: 'answered', language: 'en' });
+    expect((await ask('Est-ce que vous faites la peinture extérieure ?', answer({ language: 'fr' }))).result).toMatchObject({ status: 'answered', language: 'fr' });
+  });
+
+  it('sends mixed English and French to the model, never to the owner for language', async () => {
+    const { result, calls } = await ask('Bonjour, do you offer peinture extérieure?', answer({ language: 'fr' }));
+    expect(calls).toHaveLength(1);
+    expect(result.decidedBy).not.toBe('language_other');
+    expect(['en', 'fr']).toContain(result.language);
+  });
+
+  it("falls back to the business's language on short text, not other", async () => {
+    for (const [text, businessLanguage] of [['hi', 'fr'], ['bonjour', 'en'], ['hi', 'en'], ['bonjour', 'fr']] as const) {
+      // Even if the model calls it "other", short text is the business's language.
+      const { result, calls } = await ask(text, answer({ language: 'other' }), { businessLanguage });
+      expect(calls, text).toHaveLength(1);
+      expect(result, `${text}/${businessLanguage}`).toMatchObject({ status: 'answered', language: businessLanguage });
+      // And a fixed reply with no model call uses it too.
+      const unconfigured = await answerVisitorMessage({ ...base, visitorMessage: text, businessLanguage }, { config: { ...TEST_LLM_CONFIG, apiKey: null } });
+      expect(unconfigured).toMatchObject({ decidedBy: 'llm_unconfigured', language: businessLanguage, body: needsOwnerReply(businessLanguage) });
+    }
+    // A short text the model tags en or fr keeps that tag.
+    expect((await ask('bonjour', answer({ language: 'fr' }), { businessLanguage: 'en' })).result.language).toBe('fr');
   });
 });
 

@@ -521,7 +521,7 @@ export async function postDemoMessage(
       }
       counted = true;
       result = await answerVisitorMessage(
-        { businessName: business.displayName, contextMd: business.contextMd, history, visitorMessage: text },
+        { businessName: business.displayName, contextMd: business.contextMd, history, visitorMessage: text, businessLanguage: business.language },
         {
           transport: deps.transport,
           reserve: async (worstCase) => {

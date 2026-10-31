@@ -1,5 +1,5 @@
 import { costMicroUsd, estimateInputTokens, siteFallbackLlmConfig, siteLlmConfig, SITE_CONTEXT_MAX_CHARS, SITE_HISTORY_MAX_CHARS, SITE_HISTORY_MAX_MESSAGES, type SiteLlmConfig } from './config';
-import { findOwnerKeyword, guessLanguage } from './keywords';
+import { detectVisitorLanguage, findOwnerKeyword, guessLanguage } from './keywords';
 import { callSiteLlm, shouldTryFallback, type SiteLlmTransport } from './llm';
 import { normalizeForMatch } from './normalize';
 import { cappedReply, needsOwnerReply, offTopicReply, replyLanguage } from './replies';
@@ -15,7 +15,21 @@ export type SiteAnswerInput = {
   /** Earlier messages of this conversation only, oldest first. */
   history: SiteHistoryMessage[];
   visitorMessage: string;
+  /** The business's main language; used when the visitor's text is too short or too close to call. */
+  businessLanguage?: string | null;
 };
+
+/**
+ * The server's view of the visitor's language (spec 6b). `detected` is the confident server detection ('en', 'fr',
+ * 'other') or null; `reply` is the en/fr to answer in when the server must decide: the detection when it is en/fr,
+ * else the business's language, else the old accent/function-word guess.
+ */
+export function visitorLanguage(input: SiteAnswerInput): { detected: 'en' | 'fr' | 'other' | null; reply: 'en' | 'fr' } {
+  const detected = detectVisitorLanguage(input.visitorMessage);
+  if (detected === 'en' || detected === 'fr') return { detected, reply: detected };
+  const business = input.businessLanguage === 'fr' || input.businessLanguage === 'en' ? input.businessLanguage : null;
+  return { detected, reply: business ?? guessLanguage(input.visitorMessage) };
+}
 
 export type SiteAnswerResult = {
   status: 'answered' | 'needs_owner' | 'off_topic' | 'capped';
@@ -122,7 +136,7 @@ function fixedOwner(
 }
 
 export function cappedResult(input: SiteAnswerInput, decidedBy: DecidedBy): SiteAnswerResult {
-  const language = guessLanguage(input.visitorMessage);
+  const language = visitorLanguage(input).reply;
   return { ...fixedOwner(input, decidedBy, language), status: 'capped', body: cappedReply(language), ownerQuestion: null };
 }
 
@@ -131,10 +145,12 @@ export function cappedResult(input: SiteAnswerInput, decidedBy: DecidedBy): Site
  * this conversation's messages. The server rules decide the status; the model's is a suggestion.
  */
 export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAnswerDeps = {}): Promise<SiteAnswerResult> {
-  const guessed = guessLanguage(input.visitorMessage);
+  const { detected, reply: guessed } = visitorLanguage(input);
 
   // Rule 8: a keyword hit on the visitor message skips the call; the result would be forced anyway.
   if (findOwnerKeyword(input.visitorMessage)) return fixedOwner(input, 'keyword_visitor', guessed);
+  // Confidently neither English nor French: the owner answers, with no model call.
+  if (detected === 'other') return fixedOwner(input, 'language_other', 'other');
 
   const config = deps.config ?? siteLlmConfig();
   if (!config.apiKey) return fixedOwner(input, 'llm_unconfigured', guessed);
@@ -202,7 +218,9 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
   const parsed = siteAnswerSchema.safeParse(parsedJson);
   if (!parsed.success) return fixedOwner(input, 'invalid_output', guessed, { ...usage, rawOutput: parsedJson });
 
-  const answer = parsed.data;
+  // The model's language tag is a suggestion. A confident server detection wins; with none, a model "other" on
+  // short or close text means the business's language, not the owner.
+  const answer = { ...parsed.data, language: detected ?? (parsed.data.language === 'other' ? guessed : parsed.data.language) };
   const outcome = applyRules(answer, normalizeForMatch(input.contextMd), contactIndex(input.contextMd));
   const language = answer.language;
   const base = {
@@ -211,7 +229,7 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
     decidedBy: outcome.decidedBy,
     sourcesKept: outcome.kept,
     sourcesDropped: outcome.dropped,
-    rawOutput: answer,
+    rawOutput: parsed.data,
     ...usage,
   };
   if (outcome.status === 'answered') {

@@ -114,3 +114,90 @@ export function guessPageLanguage(text: string): 'en' | 'fr' {
   }
   return fr > en ? 'fr' : 'en';
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Server-side language check (spec 6b). Cheap and deterministic: common function words plus letters that only
+// some languages use. It only has to tell English and French from "clearly something else"; anything short or
+// close is left undecided, and the caller falls back to the business's language.
+
+type DetectLanguage = 'en' | 'fr' | 'de' | 'es' | 'it' | 'pt' | 'nl';
+
+const STOPWORDS: Record<DetectLanguage, ReadonlySet<string>> = {
+  en: new Set([
+    'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'with', 'at', 'by', 'from', 'is', 'are', 'was',
+    'be', 'do', 'does', 'did', 'have', 'has', 'you', 'your', 'we', 'our', 'i', 'my', 'me', 'it', 'this', 'that',
+    'what', 'which', 'how', 'can', 'could', 'would', 'will', 'when', 'where', 'who', 'why', 'any', 'there', 'if',
+    'not', 'hi', 'hello', 'thanks', 'please', 'offer', 'about', 'much', 'many', 't', 'll', 're', 've', 'm',
+  ]),
+  fr: new Set([
+    'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'et', 'ou', 'à', 'au', 'aux', 'en', 'dans', 'sur', 'pour',
+    'avec', 'par', 'est', 'sont', 'je', 'vous', 'nous', 'votre', 'vos', 'notre', 'mon', 'ma', 'mes', 'ce', 'cette',
+    'ces', 'que', 'qui', 'quel', 'quelle', 'quels', 'quelles', 'quoi', 'comment', 'combien', 'où', 'quand',
+    'pourquoi', 'est-ce', 'avez', 'faites', 'pouvez', 'offrez', 'êtes', 'pas', 'ne', 'oui', 'non', 'bonjour',
+    'merci', 'svp', 'il', 'elle', 'y', 'a', 'c', 'l', 'qu', 'j', 'n', 'ça',
+  ]),
+  de: new Set([
+    'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einen', 'und', 'oder', 'ist', 'sind', 'ich', 'sie',
+    'wir', 'ihr', 'ihre', 'haben', 'hat', 'mit', 'für', 'auf', 'von', 'zu', 'nicht', 'was', 'wie', 'wo', 'wann',
+    'warum', 'welche', 'können', 'kann', 'bieten', 'auch', 'es', 'im', 'am', 'bei', 'nach', 'hallo', 'danke',
+    'bitte', 'gibt', 'mein', 'meine', 'noch',
+  ]),
+  es: new Set([
+    'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'y', 'o', 'de', 'del', 'en', 'con', 'por', 'para', 'es', 'son',
+    'está', 'están', 'yo', 'usted', 'ustedes', 'nosotros', 'su', 'sus', 'mi', 'qué', 'que', 'cuál', 'cómo',
+    'cuánto', 'cuánta', 'dónde', 'cuándo', 'tienen', 'tiene', 'hacen', 'ofrecen', 'puedo', 'pueden', 'no', 'sí',
+    'hola', 'gracias', 'también', 'al', 'lo', 'se', 'me', 'hay',
+  ]),
+  it: new Set([
+    'il', 'lo', 'la', 'gli', 'le', 'un', 'una', 'e', 'o', 'di', 'del', 'della', 'in', 'con', 'per', 'è', 'sono',
+    'io', 'voi', 'noi', 'che', 'cosa', 'come', 'quanto', 'dove', 'quando', 'avete', 'fate', 'offrite', 'potete',
+    'non', 'ciao', 'grazie', 'anche', 'mi', 'vostro', 'vostra',
+  ]),
+  pt: new Set([
+    'o', 'a', 'os', 'as', 'um', 'uma', 'e', 'ou', 'de', 'do', 'da', 'dos', 'das', 'em', 'no', 'na', 'com', 'por',
+    'para', 'é', 'são', 'eu', 'você', 'vocês', 'nós', 'seu', 'sua', 'que', 'qual', 'como', 'quanto', 'onde',
+    'quando', 'têm', 'tem', 'fazem', 'oferecem', 'podem', 'não', 'sim', 'olá', 'obrigado', 'obrigada', 'também',
+  ]),
+  nl: new Set([
+    'de', 'het', 'een', 'en', 'of', 'van', 'in', 'op', 'voor', 'met', 'is', 'zijn', 'ik', 'u', 'jullie', 'wij',
+    'we', 'uw', 'mijn', 'wat', 'welke', 'hoe', 'waar', 'wanneer', 'waarom', 'hebben', 'heeft', 'kunnen', 'kan',
+    'bieden', 'niet', 'ook', 'hallo', 'bedankt', 'dank', 'graag', 'er', 'dit', 'dat',
+  ]),
+};
+
+/** Letters one language uses and the others here (mostly) don't. Each word with one adds 2 to that language. */
+const LETTERS: Partial<Record<DetectLanguage, RegExp>> = {
+  fr: /[àâçèêëîïôûùœÿ]/,
+  de: /[äöüß]/,
+  es: /[ñ¿¡áíóú]/,
+  pt: /[ãõ]/,
+};
+
+const MIN_WORDS = 3;
+
+/**
+ * Server-side language of a visitor message: 'en', 'fr', 'other' when it is confidently another language, or null
+ * when the text is too short (under 3 words) or too close to call. Confident means the top language scores at
+ * least 2 and at least twice the runner-up. Shared words (de, la, in, a…) count for every language that has them.
+ */
+export function detectVisitorLanguage(text: string): 'en' | 'fr' | 'other' | null {
+  const lower = text.toLowerCase().replace(/[’‘]/g, "'");
+  // Hyphens and apostrophes split too, so "faites-vous", "qu'est-ce" and "don't" count piece by piece.
+  const words = lower.split(/[^\p{L}]+/u).filter(Boolean);
+  if (words.length < MIN_WORDS) return null;
+  const scores = new Map<DetectLanguage, number>();
+  for (const lang of Object.keys(STOPWORDS) as DetectLanguage[]) {
+    let score = 0;
+    for (const w of words) {
+      if (STOPWORDS[lang].has(w)) score += 1;
+      const letters = LETTERS[lang];
+      if (letters && letters.test(w)) score += 2;
+    }
+    if (lang === 'es' && /[¿¡]/.test(lower)) score += 2;
+    scores.set(lang, score);
+  }
+  const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+  const [top, second] = [ranked[0]!, ranked[1]!];
+  if (top[1] < 2 || top[1] < second[1] * 2) return null;
+  return top[0] === 'en' || top[0] === 'fr' ? top[0] : 'other';
+}

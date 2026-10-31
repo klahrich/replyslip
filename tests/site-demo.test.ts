@@ -311,6 +311,16 @@ describe('messages', () => {
     expect(res.data.message.demo_note).toMatch(/always go straight to /);
   });
 
+  it('sends a German question to the owner with the other-language note, without a model call', async () => {
+    const { token } = await createSiteDemo();
+    const model = fakeModel(() => answer({ language: 'fr' }));
+    setSiteLlmTransportForTests(model.transport);
+    const res = await send(token, { client_message_id: randomUUID(), text: 'Was kostet eine Fassadenreinigung und wann haben Sie Zeit?' });
+    expect(res.data.message).toMatchObject({ status: 'needs_owner', body: needsOwnerReply('en'), handoff_reason: 'other_language', language: 'other' });
+    expect(res.data.message.demo_note).toMatch(/^I can chat in English and French\./);
+    expect(model.calls).toHaveLength(0);
+  });
+
   it('rejects bad bodies, long text and cross-site posts', async () => {
     const { token } = await createSiteDemo();
     const long = await send(token, { client_message_id: randomUUID(), text: 'x'.repeat(1001) });
@@ -721,8 +731,10 @@ describe('caps', () => {
     const day = usageDay();
     const limits = capLimitsFor({ ...business, dailyMessageCap: 5 });
     const dbs = Array.from({ length: 12 }, () => separateDb());
+    // A fresh IP each run: the shared test DB keeps per-IP daily counts across runs.
+    const ipKeys = ipKeysFor(`test-${randomUUID()}`, link.id);
     const results = await Promise.all(
-      dbs.map((db) => reserveSiteUsage(db, { businessId: business.id, conversationId: convo.id, ipKeys: ipKeysFor('198.51.100.7', link.id), day, messages: 1, costMicroUsd: 0, limits })),
+      dbs.map((db) => reserveSiteUsage(db, { businessId: business.id, conversationId: convo.id, ipKeys, day, messages: 1, costMicroUsd: 0, limits })),
     );
     expect(results.filter((r) => r.ok)).toHaveLength(5);
     expect(results.filter((r) => !r.ok).every((r) => !r.ok && r.decidedBy === 'cap_business_messages')).toBe(true);

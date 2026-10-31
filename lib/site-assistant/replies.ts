@@ -42,13 +42,13 @@ export function cappedReply(language: ReplyLanguage): string {
 }
 
 /**
- * Demo-only note under a needs_owner reply, in plain words for the visitor: why it went to the business, and
- * that on the live site they would leave an email or phone and the owner would answer. The demo itself never
- * asks for contact details.
+ * Demo-only note under a needs_owner reply, in plain words for the visitor: why it went to the business (named
+ * once), and a description of what the live site would do (take an email or phone so the owner can answer). It
+ * describes; it never asks, and the demo has no contact step.
  */
 export function demoNote(reason: HandoffReason, language: ReplyLanguage, name: string): string {
   if (language === 'fr') {
-    const live = `Sur le vrai site, vous laisseriez ici votre courriel ou votre numéro, et ${name} vous répondrait.`;
+    const live = 'Sur le vrai site, vous pourriez laisser votre courriel ou votre numéro, et l’entreprise vous répondrait.';
     switch (reason) {
       case 'owner_topic':
         return `Les questions de prix, de disponibilités, de réservations et de plaintes vont directement à ${name}. ${live}`;
@@ -60,12 +60,12 @@ export function demoNote(reason: HandoffReason, language: ReplyLanguage, name: s
         return `Je n’ai pas de réponse sûre à celle-ci, alors je préfère la transmettre à ${name} plutôt que de deviner. ${live}`;
     }
   }
-  const live = `On the live site, you'd leave your email or phone here and ${name} would get back to you.`;
+  const live = "On the live site, you could leave your email or phone and they'd get back to you.";
   switch (reason) {
     case 'owner_topic':
       return `Prices, availability, bookings and complaints always go straight to ${name}. ${live}`;
     case 'not_in_context':
-      return `I couldn't find this on ${name}'s website, so I'd pass it to ${name} rather than guess. ${live}`;
+      return `I couldn't find this on ${name}'s website, so I'd pass it to them rather than guess. ${live}`;
     case 'other_language':
       return `I can chat in English and French. For other languages, I'd pass your question to ${name}. ${live}`;
     case 'check_failed':
