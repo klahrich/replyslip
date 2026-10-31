@@ -17,6 +17,7 @@ export type DecidedBy =
   | 'invalid_output'
   | 'llm_error'
   | 'llm_timeout'
+  | 'llm_fallback_capped'
   | 'llm_unconfigured'
   | 'cap_visitor'
   | 'cap_ip_link'
@@ -40,6 +41,7 @@ export function handoffReason(decidedBy: string | null | undefined): HandoffReas
     case 'invalid_output':
     case 'llm_error':
     case 'llm_timeout':
+    case 'llm_fallback_capped':
     case 'llm_unconfigured':
       return 'check_failed';
     default:

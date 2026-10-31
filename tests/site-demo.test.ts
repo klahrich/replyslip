@@ -34,7 +34,7 @@ import {
   revokeDemoLinks,
   setSuggestedAnswerChecked,
 } from '@/lib/site-assistant/import';
-import type { SiteLlmConfig } from '@/lib/site-assistant/config';
+import { siteLlmConfig, type SiteLlmConfig } from '@/lib/site-assistant/config';
 import { setSiteLlmTransportForTests, type SiteLlmTransport } from '@/lib/site-assistant/llm';
 import { cappedReply, needsOwnerReply } from '@/lib/site-assistant/replies';
 import { call } from './helpers';
@@ -465,6 +465,58 @@ describe('fallback model', () => {
     const bothDown = fakeModel(() => ({ httpStatus: 500 }));
     expect((await ask(bothDown.transport)).status).toBe('needs_owner');
     expect(bothDown.calls).toHaveLength(2);
+  });
+
+  it('reserves the fallback separately and skips it when that reservation is refused', async () => {
+    const reserves: number[] = [];
+    const model = fakeModel((_req, n) => (n === 1 ? notFound : answer({})));
+    const result = await answerVisitorMessage(
+      { businessName: 'Maple Ridge Landscaping', contextMd: MAPLE_CONTEXT, history: [], visitorMessage: 'What areas do you serve?' },
+      {
+        transport: model.transport,
+        config,
+        reserve: async (worstCase) => {
+          reserves.push(worstCase);
+          return reserves.length === 1 ? { ok: true } : { ok: false, decidedBy: 'cap_business_cost' };
+        },
+      },
+    );
+    expect(reserves).toHaveLength(2);
+    expect(reserves[1]).toBeGreaterThan(0);
+    expect(model.calls).toHaveLength(1);
+    expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'llm_fallback_capped', llmCalled: true, body: needsOwnerReply('en') });
+  });
+
+  it('goes to the owner without the fallback when the business cap is nearly used, and never passes the cap', async () => {
+    vi.stubEnv('SITE_LLM_FALLBACK_MODEL', 'gpt-6.1-terra');
+    const question = 'What areas do you serve?';
+    const { token, business } = await createSiteDemo({ dailyCostCapMicroUsd: 10_000_000 });
+    // The worst case the route will reserve for one call on this business and question.
+    const reserves: number[] = [];
+    await answerVisitorMessage(
+      { businessName: business.displayName, contextMd: business.contextMd, history: [], visitorMessage: question },
+      { transport: fakeModel(() => answer({})).transport, config: siteLlmConfig(), reserve: async (w) => (reserves.push(w), { ok: true }) },
+    );
+    const worstCase = reserves[0]!;
+    // Room for one worst case and a half: the first call fits, the fallback's reservation doesn't.
+    const cap = 10_000_000;
+    const day = usageDay();
+    await getDb()
+      .insert(siteUsageDaily)
+      .values({ businessId: business.id, day, costMicroUsd: cap - Math.floor(worstCase * 1.5) })
+      .onConflictDoNothing();
+    const model = fakeModel((_req, n) => (n === 1 ? notFound : answer({})));
+    setSiteLlmTransportForTests(model.transport);
+    const res = await send(token, { client_message_id: randomUUID(), text: question });
+    expect(res.status).toBe(200);
+    expect(res.data.message).toMatchObject({ status: 'needs_owner', body: needsOwnerReply('en'), handoff_reason: 'check_failed' });
+    expect(model.calls).toHaveLength(1);
+    const [row] = await getDb().select().from(siteMessages).where(eq(siteMessages.id, res.data.message.id));
+    expect(row!.decidedBy).toBe('llm_fallback_capped');
+    const [usage] = await getDb().select().from(siteUsageDaily).where(and(eq(siteUsageDaily.businessId, business.id), eq(siteUsageDaily.day, day)));
+    expect(usage!.reservedMicroUsd).toBe(0);
+    expect(usage!.costMicroUsd + usage!.reservedMicroUsd).toBeLessThanOrEqual(cap);
+    expect(usage!.messages).toBe(1);
   });
 
   it('runs inside the one reservation and caps through the route', async () => {

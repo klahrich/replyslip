@@ -46,6 +46,10 @@ export type SiteAnswerDeps = {
    * Called once, right before the model call, with the worst-case cost in micro-USD. Return ok: false to stop
    * (the caller's caps). Not called when the keyword pre-check or a missing key skips the call.
    */
+  /**
+   * Reserves a worst-case cost atomically against the caps. Called before the first call, and again before a
+   * fallback call; the caller settles the actual total against the sum of what it reserved.
+   */
   reserve?: (worstCaseMicroUsd: number) => Promise<CapDecision>;
 };
 
@@ -146,15 +150,29 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
   let result = await callSiteLlm(config, SITE_INSTRUCTIONS, promptInput, deps.transport);
   let model = config.model;
   let spent = { inputTokens: 0, outputTokens: 0 };
-  // One retry on the fallback model, inside the same reservation and caps (the caller already reserved).
-  if (config.fallbackModel && config.fallbackModel !== config.model && shouldTryFallback(result)) {
-    if (result.kind === 'error') spent = { inputTokens: result.inputTokens, outputTokens: result.outputTokens };
-    model = config.fallbackModel;
-    result = await callSiteLlm({ ...config, model }, SITE_INSTRUCTIONS, promptInput, deps.transport);
+  // One retry on the fallback model. It gets its own worst-case reservation first, so the two calls together
+  // never go past what was reserved; if the caps refuse it, the message goes to the owner without the call.
+  if (config.fallbackModel && config.fallbackModel !== config.model && shouldTryFallback(result) && result.kind === 'error') {
+    spent = { inputTokens: result.inputTokens, outputTokens: result.outputTokens };
+    const fallbackConfig = { ...config, model: config.fallbackModel };
+    if (deps.reserve) {
+      const decision = await deps.reserve(costMicroUsd(estimatedIn, fallbackConfig.maxOutputTokens, fallbackConfig));
+      if (!decision.ok) {
+        return fixedOwner(input, 'llm_fallback_capped', guessed, {
+          llmCalled: true,
+          ...spent,
+          costMicroUsd: costMicroUsd(spent.inputTokens, spent.outputTokens, config),
+          model,
+        });
+      }
+    }
+    model = fallbackConfig.model;
+    result = await callSiteLlm(fallbackConfig, SITE_INSTRUCTIONS, promptInput, deps.transport);
   }
   if (result.kind === 'timeout') {
-    // Usage is unknown: charge the worst case.
-    return fixedOwner(input, 'llm_timeout', guessed, { llmCalled: true, costMicroUsd: worstCase, model });
+    // Usage is unknown: charge the worst case (plus whatever the failed first call used).
+    const earlier = costMicroUsd(spent.inputTokens, spent.outputTokens, config);
+    return fixedOwner(input, 'llm_timeout', guessed, { llmCalled: true, ...spent, costMicroUsd: earlier + worstCase, model });
   }
   const inputTokens = spent.inputTokens + result.inputTokens;
   const outputTokens = spent.outputTokens + result.outputTokens;

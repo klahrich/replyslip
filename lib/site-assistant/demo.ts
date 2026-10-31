@@ -528,7 +528,8 @@ export async function postDemoMessage(
               costMicroUsd: worstCase,
               limits,
             });
-            if (costDecision.ok) reserved = worstCase;
+            // Added up: a fallback call reserves again on top of the first call's reservation.
+            if (costDecision.ok) reserved += worstCase;
             return costDecision;
           },
         },
