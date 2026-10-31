@@ -88,6 +88,16 @@ export function serializeBranding(row: StoredBranding | null, ownerName: string 
   };
 }
 
+/**
+ * Branding for responses anyone holding a link can read (R1 and the used-up 410), which never name the agent.
+ * Logos uploaded before uploads moved to a random folder live under `branding/<agentId>/`, so a logo URL that
+ * contains the agent id is dropped (no logo) until the owner uploads it again.
+ */
+export function publicBranding(branding: Branding, agentId: string): Branding {
+  if (!branding.logo_url || !branding.logo_url.toLowerCase().includes(agentId.toLowerCase())) return branding;
+  return { ...branding, logo_url: null, logo_width: null, logo_height: null };
+}
+
 export function defaultBranding(displayName: string | null): Branding {
   return serializeBranding(null, displayName);
 }

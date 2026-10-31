@@ -255,6 +255,9 @@ describe('PUT /api/v1/agents/:id/branding/logo', () => {
     const logoUrl = first.data.branding.logo_url as string;
     expect(logoUrl).toMatch(/^https:\/\/blob\.test\/branding\//);
     const [path1] = [...store.files.keys()];
+    // A random folder, never the agent id: this URL is shown on public link pages.
+    expect(path1).toMatch(/^branding\/[0-9a-f]{32}\/[0-9a-f]{64}-[0-9a-f]{8}\.webp$/);
+    expect(logoUrl).not.toContain(o.agentId);
     const meta = await sharp(store.files.get(path1!)!).metadata();
     expect(meta).toMatchObject({ format: 'webp', width: 512, height: 256 });
     expect(meta.exif).toBeUndefined();
