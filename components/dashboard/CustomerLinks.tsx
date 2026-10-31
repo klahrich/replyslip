@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, errorText, formatTime } from './api';
+import { api, errorText } from './api';
+import { LocalTime } from './LocalTime';
 import { CopyButton } from './CopyButton';
 import type { CustomerAccess, CustomerInvite, InvitesResponse, NewCustomerInvite, Offer } from './types';
 
@@ -340,8 +341,8 @@ export function CustomerLinks({
                   <p className="dash-muted">
                     {STATUS_TEXT[inv.status]} · used {inv.uses}
                     {inv.max_uses !== null ? ` of ${inv.max_uses}` : ''}
-                    {inv.revoked_at ? ` · ${inv.rotated_at ? 'reset' : 'revoked'} ${formatTime(inv.revoked_at)}` : ''}
-                    {!inv.revoked_at && inv.expires_at ? ` · expires ${formatTime(inv.expires_at)}` : ''}
+                    {inv.revoked_at ? <>{` · ${inv.rotated_at ? 'reset' : 'revoked'} `}<LocalTime iso={inv.revoked_at} /></> : null}
+                    {!inv.revoked_at && inv.expires_at ? <>{' · expires '}<LocalTime iso={inv.expires_at} /></> : null}
                     {' · '}
                     <span translate="no">{inv.all_offers ? 'all tasks' : (inv.offers ?? []).map((o) => o.name).join(', ')}</span>
                   </p>

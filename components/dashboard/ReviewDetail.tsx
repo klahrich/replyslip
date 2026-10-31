@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, errorText, formatTime, SIGNED_OUT_EVENT } from './api';
+import { api, ApiError, errorText, SIGNED_OUT_EVENT } from './api';
+import { LocalTime } from './LocalTime';
 import { jobTitle, REVIEWS_CHANGED_EVENT, senderText, settledText } from './review-text';
 import type { Review, ReviewAction } from './types';
 
@@ -219,7 +220,7 @@ export function ReviewDetail({ taskId }: { taskId: string }) {
         <p className="dash-muted">{stageTitle(r)}</p>
         <h1 id="rv-h">{jobTitle(r)}</h1>
         <p className="dash-muted">
-          From <span translate="no">{senderText(r)}</span> to <span translate="no">{r.agent.name}</span> · sent {formatTime(r.created_at)}
+          From <span translate="no">{senderText(r)}</span> to <span translate="no">{r.agent.name}</span> · sent <LocalTime iso={r.created_at} />
         </p>
       </section>
 
@@ -245,10 +246,10 @@ export function ReviewDetail({ taskId }: { taskId: string }) {
             <ol className="dash-thread">
               {r.answers.map((a) => (
                 <li key={a.asked_at}>
-                  <p className="dash-muted">Your bot asked · {formatTime(a.asked_at)}</p>
+                  <p className="dash-muted">Your bot asked · <LocalTime iso={a.asked_at} /></p>
                   <p className="dash-pre-text">{a.question}</p>
                   <p className="dash-muted dash-review-reply">
-                    {r.sender.kind === 'customer' ? 'Your customer' : 'They'} answered · {formatTime(a.answered_at)}
+                    {r.sender.kind === 'customer' ? 'Your customer' : 'They'} answered · <LocalTime iso={a.answered_at} />
                   </p>
                   <p className="dash-pre-text">{a.answer}</p>
                 </li>
@@ -302,7 +303,7 @@ export function ReviewDetail({ taskId }: { taskId: string }) {
               <p className="dash-pre-text dash-review-held">{r.fail_message}</p>
             </>
           )}
-          <p className="dash-muted dash-review-help">You released this {formatTime(r.released_at)}.</p>
+          <p className="dash-muted dash-review-help">You released this <LocalTime iso={r.released_at} />.</p>
         </section>
       ) : null}
 
@@ -319,7 +320,7 @@ export function ReviewDetail({ taskId }: { taskId: string }) {
         {r.actions.length === 0 ? (
           <>
             <p>{settledText(r)}</p>
-            {r.reviewed_at ? <p className="dash-muted">You reviewed this {formatTime(r.reviewed_at)}.</p> : null}
+            {r.reviewed_at ? <p className="dash-muted">You reviewed this <LocalTime iso={r.reviewed_at} />.</p> : null}
           </>
         ) : panel ? (
           <form

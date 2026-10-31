@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useId, useState } from 'react';
-import { api, errorText, formatTime } from './api';
+import { api, errorText } from './api';
+import { LocalTime } from './LocalTime';
 import { OnceSecret } from './CopyButton';
 import type { NewWatcherKey, WatcherKey } from './types';
 
@@ -162,9 +163,9 @@ export function WatcherKeys() {
                   <td data-label="Key">
                     <code translate="no">{k.prefix}…</code>
                   </td>
-                  <td data-label="Created">{formatTime(k.created_at)}</td>
+                  <td data-label="Created"><LocalTime iso={k.created_at} /></td>
                   <td data-label={k.revoked_at ? 'Revoked' : 'Last used'}>
-                    {k.revoked_at ? `Revoked ${formatTime(k.revoked_at)}` : formatTime(k.last_used_at)}
+                    {k.revoked_at ? <>Revoked <LocalTime iso={k.revoked_at} /></> : <LocalTime iso={k.last_used_at} />}
                   </td>
                   <td className="dash-td-actions">
                     <div className="dash-actions">

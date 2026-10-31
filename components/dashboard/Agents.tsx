@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { api, errorText, formatTime } from './api';
+import { api, errorText } from './api';
+import { LocalTime } from './LocalTime';
 import { OnceSecret } from './CopyButton';
 import { DeliveryPanel } from './DeliveryPanel';
 import type { Agent, AgentKey, NewAgentKey } from './types';
@@ -33,12 +34,12 @@ function DeliveryHealth({ a }: { a: Agent }) {
     !!a.last_failed_at && (!a.last_delivered_at || new Date(a.last_failed_at).getTime() > new Date(a.last_delivered_at).getTime());
   return (
     <p className="dash-muted dash-health">
-      <span>Last delivered {formatTime(a.last_delivered_at ?? null)}</span>
+      <span>Last delivered <LocalTime iso={a.last_delivered_at} /></span>
       {a.last_failed_at ? (
         <>
           {' · '}
           <span className={failedLast ? 'dash-health-bad' : undefined}>
-            Last failed {formatTime(a.last_failed_at)}
+            Last failed <LocalTime iso={a.last_failed_at} />
             {a.last_error ? (
               <>
                 : <span translate="no">{a.last_error}</span>
@@ -113,7 +114,7 @@ export function Agents({
                     </h3>
                     {a.description ? <p className="dash-agent-desc">{a.description}</p> : null}
                     <p className="dash-muted">
-                      Joined {formatTime(a.created_at)} · {deliveryLabel(a)}
+                      Joined <LocalTime iso={a.created_at} /> · {deliveryLabel(a)}
                     </p>
                     {!revoked && a.shared && handle ? (
                       <p className="dash-muted">
@@ -197,8 +198,8 @@ export function Agents({
                             <td data-label="Key">
                               <code translate="no">{k.prefix}…</code>
                             </td>
-                            <td data-label="Created">{formatTime(k.created_at)}</td>
-                            <td data-label={k.revoked_at ? 'Revoked' : 'Last used'}>{k.revoked_at ? `Revoked ${formatTime(k.revoked_at)}` : formatTime(k.last_used_at)}</td>
+                            <td data-label="Created"><LocalTime iso={k.created_at} /></td>
+                            <td data-label={k.revoked_at ? 'Revoked' : 'Last used'}>{k.revoked_at ? <>Revoked <LocalTime iso={k.revoked_at} /></> : <LocalTime iso={k.last_used_at} />}</td>
                             <td className="dash-td-actions">
                               <div className="dash-actions">
                                 {!k.revoked_at && !revoked ? (

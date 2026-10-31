@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { JOIN_CODE_MAX_PENDING } from '@/lib/constants';
-import { api, errorText, formatTime } from './api';
+import { api, errorText } from './api';
+import { LocalTime } from './LocalTime';
 import { CopyButton, OnceSecret } from './CopyButton';
 import type { Agent, JoinCode } from './types';
 
@@ -121,7 +122,7 @@ export function JoinCodes({
             joins. Pick Bearer token if your endpoint checks the Authorization header, HMAC signature if it checks a
             signed body, or Static headers if it wants its own header.
           </p>
-          <p className="dash-muted">Expires {formatTime(fresh.expires_at)}.</p>
+          <p className="dash-muted">Expires <LocalTime iso={fresh.expires_at} />.</p>
         </OnceSecret>
       ) : null}
 
@@ -150,8 +151,8 @@ export function JoinCodes({
                   <td>
                     <code translate="no">{c.prefix}…</code>
                   </td>
-                  <td data-label="Created">{formatTime(c.created_at)}</td>
-                  <td data-label="Expires">{formatTime(c.expires_at)}</td>
+                  <td data-label="Created"><LocalTime iso={c.created_at} /></td>
+                  <td data-label="Expires"><LocalTime iso={c.expires_at} /></td>
                   <td className="dash-td-actions">
                     <div className="dash-actions">
                       <button
@@ -203,7 +204,7 @@ export function JoinCodes({
                       <code translate="no">{c.prefix}…</code>
                     </td>
                     <td>{historyLabel(c, agentName(c.consumed_by_agent_id))}</td>
-                    <td data-label={historyWhenLabel(c)}>{formatTime(historyWhen(c))}</td>
+                    <td data-label={historyWhenLabel(c)}><LocalTime iso={historyWhen(c)} /></td>
                   </tr>
                 ))}
               </tbody>

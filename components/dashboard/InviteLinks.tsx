@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, errorText, formatTime } from './api';
+import { api, errorText } from './api';
+import { LocalTime } from './LocalTime';
 import { CopyButton } from './CopyButton';
 import { CustomerLinks } from './CustomerLinks';
 import type { Invite, InvitesResponse, NewInvite, Offer } from './types';
@@ -358,7 +359,7 @@ function AgentInviteLinks({
                   </p>
                   <p className="dash-muted">
                     {STATUS_TEXT[inv.status]} · used {inv.uses} of {inv.max_uses} ·{' '}
-                    {inv.status === 'revoked' ? `revoked ${formatTime(inv.revoked_at)}` : `expires ${formatTime(inv.expires_at)}`}
+                    {inv.status === 'revoked' ? <>revoked <LocalTime iso={inv.revoked_at} /></> : <>expires <LocalTime iso={inv.expires_at} /></>}
                     {' · '}
                     <span translate="no">{inv.offers.map((o) => o.name).join(', ') || 'no tasks'}</span>
                     {inv.approve_on_redeem ? '' : ' · needs your approval'}
