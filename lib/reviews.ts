@@ -1,7 +1,18 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { getDb, type Db } from '@/db';
-import { agentOffers, agentShares, agents, tasks, users, workspaces, type AgentRow, type TaskRow } from '@/db/schema';
+import {
+  agentOffers,
+  agentShares,
+  agents,
+  taskAnswers,
+  tasks,
+  users,
+  workspaces,
+  type AgentRow,
+  type TaskAnswerRow,
+  type TaskRow,
+} from '@/db/schema';
 import { getAgent } from './agents';
 import { OWNER_DECLINED_REASON, OWNER_NOTE_MAX, REVIEWS_LIST_MAX } from './constants';
 import { inputDisplay, resultDisplay } from './customer-api';
@@ -9,7 +20,7 @@ import { consumeOrThrow } from './customer-invites';
 import { HttpError } from './errors';
 import { offerDisplayTitle } from './offer-title';
 import { heldCountFor } from './review-notice';
-import { afterWake, lockTargetAgentShared, serializeAnswer, taskAnswersFor, type HeldAction } from './tasks';
+import { afterWake, lockTargetAgentShared, serializeAnswer, type HeldAction } from './tasks';
 import { enqueueWake, reviewUrl, type WakeReason } from './wakes';
 
 export type ReviewMode = 'auto' | 'review_first';
@@ -141,21 +152,25 @@ async function contextsFor(db: Db, rows: TaskRow[]): Promise<Map<string, Context
  * Owner-only view of one review_first task. Sender text is untrusted: render it as text.
  * customer_email is owner-only, like the share list; it never goes to a bot or an agent tool.
  */
-async function serializeReview(db: Db, task: TaskRow, context: Context | undefined) {
+function sameInstant(a: Date | null | undefined, b: Date | null | undefined): boolean {
+  return !!a && !!b && a.getTime() === b.getTime();
+}
+
+/** What the latest release sent, or null when the current state didn't come from a release. */
+function currentRelease(task: TaskRow): HeldAction | null {
+  if (!task.releasedAt) return null;
+  if (task.status === 'done' && sameInstant(task.completedAt, task.releasedAt)) return 'result';
+  if (task.status === 'failed' && sameInstant(task.completedAt, task.releasedAt)) return 'failure';
+  if (task.status === 'needs_info' && sameInstant(task.questionAskedAt, task.releasedAt)) return 'question';
+  return null;
+}
+
+function serializeReview(task: TaskRow, context: Context | undefined, answers: TaskAnswerRow[]) {
   const held = task.status === 'awaiting_release' ? (task.heldAction as HeldAction | null) : null;
-  // After release, show the owner what went out (the content stays on the task; decline and send-back clear it).
-  const shown: HeldAction | null =
-    held ??
-    (task.releasedAt
-      ? task.status === 'done'
-        ? 'result'
-        : task.status === 'needs_info'
-          ? 'question'
-          : task.status === 'failed'
-            ? 'failure'
-            : null
-      : null);
-  const answers = await taskAnswersFor(db, task.id);
+  // After a release, show the owner what went out, but only while that release is still the task's
+  // latest outcome. A later decline (or a reopen after a released question) leaves an old releasedAt behind.
+  const released = currentRelease(task);
+  const shown: HeldAction | null = held ?? released;
   return {
     task_id: task.id,
     status: task.status,
@@ -182,7 +197,7 @@ async function serializeReview(db: Db, task: TaskRow, context: Context | undefin
     owner_note: task.ownerNote ?? null,
     reviewed_at: task.reviewedAt?.toISOString() ?? null,
     reviewed_by: task.reviewedBy ?? null,
-    released_at: task.releasedAt?.toISOString() ?? null,
+    released_at: released ? (task.releasedAt?.toISOString() ?? null) : null,
     created_at: task.createdAt.toISOString(),
     updated_at: task.updatedAt.toISOString(),
     completed_at: task.completedAt?.toISOString() ?? null,
@@ -191,11 +206,28 @@ async function serializeReview(db: Db, task: TaskRow, context: Context | undefin
   };
 }
 
-export type SerializedReview = Awaited<ReturnType<typeof serializeReview>>;
+export type SerializedReview = ReturnType<typeof serializeReview>;
+
+/** All answers for these tasks in one query, grouped by task in answer order. */
+async function answersByTask(db: Db, ids: string[]): Promise<Map<string, TaskAnswerRow[]>> {
+  const byTask = new Map<string, TaskAnswerRow[]>();
+  if (ids.length === 0) return byTask;
+  const rows = await db
+    .select()
+    .from(taskAnswers)
+    .where(inArray(taskAnswers.taskId, ids))
+    .orderBy(taskAnswers.answeredAt, taskAnswers.id);
+  for (const row of rows) {
+    const list = byTask.get(row.taskId) ?? [];
+    list.push(row);
+    byTask.set(row.taskId, list);
+  }
+  return byTask;
+}
 
 async function serializeOne(db: Db, task: TaskRow): Promise<SerializedReview> {
-  const contexts = await contextsFor(db, [task]);
-  return serializeReview(db, task, contexts.get(task.id));
+  const [contexts, answers] = await Promise.all([contextsFor(db, [task]), answersByTask(db, [task.id])]);
+  return serializeReview(task, contexts.get(task.id), answers.get(task.id) ?? []);
 }
 
 // ---------- reads ----------
@@ -216,9 +248,14 @@ export async function listReviews(workspaceId: string, filter: { agentId?: strin
     .where(held)
     .groupBy(tasks.toAgentId, tasks.status)
     .orderBy(desc(sql`count(*)`));
-  const contexts = await contextsFor(db, rows);
-  const reviews: SerializedReview[] = [];
-  for (const row of rows) reviews.push(await serializeReview(db, row, contexts.get(row.id)));
+  const [contexts, answers] = await Promise.all([
+    contextsFor(db, rows),
+    answersByTask(
+      db,
+      rows.map((row) => row.id),
+    ),
+  ]);
+  const reviews = rows.map((row) => serializeReview(row, contexts.get(row.id), answers.get(row.id) ?? []));
   const byAgent = new Map<string, { agent_id: string; in_review: number; awaiting_release: number }>();
   for (const row of counts) {
     const entry = byAgent.get(row.agentId) ?? { agent_id: row.agentId, in_review: 0, awaiting_release: 0 };
