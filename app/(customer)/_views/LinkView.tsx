@@ -1,20 +1,17 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { ArrowLeft, Link2Off, Loader2, Mail } from 'lucide-react';
-import { JOBS_LIVE, acceptLink, getLink, requestCode, verifyCode } from '../_lib/api';
+import { Link2Off, Loader2, Mail } from 'lucide-react';
+import { acceptLink, getLink } from '../_lib/api';
 import { brandStyle } from '../_lib/brand';
 import { ApiError, type LinkResponse } from '../_lib/types';
 import { Button } from '../_ui/button';
-import { Input } from '../_ui/input';
-import { InputOTP, InputOTPGroup, InputOTPSlot } from '../_ui/input-otp';
-import { Label } from '../_ui/label';
+import { EmailSignIn, SignInCard, retryText } from '../_components/EmailSignIn';
 import { LogoTile, PlainFrame, ValettoFooter } from '../_components/Frame';
 import { Notice } from '../_components/Notice';
 import { Loading, useEmail } from './common';
-
-type Step = 'email' | 'code';
 
 const linkErrors: Record<string, { title: string; body: string }> = {
   invite_not_found: { title: "This link doesn't work anymore", body: 'Ask the business that sent it for a new one.' },
@@ -48,6 +45,7 @@ export function LinkFromHash() {
 
 function DeadLink({ code }: { code: string }) {
   const c = linkErrors[code] ?? linkErrors.invite_not_found;
+  if (code === 'invite_used_up') return <UsedUpLink title={c.title} />;
   return (
     <PlainFrame>
       <Notice icon={<Link2Off />} title={c.title}>
@@ -57,17 +55,51 @@ function DeadLink({ code }: { code: string }) {
   );
 }
 
-function retryText(e: unknown): string {
-  const s = e instanceof ApiError ? Number(e.details?.retry_after_seconds) : NaN;
-  const mins = Number.isFinite(s) && s > 0 ? Math.ceil(s / 60) : 0;
-  return mins ? `Too many tries. Wait ${mins} minute${mins === 1 ? '' : 's'}, then try again.` : 'Too many tries. Wait a few minutes, then try again.';
+/**
+ * Personal links work once. Someone who already joined with one gets back in with an email code and lands on
+ * their businesses list (/c); someone still signed in just gets a way there.
+ */
+function UsedUpLink({ title }: { title: string }) {
+  const router = useRouter();
+  const email = useEmail();
+  const [signingIn, setSigningIn] = useState(false);
+  if (signingIn) {
+    return (
+      <PlainFrame>
+        <SignInCard>
+          <EmailSignIn
+            title="Sign in with your email"
+            intro="Enter the email you used with this business. We'll send you a 6-digit code."
+            onSignedIn={() => router.push('/c')}
+          />
+        </SignInCard>
+      </PlainFrame>
+    );
+  }
+  return (
+    <PlainFrame>
+      <Notice
+        icon={<Link2Off />}
+        title={title}
+        action={
+          email ? (
+            <Button asChild className="h-12 w-full rounded-xl text-base font-semibold">
+              <Link href="/c">Go to your businesses</Link>
+            </Button>
+          ) : (
+            <Button type="button" onClick={() => setSigningIn(true)} className="h-12 w-full rounded-xl text-base font-semibold">
+              <Mail /> Sign in with your email
+            </Button>
+          )
+        }
+      >
+        <p>{email
+            ? `You're signed in as ${email}. Your businesses and requests are on your list.`
+            : "If you've already joined, sign in with your email to get back to your requests. Otherwise, ask the business for a new link."}</p>
+      </Notice>
+    </PlainFrame>
+  );
 }
-
-/** Until the jobs routes (R3–R8) ship, the link page ends here instead of opening the bot page. */
-const joined = (name: string, pending: boolean) =>
-  pending
-    ? { title: `Waiting for approval from ${name}`, body: "You'll be able to send requests once they approve you. You can close this page." }
-    : { title: "You're in", body: `${name}'s page isn't open for requests yet. Open this same link again soon to get started.` };
 
 const turnedOff = (name: string) => ({ title: `${name} has turned off your access.`, body: mistake(name) });
 
@@ -78,19 +110,13 @@ export function LinkView({ token }: { token: string }) {
   const [link, setLink] = useState<LinkResponse | null>(null);
   const [dead, setDead] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<{ title: string; body?: string } | null>(null);
-  const [step, setStep] = useState<Step>('email');
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     getLink(token).then(
       (l) => {
-        if (l.next === 'open_bot' || l.next === 'wait') {
-          if (JOBS_LIVE) router.replace(`/c/${l.bot.agent_id}`);
-          else setBlocked(joined(l.bot.branding.display_name, l.next === 'wait'));
-        }
+        if (l.next === 'open_bot' || l.next === 'wait') router.replace(`/c/${l.bot.agent_id}`);
         else if (l.next === 'blocked') setBlocked(turnedOff(l.bot.branding.display_name));
         setLink(l);
       },
@@ -107,9 +133,7 @@ export function LinkView({ token }: { token: string }) {
   async function accept() {
     try {
       const r = await acceptLink(token);
-      if (JOBS_LIVE) return router.push(`/c/${r.bot.agent_id}`);
-      setBlocked(joined(name, r.share.status === 'pending'));
-      setBusy(false);
+      router.push(`/c/${r.bot.agent_id}`);
     } catch (e) {
       const code = e instanceof ApiError ? e.code : '';
       if (code === 'invite_expired' || code === 'invite_used_up' || code === 'invite_not_found') setDead(code);
@@ -125,35 +149,11 @@ export function LinkView({ token }: { token: string }) {
     }
   }
 
-  async function sendCode(ev: React.FormEvent) {
-    ev.preventDefault();
-    setError(null);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return setError('Enter a valid email address.');
-    setBusy(true);
-    try {
-      await requestCode(email.trim());
-      setStep('code');
-    } catch (e) {
-      setError(e instanceof ApiError && e.code === 'rate_limited' ? retryText(e) : e instanceof Error ? e.message : 'Something went wrong. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function checkCode(value: string) {
-    setError(null);
-    setBusy(true);
-    try {
-      await verifyCode(email.trim(), value);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
-      setCode('');
-      setBusy(false);
-      return;
-    }
+  async function signedIn() {
     // Signed in now. Show the one-tap step, so if the join below fails its error sits next to a working
     // Continue / Ask for access button instead of a code that's already used.
     setLink((l) => (l ? { ...l, next: 'accept', viewer: { ...l.viewer, signed_in: true } } : l));
+    setBusy(true);
     await accept();
   }
 
@@ -185,104 +185,14 @@ export function LinkView({ token }: { token: string }) {
                 void accept();
               }}
             />
-          ) : step === 'email' ? (
-            <form onSubmit={sendCode} noValidate>
-              <h1 className="text-[22px] leading-snug font-semibold tracking-tight">
-                {asks ? `Sign in to ask ${name} for access` : `Sign in to send a request to ${name}`}
-              </h1>
-              <p className="mt-2 text-[15px] text-muted-foreground">We&apos;ll email you a 6-digit code. No password needed.</p>
-              <div className="mt-6 grid gap-2">
-                <Label htmlFor="vt-email" className="text-[15px]">
-                  Email
-                </Label>
-                <Input
-                  id="vt-email"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  aria-invalid={Boolean(error)}
-                  aria-describedby={error ? 'vt-email-error' : 'vt-email-note'}
-                  className="h-12 rounded-xl px-3.5 text-base md:text-base"
-                />
-                {error ? (
-                  <p id="vt-email-error" className="text-sm text-destructive">
-                    {error}
-                  </p>
-                ) : (
-                  <p id="vt-email-note" className="text-sm text-muted-foreground">
-                    {name} will see your email.
-                  </p>
-                )}
-              </div>
-              <Button type="submit" disabled={busy} className="mt-6 h-12 w-full rounded-xl text-base font-semibold">
-                {busy ? <Loader2 className="animate-spin" /> : <Mail />} Email me a code
-              </Button>
-              {asks && <p className="mt-4 text-center text-sm text-muted-foreground">{name} approves each new customer.</p>}
-            </form>
           ) : (
-            <div>
-              <button
-                type="button"
-                onClick={() => {
-                  setStep('email');
-                  setCode('');
-                  setError(null);
-                }}
-                className="-ml-2 mb-3 inline-flex h-11 items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground hover:text-foreground"
-              >
-                <ArrowLeft className="size-4" /> Change email
-              </button>
-              <h1 className="text-[22px] leading-snug font-semibold tracking-tight">Check your email</h1>
-              <p className="mt-2 text-[15px] text-muted-foreground">
-                Enter the 6-digit code we sent to <span className="font-medium break-words text-foreground">{email.trim()}</span>.
-              </p>
-              <div className="mt-6">
-                <Label htmlFor="vt-code" className="sr-only">
-                  Sign-in code
-                </Label>
-                <InputOTP
-                  id="vt-code"
-                  maxLength={6}
-                  value={code}
-                  onChange={(v) => {
-                    setCode(v.replace(/\D/g, ''));
-                    if (v.length === 6) void checkCode(v);
-                  }}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  disabled={busy}
-                  autoFocus
-                  containerClassName="justify-center"
-                  aria-invalid={Boolean(error)}
-                >
-                  <InputOTPGroup className="gap-1.5 sm:gap-2">
-                    {[0, 1, 2, 3, 4, 5].map((i) => (
-                      <InputOTPSlot key={i} index={i} className="h-12 w-11 rounded-xl! border text-xl font-medium sm:size-14" />
-                    ))}
-                  </InputOTPGroup>
-                </InputOTP>
-                <p className={error ? 'mt-3 text-center text-sm text-destructive' : 'mt-3 text-center text-sm text-muted-foreground'} role={error ? 'alert' : undefined}>
-                  {error ?? (busy ? 'Checking…' : 'The code expires in 10 minutes.')}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                className="mt-6 h-12 w-full rounded-xl bg-card text-base"
-                onClick={() => {
-                  setError(null);
-                  void requestCode(email.trim());
-                }}
-              >
-                Send a new code
-              </Button>
-            </div>
+            <EmailSignIn
+              title={asks ? `Sign in to ask ${name} for access` : `Sign in to send a request to ${name}`}
+              intro="We'll email you a 6-digit code. No password needed."
+              emailNote={`${name} will see your email.`}
+              footer={asks ? `${name} approves each new customer.` : undefined}
+              onSignedIn={signedIn}
+            />
           )}
         </section>
       </main>

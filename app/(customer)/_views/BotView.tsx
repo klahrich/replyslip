@@ -4,17 +4,17 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronRight, Clock, Hourglass, Lock, ShieldOff } from 'lucide-react';
 import { getBot, listRequests } from '../_lib/api';
-import { ApiError, type BotResponse, type Job, type RequestListRow } from '../_lib/types';
+import type { BotResponse, Job, RequestListRow } from '../_lib/types';
 import { cn } from '../_lib/utils';
 import { BrandFrame } from '../_components/Frame';
 import { Notice } from '../_components/Notice';
 import { StatusBadge } from '../_components/StatusBadge';
 import { usePoll } from '../_components/usePoll';
-import { Account, Loading, NotFound, useEmail, when } from './common';
+import { Account, ConnectError, Loading, NotFound, loadFailure, useEmail, when, type LoadFailure } from './common';
 
 export function BotView({ agentId }: { agentId: string }) {
   const [data, setData] = useState<BotResponse | null>(null);
-  const [missing, setMissing] = useState(false);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
   const [recent, setRecent] = useState<RequestListRow[] | null>(null);
   const email = useEmail();
 
@@ -22,9 +22,10 @@ export function BotView({ agentId }: { agentId: string }) {
     try {
       const d = await getBot(agentId);
       setData(d);
+      setFailure(null);
       if (d.share.status !== 'pending') setRecent((await listRequests(agentId, { limit: 3 })).requests);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) setMissing(true);
+      setFailure(loadFailure(e));
     }
   }, [agentId]);
 
@@ -35,7 +36,17 @@ export function BotView({ agentId }: { agentId: string }) {
   // Waiting for approval: check every 30 s and swap in the jobs without a reload (spec 15.9).
   usePoll(load, () => 30000, data?.share.status === 'pending');
 
-  if (missing) return <NotFound />;
+  if (failure === 'missing') return <NotFound />;
+  // A failed poll keeps the page it already has; only a first load that fails shows the retry screen.
+  if (failure === 'connect' && !data)
+    return (
+      <ConnectError
+        onRetry={() => {
+          setFailure(null);
+          void load();
+        }}
+      />
+    );
   if (!data) return <Loading />;
   const { branding } = data.bot;
   const name = branding.display_name;
@@ -157,11 +168,15 @@ function JobCardBody({ title, description }: { title: string; description: strin
 }
 
 export function RequestRow({ agentId, name, row }: { agentId: string; name: string; row: RequestListRow }) {
+  const job = row.offer_title ?? row.title;
   return (
     <Link href={`/c/${agentId}/r/${row.id}`} className="flex min-h-16 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none">
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-medium">{row.summary}</span>
-        <span className="mt-0.5 block text-[13px] text-muted-foreground">{when(row.created_at)}</span>
+        <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
+          {job && job !== row.summary ? `${job} · ` : ''}
+          {when(row.created_at)}
+        </span>
       </span>
       <StatusBadge status={row.status} name={name} />
     </Link>

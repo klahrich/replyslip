@@ -14,33 +14,54 @@ import { StatusBadge } from '../_components/StatusBadge';
 import { failCopy, statusCopy } from '../_components/status';
 import { usePoll } from '../_components/usePoll';
 import { cn } from '../_lib/utils';
-import { Account, Loading, NotFound, when } from './common';
+import { Account, ConnectError, Loading, NotFound, loadFailure, when, type LoadFailure } from './common';
 
 const WAITING = new Set(['in_review', 'open', 'awaiting_release']);
 
 export function RequestView({ agentId, taskId }: { agentId: string; taskId: string }) {
   const [branding, setBranding] = useState<Branding | null>(null);
   const [req, setReq] = useState<CustomerRequest | null>(null);
-  const [missing, setMissing] = useState(false);
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
 
   const load = useCallback(async () => {
     try {
       setReq((await getRequest(taskId)).request);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) setMissing(true);
+      setFailure(loadFailure(e));
     }
   }, [taskId]);
 
+  const loadBranding = useCallback(async () => {
+    try {
+      setBranding((await getBot(agentId)).bot.branding);
+    } catch (e) {
+      setFailure(loadFailure(e));
+    }
+  }, [agentId]);
+
   useEffect(() => {
-    getBot(agentId).then((b) => setBranding(b.bot.branding), () => setMissing(true));
-    const t = setTimeout(load, 0);
+    const t = setTimeout(() => {
+      void loadBranding();
+      void load();
+    }, 0);
     return () => clearTimeout(t);
-  }, [agentId, load]);
+  }, [loadBranding, load]);
 
   // Spec 15.9: every 5 s for 2 minutes, then every 15 s; stop on done/failed and while a question is open.
   usePoll(load, (ms) => (ms < 120000 ? 5000 : 15000), Boolean(req && WAITING.has(req.status)));
 
-  if (missing) return <NotFound message="We couldn't find that request." />;
+  if (failure === 'missing') return <NotFound message="We couldn't find that request." />;
+  // A failed poll keeps what's on screen; only a first load that fails shows the retry screen.
+  if (failure === 'connect' && (!branding || !req))
+    return (
+      <ConnectError
+        onRetry={() => {
+          setFailure(null);
+          if (!branding) void loadBranding();
+          void load();
+        }}
+      />
+    );
   if (!branding || !req) return <Loading />;
   const name = branding.display_name;
   const copy = statusCopy(req.status, name);
@@ -51,7 +72,7 @@ export function RequestView({ agentId, taskId }: { agentId: string; taskId: stri
         <ArrowLeft className="size-4" /> Your requests
       </Link>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <h1 className="text-[26px] leading-tight font-semibold tracking-tight">{req.title}</h1>
+        <h1 className="text-[26px] leading-tight font-semibold tracking-tight">{req.offer_title ?? req.title}</h1>
         <StatusBadge status={req.status} name={name} />
       </div>
       <p className="mt-1 text-sm text-muted-foreground">Sent {when(req.created_at).replace(/^Today/, 'today')}</p>
@@ -130,7 +151,7 @@ function FailedCard({ req, name }: { req: CustomerRequest; name: string }) {
         </figure>
       )}
       <p className="mt-3 text-[15px] text-muted-foreground">{copy.body}</p>
-      {req.fail_code !== 'declined_by_owner' && (
+      {req.fail_code !== 'declined_by_owner' && req.offer && (
         <Button asChild variant="outline" className="mt-4 h-12 w-full rounded-xl bg-card text-base sm:w-auto sm:px-6">
           <Link href={`/c/${req.bot.agent_id}/new/${req.offer}`}>Send it again</Link>
         </Button>

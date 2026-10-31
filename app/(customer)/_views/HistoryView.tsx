@@ -4,22 +4,25 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Inbox } from 'lucide-react';
 import { getBot, listRequests } from '../_lib/api';
-import { ApiError, type Branding, type RequestListFilter, type RequestListRow } from '../_lib/types';
+import type { Branding, RequestListFilter, RequestListRow, ReviewMode } from '../_lib/types';
 import { Button } from '../_ui/button';
 import { BrandFrame } from '../_components/Frame';
 import { usePoll } from '../_components/usePoll';
 import { cn } from '../_lib/utils';
-import { Account, Loading, NotFound } from './common';
+import { Account, ConnectError, Loading, NotFound, loadFailure, type LoadFailure } from './common';
 import { RequestRow } from './BotView';
 
 type Filter = 'all' | RequestListFilter;
-/** Section 17.4: R6 also filters on the review-first statuses. Labels match the status badges. */
-const FILTERS: { id: Filter; label: string }[] = [
+/**
+ * Section 17.4: R6 also filters on the review-first statuses. Labels match the status badges. The review-first
+ * chips only show for a business that reviews requests (review_mode "review_first"); today every bot is "auto".
+ */
+const FILTERS: { id: Filter; label: string; reviewOnly?: true }[] = [
   { id: 'all', label: 'All' },
   { id: 'needs_info', label: 'Needs your answer' },
-  { id: 'in_review', label: 'In review' },
+  { id: 'in_review', label: 'In review', reviewOnly: true },
   { id: 'open', label: 'Working on it' },
-  { id: 'awaiting_release', label: 'Answer in review' },
+  { id: 'awaiting_release', label: 'Answer in review', reviewOnly: true },
   { id: 'done', label: 'Done' },
   { id: 'failed', label: 'Not completed' },
 ];
@@ -29,7 +32,8 @@ export function HistoryView({ agentId }: { agentId: string }) {
   const [rows, setRows] = useState<RequestListRow[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
-  const [missing, setMissing] = useState(false);
+  const [reviewMode, setReviewMode] = useState<ReviewMode>('auto');
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -37,20 +41,42 @@ export function HistoryView({ agentId }: { agentId: string }) {
       setRows(r.requests);
       setCursor(r.next_cursor);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) setMissing(true);
+      setFailure(loadFailure(e));
     }
   }, [agentId, filter]);
 
-  useEffect(() => {
-    getBot(agentId).then((b) => setBranding(b.bot.branding), () => setMissing(true));
+  const loadBot = useCallback(async () => {
+    try {
+      const b = await getBot(agentId);
+      setBranding(b.bot.branding);
+      setReviewMode(b.review_mode);
+    } catch (e) {
+      setFailure(loadFailure(e));
+    }
   }, [agentId]);
+
+  useEffect(() => {
+    const t = setTimeout(loadBot, 0);
+    return () => clearTimeout(t);
+  }, [loadBot]);
   useEffect(() => {
     const t = setTimeout(load, 0);
     return () => clearTimeout(t);
   }, [load]);
   usePoll(load, () => 30000, true); // spec 15.9: the list every 30 s while visible
 
-  if (missing) return <NotFound />;
+  if (failure === 'missing') return <NotFound />;
+  // A failed poll keeps the list on screen; only a first load that fails shows the retry screen.
+  if (failure === 'connect' && (!branding || !rows))
+    return (
+      <ConnectError
+        onRetry={() => {
+          setFailure(null);
+          if (!branding) void loadBot();
+          void load();
+        }}
+      />
+    );
   if (!branding || !rows) return <Loading />;
   const name = branding.display_name;
 
@@ -63,7 +89,7 @@ export function HistoryView({ agentId }: { agentId: string }) {
 
       <div className="-mx-4 mt-4 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:px-0" role="tablist" aria-label="Filter requests">
         <div className="flex w-max gap-2">
-          {FILTERS.map((f) => (
+          {FILTERS.filter((f) => !f.reviewOnly || reviewMode === 'review_first' || filter === f.id).map((f) => (
             <button
               key={f.id}
               role="tab"
@@ -102,9 +128,13 @@ export function HistoryView({ agentId }: { agentId: string }) {
           variant="outline"
           className="mt-4 h-12 rounded-xl bg-card text-base"
           onClick={async () => {
-            const more = await listRequests(agentId, { limit: 20, cursor, status: filter === 'all' ? undefined : filter });
-            setRows([...(rows ?? []), ...more.requests]);
-            setCursor(more.next_cursor);
+            try {
+              const more = await listRequests(agentId, { limit: 20, cursor, status: filter === 'all' ? undefined : filter });
+              setRows([...(rows ?? []), ...more.requests]);
+              setCursor(more.next_cursor);
+            } catch {
+              // The list stays as it is; the button is still there to try again.
+            }
           }}
         >
           Show more

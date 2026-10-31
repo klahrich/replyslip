@@ -2,13 +2,8 @@
  * Customer page API client (spec section 15, with sections 16 and 17). Every function returns the R1–R8
  * response shapes from types.ts and throws ApiError with the server's error code and message.
  *
- * Live today (PR #94): sign-in (/api/v1/auth/*), R1 open a link, R2 accept it. Same-origin fetch with the
- * session cookie.
- * R3–R8 are live (PR #102). The sample layer in api-mock.ts still answers when VALETTO_MOCK=1 in dev, or for a
- * route whose LIVE flag is set back to false.
- *
- * `VALETTO_MOCK=1 npm run dev` sends every call, sign-in included, to api-mock.ts for design work and the
- * screenshot script. That switch is compiled out of production builds.
+ * Sign-in (/api/v1/auth/*) and R1–R8 (/api/v1/c/*): same-origin fetch with the session cookie.
+ * A failed fetch (offline, DNS, CORS) throws ApiError status 0 with code `network_error`.
  */
 import { ApiError } from './types';
 import type {
@@ -26,16 +21,6 @@ import type {
   RequestResponse,
   RequestStatus,
 } from './types';
-
-/** Which of R3–R8 the server has shipped. false = answer from sample data. */
-const LIVE = { R3: true, R4: true, R5: true, R6: true, R7: true, R8: true } as const;
-
-/** Inlined at build time (next.config.ts `env`). Never true in a production build. */
-export const MOCK = process.env.NODE_ENV !== 'production' && process.env.VALETTO_MOCK === '1';
-
-/** False until the server ships the jobs list (R4): the /c pages then show a "you're in" notice, not sample data. */
-export const JOBS_LIVE = MOCK || LIVE.R4;
-const mock = () => import('./api-mock');
 
 /** Fired on window when a signed-in route answers 401; SessionGate swaps the page for a sign-in notice. */
 export const UNAUTHORIZED_EVENT = 'valetto:unauthorized';
@@ -103,20 +88,6 @@ function errorBody(json: unknown, status: number): ApiErrorBody {
 
 const enc = encodeURIComponent;
 
-/** Sample routes still need a real session, so signed-out visitors see the same 401 the live routes give. */
-let session: Promise<unknown> | null = null;
-async function sample() {
-  const m = await mock();
-  if (MOCK) return m;
-  session ??= call<Me>('/api/v1/auth/me').catch((e: unknown) => {
-    session = null;
-    if (e instanceof ApiError && e.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
-    throw e;
-  });
-  await session;
-  return m;
-}
-
 /* ---------------- response normalizing (the one place older or partial shapes are absorbed) ---------------- */
 
 const STATUSES: readonly RequestStatus[] = ['in_review', 'open', 'needs_info', 'awaiting_release', 'done', 'failed'];
@@ -157,27 +128,23 @@ function normalizeRequest(r: WireRequest): CustomerRequest {
 
 /** `POST /api/v1/auth/request-code` */
 export async function requestCode(email: string): Promise<{ ok: true; message: string }> {
-  if (MOCK) return (await mock()).requestCode(email);
   return (await call<{ ok: true; message: string }>('/api/v1/auth/request-code', { method: 'POST', body: { email } })).data;
 }
 
 /** `POST /api/v1/auth/verify-code`. Sets the session cookie; a new email gets its own customer workspace. */
 export async function verifyCode(email: string, code: string): Promise<Me> {
-  if (MOCK) return (await mock()).verifyCode(email, code);
+  etagCache.clear(); // a different account may sign in on this tab
   return (await call<Me>('/api/v1/auth/verify-code', { method: 'POST', body: { email, code } })).data;
 }
 
 /** `GET /api/v1/auth/me` */
 export async function getMe(): Promise<Me> {
-  if (MOCK) return (await mock()).getMe();
   return (await call<Me>('/api/v1/auth/me')).data;
 }
 
 /** `POST /api/v1/auth/logout` */
 export async function signOut(): Promise<void> {
-  if (MOCK) return (await mock()).signOut();
   etagCache.clear();
-  session = null;
   await call('/api/v1/auth/logout', { method: 'POST' });
 }
 
@@ -185,33 +152,24 @@ export async function signOut(): Promise<void> {
 
 /** R1 `GET /api/v1/c/links/:token` */
 export async function getLink(token: string): Promise<LinkResponse> {
-  if (MOCK) return (await mock()).getLink(token);
   const { data } = await call<LinkResponse>(`/api/v1/c/links/${enc(token)}`);
-  if (!LIVE.R4) {
-    const share = data.viewer.signed_in ? data.viewer.share_status : null;
-    (await mock()).rememberLiveBot({ ...data.bot, access_mode: data.access_mode, ...(share ? { share_status: share } : {}) });
-  }
   return data;
 }
 
 /** R2 `POST /api/v1/c/links/:token/accept` */
 export async function acceptLink(token: string): Promise<AcceptResponse> {
-  if (MOCK) return (await mock()).acceptLink(token);
   const { data } = await call<AcceptResponse>(`/api/v1/c/links/${enc(token)}/accept`, { method: 'POST', body: {} });
-  if (!LIVE.R4) (await mock()).rememberLiveBot({ agent_id: data.bot.agent_id, share_status: data.share.status });
   return data;
 }
 
 /** R3 `GET /api/v1/c/bots` */
 export async function listBots(): Promise<BotsResponse> {
-  if (MOCK || !LIVE.R3) return (await sample()).listBots();
   const { data } = await call<BotsResponse>('/api/v1/c/bots');
   return { bots: data.bots ?? [] };
 }
 
 /** R4 `GET /api/v1/c/bots/:agent_id` */
 export async function getBot(agentId: string): Promise<BotResponse> {
-  if (MOCK || !LIVE.R4) return (await sample()).getBot(agentId);
   const { data } = await call<BotResponse & { access?: BotResponse['access']; review_mode?: BotResponse['review_mode'] }>(
     `/api/v1/c/bots/${enc(agentId)}`,
     { conditional: true },
@@ -227,7 +185,6 @@ export async function getBot(agentId: string): Promise<BotResponse> {
 
 /** R5 `POST /api/v1/c/bots/:agent_id/requests`. Resolves with the HTTP status (201 new, 200 retry of the same client_request_id). */
 export async function createRequest(agentId: string, body: CreateRequestBody): Promise<RequestResponse & { http_status: 200 | 201 }> {
-  if (MOCK || !LIVE.R5) return (await sample()).createRequest(agentId, body);
   const { data, status } = await call<{ request: WireRequest }>(`/api/v1/c/bots/${enc(agentId)}/requests`, { method: 'POST', body });
   return { request: normalizeRequest(data.request), http_status: status === 201 ? 201 : 200 };
 }
@@ -237,7 +194,6 @@ export async function listRequests(
   agentId: string,
   opts: { status?: RequestListFilter; limit?: number; cursor?: string | null } = {},
 ): Promise<RequestListResponse> {
-  if (MOCK || !LIVE.R6) return (await sample()).listRequests(agentId, opts);
   const q = new URLSearchParams();
   if (opts.status) q.set('status', opts.status);
   if (opts.limit) q.set('limit', String(opts.limit));
@@ -249,14 +205,12 @@ export async function listRequests(
 
 /** R7 `GET /api/v1/c/requests/:task_id` */
 export async function getRequest(taskId: string): Promise<RequestResponse> {
-  if (MOCK || !LIVE.R7) return (await sample()).getRequest(taskId);
   const { data } = await call<{ request: WireRequest }>(`/api/v1/c/requests/${enc(taskId)}`, { conditional: true });
   return { request: normalizeRequest(data.request) };
 }
 
 /** R8 `POST /api/v1/c/requests/:task_id/answer` */
 export async function answerRequest(taskId: string, answer: string): Promise<RequestResponse> {
-  if (MOCK || !LIVE.R8) return (await sample()).answerRequest(taskId, answer);
   const { data } = await call<{ request: WireRequest }>(`/api/v1/c/requests/${enc(taskId)}/answer`, { method: 'POST', body: { answer } });
   return { request: normalizeRequest(data.request) };
 }
