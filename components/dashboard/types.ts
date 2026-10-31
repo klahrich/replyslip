@@ -218,3 +218,54 @@ export type Offer = {
   notes_enabled: boolean;
   created_at: string;
 };
+
+/** GET/PUT /api/v1/agents/:id/review-mode `review`. */
+export type ReviewMode = 'auto' | 'review_first';
+
+export type ReviewSettings = {
+  agent_id: string;
+  review_mode: ReviewMode;
+  notify_review_email: boolean;
+  /** Items of this agent waiting for the owner. */
+  held_count: number;
+};
+
+export type ReviewAction = 'approve' | 'decline' | 'release' | 'send_back';
+
+/** One review_first item, from GET /api/v1/reviews and /api/v1/reviews/:task_id. Sender text is untrusted: text only. */
+export type Review = {
+  task_id: string;
+  status: 'in_review' | 'awaiting_release' | 'open' | 'needs_info' | 'done' | 'failed';
+  /** request: the customer's request waits for approval. answer: the bot's answer waits for release. */
+  stage: 'request' | 'answer' | null;
+  held_action: 'result' | 'question' | 'failure' | null;
+  actions: ReviewAction[];
+  agent: { id: string; name: string };
+  sender: {
+    kind: 'customer' | 'agent';
+    customer_email: string | null;
+    workspace_handle: string | null;
+    agent_name: string | null;
+  };
+  offer: { name: string; title: string } | null;
+  title: string;
+  notes: string | null;
+  input_display: { key: string; label: string; value: string }[];
+  answers: { question: string; answer: string; asked_at: string; answered_at: string }[];
+  result_display: { key: string; label: string; kind: 'text' | 'number' | 'boolean' | 'list' | 'json'; value: string }[];
+  question: string | null;
+  fail_message: string | null;
+  owner_note: string | null;
+  reviewed_at: string | null;
+  released_at: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type ReviewsResponse = {
+  reviews: Review[];
+  /** Everything waiting in the workspace, not only the items returned. */
+  count: number;
+  by_agent: { agent_id: string; in_review: number; awaiting_release: number }[];
+};
