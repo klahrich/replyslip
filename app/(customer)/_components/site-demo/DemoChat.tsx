@@ -30,17 +30,23 @@ type Item = {
   fresh?: boolean;
   /** Visitor rows from a suggestion tap: the suggestion, so Try again records the same tap. */
   tapId?: string;
+  /** Tap rows whose stored answer isn't on screen yet (refused before it showed): Try again runs the whole tap again. */
+  tapAnswer?: string;
   /** needs_owner only: the server's demo note (why it went to the owner). */
   note?: string | null;
 };
 
 const DEFAULT_MAX = 1000;
 
-/** A tapped suggestion's stored answer waits this long (random in the range) behind the typing indicator, or for the
- * tap's request if that takes longer, so it reads like a reply rather than a canned pop-up. */
+/** A tapped suggestion's stored answer waits this long (random in the range) behind the typing indicator, so it reads
+ * like a reply rather than a canned pop-up. It also waits for the tap's request, but no longer than TAP_FALLBACK_MS
+ * from the tap: a slow network shouldn't hold back an answer the page already has. */
 const TAP_DELAY_MIN_MS = 1200;
 const TAP_DELAY_MAX_MS = 2000;
+const TAP_FALLBACK_MS = 5000;
 const tapDelay = () => TAP_DELAY_MIN_MS + Math.random() * (TAP_DELAY_MAX_MS - TAP_DELAY_MIN_MS);
+
+type TapResult = { ok: true } | { ok: false; err: DemoApiError };
 
 /** What the minimized bubble flags: a reply that came in, or a send that failed. */
 type Mark = 'reply' | 'error';
@@ -262,54 +268,75 @@ export function DemoChat({
     void post(clientId, body);
   }
 
-  async function tap(sq: SuggestedQuestion) {
+  function tap(sq: SuggestedQuestion) {
     if (disabled) return;
     const clientId = crypto.randomUUID();
-    // The stored answer is already checked (no model call). The question shows at once; the answer follows behind the
-    // typing indicator once both the random delay and the tap's request are done, so at max(request, delay).
-    setItems((xs) => [...xs, { key: clientId, role: 'visitor', body: sq.question, status: null, fresh: true, tapId: sq.id }]);
+    setItems((xs) => [...xs, { key: clientId, role: 'visitor', body: sq.question, status: null, fresh: true, tapId: sq.id, tapAnswer: sq.answer }]);
+    void runTap(clientId, sq.id, sq.question, sq.answer);
+  }
+
+  /**
+   * The stored answer is already checked (no model call). The question is on screen; the answer follows behind the
+   * typing indicator after the random delay, once the tap's request succeeds or TAP_FALLBACK_MS pass with no reply.
+   * A refusal (any error response) before that shows the usual error instead of the answer. A refusal after the
+   * fallback leaves the answer and marks the question Not sent. No response at all (network error, timeout) counts as
+   * no answer back: the answer shows and the question gets Not sent / Try again.
+   */
+  async function runTap(clientId: string, tapId: string, question: string, answer: string) {
     setInline(null);
     setThinking(true);
+    setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: false } : x)));
     const delay = wait(tapDelay());
-    let failure: Inline | null = null;
-    try {
-      await demoApi.send(token, { client_message_id: clientId, suggested_question_id: sq.id });
-    } catch (e) {
-      const err = e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', '');
-      if (err.status === 410) return onGone('expired');
-      // A suggestion withdrawn since the page loaded still gets its answer; any other 404 is a dead link.
-      if (err.status === 404 && err.code !== 'suggested_question_not_found') return onGone('dead');
-      // Not recorded: the answer still shows, the question gets the same Not sent / Try again as a typed message.
-      if (err.status !== 404) failure = retryReason(err);
+    const request: Promise<TapResult> = demoApi.send(token, { client_message_id: clientId, suggested_question_id: tapId }).then(
+      () => ({ ok: true }),
+      (e: unknown) => ({ ok: false, err: e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', '') }),
+    );
+    const first = await Promise.race([request, wait(TAP_FALLBACK_MS).then(() => null)]);
+    if (first && !first.ok && first.err.status !== 0) {
+      // Refused before the answer showed: no stored answer, the same handling as a typed message. A suggestion
+      // withdrawn since the page loaded goes back in the input to send as a typed question.
+      setThinking(false);
+      const err = first.err.status === 404 && first.err.code === 'suggested_question_not_found' ? new DemoApiError(400, first.err.code, '') : first.err;
+      fail(err, clientId, question);
+      return requestAnimationFrame(() => openRef.current && inputRef.current?.focus());
     }
     await delay;
     setThinking(false);
+    const lost = first && !first.ok ? first.err : null;
     setItems((xs) => [
-      ...xs.map((x) => (failure && x.key === clientId ? { ...x, failed: true } : x)),
-      { key: `${clientId}-a`, role: 'assistant', body: sq.answer, status: 'answered', fresh: true },
+      ...xs.map((x) => (x.key === clientId ? { ...x, tapAnswer: undefined, failed: lost ? true : x.failed } : x)),
+      { key: `${clientId}-a`, role: 'assistant', body: answer, status: 'answered', fresh: true },
     ]);
-    if (failure) {
-      setInline(failure);
-      failedHidden(reasonText(failure));
-    } else {
-      replied();
-    }
+    replied();
+    if (lost) tapNotRecorded(lost, clientId);
+    // Shown on the fallback: a late refusal (or timeout) still marks the question.
+    if (!first) void request.then((r) => !r.ok && tapNotRecorded(r.err, clientId));
     requestAnimationFrame(() => openRef.current && inputRef.current?.focus());
   }
 
+  /** Try again on a tap whose answer is already on screen: record the tap in the background. */
   function recordTap(clientId: string, tapId: string) {
     setInline(null);
     setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: false } : x)));
     demoApi.send(token, { client_message_id: clientId, suggested_question_id: tapId }).catch((e: unknown) => {
-      const err = e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', '');
-      if (err.status === 410) return onGone('expired');
-      // A suggestion withdrawn since the page loaded keeps its answer on screen; any other 404 is a dead link.
-      if (err.status === 404) return err.code === 'suggested_question_not_found' ? undefined : onGone('dead');
-      // Not recorded: the answer stays, the question gets the same Not sent / Try again as a typed message.
-      setInline(retryReason(err));
-      failedHidden(reasonText(retryReason(err)));
-      setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: true } : x)));
+      tapNotRecorded(e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', ''), clientId);
     });
+  }
+
+  /** A tap whose answer is on screen wasn't recorded. The answer stays; the question gets Not sent and the reason. */
+  function tapNotRecorded(err: DemoApiError, clientId: string) {
+    if (err.status === 410) return onGone('expired');
+    // A suggestion withdrawn since the page loaded keeps its answer on screen; any other 404 is a dead link.
+    if (err.status === 404) return err.code === 'suggested_question_not_found' ? undefined : onGone('dead');
+    setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: true } : x)));
+    if (err.status === 429 && err.code === 'daily_limit') {
+      // The daily cap closes the input and says so, as for a typed message.
+      failedHidden(t.demoCap);
+      return setCapped(true);
+    }
+    const why: Inline = err.status === 400 ? 'badRequest' : retryReason(err);
+    setInline(why);
+    failedHidden(reasonText(why));
   }
 
   function onKey(ev: KeyboardEvent<HTMLTextAreaElement>) {
@@ -376,8 +403,10 @@ export function DemoChat({
                   <span>{t.notSent}</span>
                   <button
                     type="button"
-                    disabled={thinking}
-                    onClick={() => (it.tapId ? recordTap(it.key, it.tapId) : void post(it.key, it.body))}
+                    disabled={disabled}
+                    onClick={() =>
+                      it.tapId ? (it.tapAnswer ? void runTap(it.key, it.tapId, it.body, it.tapAnswer) : recordTap(it.key, it.tapId)) : void post(it.key, it.body)
+                    }
                     className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 font-medium underline underline-offset-4 disabled:opacity-50"
                   >
                     <RotateCw className="size-3.5" aria-hidden />
