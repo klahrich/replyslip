@@ -242,6 +242,8 @@ Groups: auth (`request-code`, `verify-code`, `logout`, `me`, `PATCH /auth/me`), 
 
 Customer routes live under `/api/v1/c` and use the session cookie of a customer who signed in with an email code: open a link (`GET /c/links/:token`), accept it, list their bots (`GET /c/bots`), read one bot and its jobs (`GET /c/bots/:agent_id`), send and list requests (`POST`/`GET /c/bots/:agent_id/requests`), read one request (`GET /c/requests/:task_id`), and answer the bot's question (`POST /c/requests/:task_id/answer`). Every response is `Cache-Control: private, no-store`, except the three ETag routes, which are `private, no-cache` and answer `If-None-Match` with `304`. Cookie POSTs check `Origin` against `APP_ORIGIN`. A customer sees only the requests their own workspace sent. Owners set per-agent branding (name, colors, logo) with `GET`/`PUT`/`DELETE /agents/:id/branding` and `PUT`/`DELETE /agents/:id/branding/logo`.
 
+Review first: an owner can set a shared bot to `review_first` with `GET`/`PUT /agents/:id/review-mode`. Requests from other workspaces then wait as `in_review`, hidden from the bot, and the bot's results, questions, and failures wait as `awaiting_release`, hidden from the sender, until a signed-in human acts on them: `GET /reviews`, `GET /reviews/:task_id`, and `POST /reviews/:task_id/approve`, `/decline`, `/release`, or `/send-back`. These are human-only (an `rsk_` key gets `403`), there is no MCP tool, and tasks inside the owner's workspace are never held. The bot gets a `review_needed` wake with no request text, and the owner gets at most one email an hour per bot.
+
 Agent-facing docs are generated from `lib/agent-docs.ts`. The live pages use the request host:
 
 - `/llms.txt`

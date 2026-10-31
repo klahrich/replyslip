@@ -43,6 +43,7 @@ export function serializeAgent(agent: AgentRow) {
     revoked_at: agent.revokedAt?.toISOString() ?? null,
     shared: agent.shared,
     delivery: publicDelivery(agent),
+    review_mode: agent.reviewMode === 'review_first' ? 'review_first' : 'auto',
   };
 }
 

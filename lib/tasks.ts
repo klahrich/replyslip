@@ -19,10 +19,14 @@ import { HttpError } from './errors';
 import { assertResultSchema, validateResult } from './validate';
 import { assertWithinLimit } from './plans';
 import { assertFreeTextFields, parseRecipient, resolveSharedTask } from './sharing';
-import { CROSS_WORKSPACE_TASK_NOTICE } from './wake-notice';
+import { CROSS_WORKSPACE_TASK_NOTICE, HELD_FOR_REVIEW_NOTICE } from './wake-notice';
 import { deliverWebhookWake, enqueueWake, type WakeReason } from './wakes';
+import { claimReviewNotice, sendReviewNotice } from './review-notice';
 
 const CLOSED = new Set(['done', 'failed']);
+/** Statuses where the owner gates the task (review_first). Nothing held is ever shown to the sending side. */
+export const HELD_STATUSES = new Set(['in_review', 'awaiting_release']);
+export type HeldAction = 'result' | 'question' | 'failure';
 
 function iso(date: Date | null): string | null {
   return date ? date.toISOString() : null;
@@ -38,7 +42,33 @@ export function isCrossWorkspaceTask(task: Pick<TaskRow, 'fromWorkspaceId' | 'wo
   return task.fromWorkspaceId != null && task.fromWorkspaceId !== task.workspaceId;
 }
 
-export function serializeTask(task: TaskRow, fromName: string, toName: string, labels?: TaskLabels) {
+/**
+ * The row as `viewerWorkspaceId` may see it. The owner's workspace sees everything. Any other viewer (the sending
+ * workspace: a guest agent or a customer) never sees held content while the owner reviews it, and never sees the
+ * owner's note.
+ */
+export function taskViewFor(task: TaskRow, viewerWorkspaceId: string): TaskRow {
+  if (viewerWorkspaceId === task.workspaceId) return task;
+  const held = HELD_STATUSES.has(task.status);
+  return {
+    ...task,
+    result: held ? null : task.result,
+    question: held ? null : task.question,
+    failReason: held ? null : task.failReason,
+    heldAction: null,
+    ownerNote: null,
+  };
+}
+
+export function serializeTask(
+  row: TaskRow,
+  fromName: string,
+  toName: string,
+  viewerWorkspaceId: string,
+  labels?: TaskLabels,
+) {
+  const task = taskViewFor(row, viewerWorkspaceId);
+  const ownerSide = viewerWorkspaceId === row.workspaceId;
   const cross = isCrossWorkspaceTask(task);
   const toAddress = cross && labels?.ownerHandle ? `@${labels.ownerHandle}/${toName}` : toName;
   return {
@@ -65,10 +95,15 @@ export function serializeTask(task: TaskRow, fromName: string, toName: string, l
     to_address: toAddress,
     offer: labels?.offerName ?? null,
     notice: cross ? CROSS_WORKSPACE_TASK_NOTICE : null,
+    review_mode: task.reviewMode === 'review_first' ? 'review_first' : 'auto',
+    held_action: ownerSide ? (task.heldAction ?? null) : null,
+    owner_note: ownerSide ? (task.ownerNote ?? null) : null,
+    released_at: iso(task.releasedAt),
+    review_notice: ownerSide && task.status === 'awaiting_release' ? HELD_FOR_REVIEW_NOTICE : null,
   };
 }
 
-async function labelsFor(db: Db, rows: TaskRow[]): Promise<Map<string, TaskLabels>> {
+export async function labelsFor(db: Db, rows: TaskRow[]): Promise<Map<string, TaskLabels>> {
   const workspaceIds = new Set<string>();
   const offerIds = new Set<string>();
   for (const task of rows) {
@@ -134,13 +169,13 @@ async function activeAgentByName(db: Db, workspaceId: string, name: string): Pro
   return agent;
 }
 
-async function namesFor(db: Db, task: TaskRow): Promise<{ from: string; to: string }> {
+export async function namesFor(db: Db, task: TaskRow): Promise<{ from: string; to: string }> {
   const from = await agentById(db, task.fromAgentId);
   const to = await agentById(db, task.toAgentId);
   return { from: from?.name ?? 'unknown', to: to?.name ?? 'unknown' };
 }
 
-async function afterWake(wakeId: string | null): Promise<void> {
+export async function afterWake(wakeId: string | null): Promise<void> {
   if (!wakeId) return;
   await deliverWebhookWake(wakeId);
 }
@@ -274,6 +309,9 @@ export async function createTask(
       workspaceId = recipient.workspaceId;
       offerId = resolved.offerId;
     }
+    // review_first gates only tasks from another workspace (customers and guest agents). Snapshot the mode so a
+    // later switch affects only new tasks.
+    const review = workspaceId !== caller.workspaceId && recipient.reviewMode === 'review_first';
     const [task] = await tx
       .insert(tasks)
       .values({
@@ -288,24 +326,32 @@ export async function createTask(
         inputSchema,
         input: formInput,
         clientRequestId: input.clientRequestId ?? null,
-        status: 'open',
+        status: review ? 'in_review' : 'open',
+        reviewMode: review ? 'review_first' : null,
       })
       .returning();
     if (!task) throw new HttpError(500, 'internal_error', 'Something went wrong.');
+    // In review the bot gets only a content-free review_needed wake for its owner; the task wake waits for Approve.
     const wakeId = await enqueueWake(tx, {
       workspaceId,
       agentId: recipient.id,
-      reason: 'task',
+      reason: review ? 'review_needed' : 'task',
       taskId: task.id,
     });
+    const reviewNotice = review ? await claimReviewNotice(tx, recipient) : null;
     const labels = await labelsFor(tx, [task]);
-    return { payload: serializeTask(task, caller.agentName, recipient.name, labels.get(task.id)), wakeId };
+    return {
+      payload: serializeTask(task, caller.agentName, recipient.name, caller.workspaceId, labels.get(task.id)),
+      wakeId,
+      reviewNotice,
+    };
   });
   await afterWake(written.wakeId);
+  if (written.reviewNotice) sendReviewNotice(written.reviewNotice);
   return written.payload;
 }
 
-async function loadTask(db: Db, workspaceId: string, taskId: string): Promise<TaskRow> {
+export async function loadTask(db: Db, workspaceId: string, taskId: string): Promise<TaskRow> {
   const [task] = await db
     .select()
     .from(tasks)
@@ -325,6 +371,10 @@ function assertParticipant(task: TaskRow, caller: AgentPrincipal): void {
   if (task.fromAgentId !== caller.agentId && task.toAgentId !== caller.agentId) {
     throw new HttpError(404, 'not_found', 'No task was found.');
   }
+  // A request in review does not exist for the bot until its owner approves it.
+  if (task.status === 'in_review' && task.toAgentId === caller.agentId) {
+    throw new HttpError(404, 'not_found', 'No task was found.');
+  }
 }
 
 function assertTarget(task: TaskRow, caller: AgentPrincipal): void {
@@ -335,6 +385,15 @@ function assertTarget(task: TaskRow, caller: AgentPrincipal): void {
   if (CLOSED.has(task.status)) {
     throw new HttpError(409, 'task_closed', `This task is already ${task.status}.`);
   }
+  if (task.status === 'awaiting_release') throw taskHeld();
+}
+
+function taskHeld(): HttpError {
+  return new HttpError(
+    409,
+    'task_held',
+    'Your answer on this task is waiting for your owner to release it. Wait for a sent_back wake before changing it.',
+  );
 }
 
 export async function getTask(caller: AgentPrincipal, taskId: string) {
@@ -352,7 +411,7 @@ export async function getTask(caller: AgentPrincipal, taskId: string) {
     [task.toAgentId, names.to],
   ]);
   return {
-    task: serializeTask(task, names.from, names.to, labels.get(task.id)),
+    task: serializeTask(task, names.from, names.to, caller.workspaceId, labels.get(task.id)),
     messages: thread.map((message) =>
       serializeMessage(message, nameById.get(message.fromAgentId) ?? 'unknown', nameById.get(message.toAgentId) ?? 'unknown'),
     ),
@@ -381,7 +440,7 @@ export async function taskAnswersFor(db: Db, taskId: string): Promise<TaskAnswer
  * FOR SHARE on the task's target agent, taken before any task lock. A revoked target is 404: its
  * tasks are closed and nothing may queue a wake for it.
  */
-async function lockTargetAgentShared(tx: Db, agentId: string): Promise<void> {
+export async function lockTargetAgentShared(tx: Db, agentId: string): Promise<void> {
   const [agent] = await tx
     .select({ revokedAt: agents.revokedAt })
     .from(agents)
@@ -441,7 +500,7 @@ export async function answerTask(caller: AgentPrincipal, taskId: string, answer:
     });
     const names = await namesFor(tx, updated);
     const labels = await labelsFor(tx, [updated]);
-    return { payload: serializeTask(updated, names.from, names.to, labels.get(updated.id)), wakeId };
+    return { payload: serializeTask(updated, names.from, names.to, caller.workspaceId, labels.get(updated.id)), wakeId };
   });
   await afterWake(written.wakeId);
   return written.payload;
@@ -463,6 +522,8 @@ export async function listTasks(
     if (either) conditions.push(either);
   }
   if (filter.status) conditions.push(eq(tasks.status, filter.status));
+  // A request in review is invisible to its target bot until the owner approves it.
+  conditions.push(sql`not (${tasks.toAgentId} = ${caller.agentId} and ${tasks.status} = 'in_review')`);
   const rows = await getDb()
     .select({
       task: tasks,
@@ -479,7 +540,7 @@ export async function listTasks(
     getDb(),
     rows.map((row) => row.task),
   );
-  return rows.map((row) => serializeTask(row.task, row.fromName, row.toName, labels.get(row.task.id)));
+  return rows.map((row) => serializeTask(row.task, row.fromName, row.toName, caller.workspaceId, labels.get(row.task.id)));
 }
 
 async function closeOrQuestion(
@@ -492,6 +553,7 @@ async function closeOrQuestion(
     failReason?: string | null;
     completed: boolean;
     reason: WakeReason;
+    held: HeldAction;
   },
 ) {
   const written = await getDb().transaction(async (tx) => {
@@ -502,16 +564,20 @@ async function closeOrQuestion(
     assertTarget(task, caller);
     const change = mutate(task);
     const now = new Date();
+    // review_first (snapshotted on the task): store what the bot did, hold it, and wake nobody. The owner
+    // releases it (lib/reviews.ts), which applies the real status and wakes the sender then.
+    const hold = task.reviewMode === 'review_first' && isCrossWorkspaceTask(task);
     const [updated] = await tx
       .update(tasks)
       .set({
-        status: change.status,
+        status: hold ? 'awaiting_release' : change.status,
         result: change.result === undefined ? task.result : change.result,
         question: change.question === undefined ? task.question : change.question,
         failReason: change.failReason === undefined ? task.failReason : change.failReason,
-        questionAskedAt: change.status === 'needs_info' ? now : task.questionAskedAt,
+        questionAskedAt: !hold && change.status === 'needs_info' ? now : task.questionAskedAt,
+        heldAction: hold ? change.held : null,
         updatedAt: now,
-        completedAt: change.completed ? now : task.completedAt,
+        completedAt: !hold && change.completed ? now : task.completedAt,
       })
       .where(
         and(
@@ -523,15 +589,17 @@ async function closeOrQuestion(
       )
       .returning();
     if (!updated) throw new HttpError(409, 'task_closed', 'This task is already closed.');
-    const wakeId = await enqueueWake(tx, {
-      workspaceId: caller.workspaceId,
-      agentId: updated.fromAgentId,
-      reason: change.reason,
-      taskId: updated.id,
-    });
+    const wakeId = hold
+      ? null
+      : await enqueueWake(tx, {
+          workspaceId: caller.workspaceId,
+          agentId: updated.fromAgentId,
+          reason: change.reason,
+          taskId: updated.id,
+        });
     const names = await namesFor(tx, updated);
     const labels = await labelsFor(tx, [updated]);
-    return { payload: serializeTask(updated, names.from, names.to, labels.get(updated.id)), wakeId };
+    return { payload: serializeTask(updated, names.from, names.to, caller.workspaceId, labels.get(updated.id)), wakeId };
   });
   await afterWake(written.wakeId);
   return written.payload;
@@ -555,6 +623,7 @@ export async function completeTask(caller: AgentPrincipal, taskId: string, resul
     result,
     completed: true,
     reason: 'result',
+    held: 'result',
   }));
 }
 
@@ -571,6 +640,7 @@ export async function askTask(caller: AgentPrincipal, taskId: string, question: 
     question: trimmed,
     completed: false,
     reason: 'question',
+    held: 'question',
   }));
 }
 
@@ -584,6 +654,7 @@ export async function failTask(caller: AgentPrincipal, taskId: string, reason: s
     failReason: trimmed,
     completed: true,
     reason: 'failure',
+    held: 'failure',
   }));
 }
 
@@ -609,7 +680,7 @@ export async function listWorkspaceTasks(workspaceId: string, status: string | u
     getDb(),
     rows.map((row) => row.task),
   );
-  return rows.map((row) => serializeTask(row.task, row.fromName, row.toName, labels.get(row.task.id)));
+  return rows.map((row) => serializeTask(row.task, row.fromName, row.toName, workspaceId, labels.get(row.task.id)));
 }
 
 export async function getWorkspaceTask(workspaceId: string, taskId: string) {
@@ -627,7 +698,7 @@ export async function getWorkspaceTask(workspaceId: string, taskId: string) {
     [task.toAgentId, names.to],
   ]);
   return {
-    task: serializeTask(task, names.from, names.to, labels.get(task.id)),
+    task: serializeTask(task, names.from, names.to, workspaceId, labels.get(task.id)),
     messages: thread.map((message) =>
       serializeMessage(message, nameById.get(message.fromAgentId) ?? 'unknown', nameById.get(message.toAgentId) ?? 'unknown'),
     ),

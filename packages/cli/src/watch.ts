@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { GUEST_WAKE_NOTICE, WAKE_NOTICE } from '../../../lib/wake-notice.ts';
+import { GUEST_WAKE_NOTICE, REVIEW_NEEDED_NOTICE, WAKE_NOTICE } from '../../../lib/wake-notice.ts';
 import { defaultRegistry, type DriverRegistry } from './drivers/registry.ts';
 import type { CommandRunner, DriverCheck, NudgeDriver } from './drivers/types.ts';
 import { acquireWatcherLock, bindWatcherLockLifecycle, type WatcherLockHold } from './watcher-lock.ts';
@@ -13,13 +13,15 @@ export type DueWake = {
   reason?: string;
   task_id?: string | null;
   agent_name?: string;
-  /** Accepted only when it is the exact guest-task notice. Any other value is ignored. */
+  /** Accepted only when it is the exact guest-task or review-needed notice. Any other value is ignored. */
   notice?: string;
 };
 
-/** Poll text never replaces the fixed notice unless it is the guest-task constant. */
+/** Poll text never replaces the fixed notice unless it is the guest-task or review-needed constant. */
 export function nudgeText(wake: DueWake): string {
-  return wake.notice === GUEST_WAKE_NOTICE ? GUEST_WAKE_NOTICE : WAKE_NOTICE;
+  if (wake.notice === GUEST_WAKE_NOTICE) return GUEST_WAKE_NOTICE;
+  if (wake.notice === REVIEW_NEEDED_NOTICE) return REVIEW_NEEDED_NOTICE;
+  return WAKE_NOTICE;
 }
 
 export type WakeNudge = { driver: string; target: string };

@@ -364,6 +364,8 @@ export async function requireUser(req: Request): Promise<SessionUser & { workspa
 }
 
 export const HUMAN_APPROVAL_MESSAGE = 'A signed-in human must approve guests in the dashboard.';
+/** review_first: a bot can never approve, release or read what waits for review. */
+export const HUMAN_REVIEW_MESSAGE = 'A signed-in human must review this in the dashboard. Your bot cannot approve or release anything.';
 
 /**
  * Session cookie for a human owner. An agent API key (`rsk_`) is a different
@@ -371,11 +373,12 @@ export const HUMAN_APPROVAL_MESSAGE = 'A signed-in human must approve guests in 
  */
 export async function requireHumanOwner(
   req: Request,
+  message: string = HUMAN_APPROVAL_MESSAGE,
 ): Promise<SessionUser & { workspace: NonNullable<SessionUser['workspace']> }> {
   const token = bearerToken(req);
   if (token?.startsWith('rsk_')) {
     await authenticateAgentKey(token, { recordUse: false });
-    throw new HttpError(403, 'human_required', HUMAN_APPROVAL_MESSAGE);
+    throw new HttpError(403, 'human_required', message);
   }
   return requireUser(req);
 }

@@ -201,7 +201,8 @@ export async function failGuestTasks(
     eq(tasks.toAgentId, agent.id),
     isNotNull(tasks.fromWorkspaceId),
     ne(tasks.fromWorkspaceId, agent.workspaceId),
-    inArray(tasks.status, ['open', 'needs_info']),
+    // Held review_first tasks close too, and what was held is dropped, so the sender never sees it.
+    inArray(tasks.status, ['open', 'needs_info', 'in_review', 'awaiting_release']),
   ];
   if (guestWorkspaceId) conditions.push(eq(tasks.fromWorkspaceId, guestWorkspaceId));
   const closed = await tx
@@ -209,6 +210,9 @@ export async function failGuestTasks(
     .set({
       status: 'failed',
       failReason: ACCESS_REVOKED_REASON,
+      result: sql`case when ${tasks.status} = 'awaiting_release' then null else ${tasks.result} end`,
+      question: sql`case when ${tasks.status} = 'awaiting_release' then null else ${tasks.question} end`,
+      heldAction: null,
       updatedAt: new Date(),
       completedAt: new Date(),
     })

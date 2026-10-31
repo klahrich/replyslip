@@ -461,6 +461,7 @@ describe('first-agent alert', () => {
       },
       async sendPendingCustomers() {},
       async sendEarlyAccessNotice() {},
+      async sendReviewNeeded() {},
     });
     try {
       alerts.length = 0;

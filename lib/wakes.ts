@@ -6,9 +6,21 @@ import { HttpError } from './errors';
 import { safeEqualString } from './crypto';
 import { buildWebhookCall, localNudgeOf } from './delivery';
 import { assertPublicWebhookUrl } from './webhook-url';
-import { GUEST_WAKE_NOTICE, WAKE_NOTICE } from './wake-notice';
+import { absoluteUrl, canonicalOrigin } from './origin';
+import { GUEST_WAKE_NOTICE, REVIEW_NEEDED_NOTICE, WAKE_NOTICE, reviewPath } from './wake-notice';
 
-export type WakeReason = 'message' | 'task' | 'result' | 'question' | 'failure' | 'test' | 'answer';
+export type WakeReason =
+  | 'message'
+  | 'task'
+  | 'result'
+  | 'question'
+  | 'failure'
+  | 'test'
+  | 'answer'
+  /** To a review_first bot: a request waits for its owner. Carries no task content; the bot cannot open the task. */
+  | 'review_needed'
+  /** To the target bot: the owner sent its held answer back with a note. */
+  | 'sent_back';
 
 export type WebhookAttempt = {
   outcome: 'delivered' | 'pending' | 'skipped';
@@ -48,6 +60,7 @@ export function wakeNoticeBody(input: {
   createdAt: Date;
   notice?: string;
 }): string {
+  const review = input.reason === 'review_needed' && input.taskId ? { review_url: reviewUrl(input.taskId) } : {};
   return JSON.stringify({
     id: input.id,
     type: 'replyslip.wake',
@@ -55,11 +68,18 @@ export function wakeNoticeBody(input: {
     reason: input.reason,
     task_id: input.taskId,
     notice: input.notice ?? WAKE_NOTICE,
+    ...review,
     created_at: input.createdAt.toISOString(),
   });
 }
 
-async function noticeForTask(db: Db, taskId: string | null): Promise<string> {
+/** Link for the owner, never for the bot to follow: the page needs a human session. */
+export function reviewUrl(taskId: string): string {
+  return absoluteUrl(canonicalOrigin() ?? '', reviewPath(taskId));
+}
+
+async function noticeForTask(db: Db, taskId: string | null, reason?: string): Promise<string> {
+  if (reason === 'review_needed') return REVIEW_NEEDED_NOTICE;
   if (!taskId) return WAKE_NOTICE;
   const [task] = await db
     .select({ fromWorkspaceId: tasks.fromWorkspaceId, workspaceId: tasks.workspaceId })
@@ -164,7 +184,7 @@ export async function deliverWebhookWake(wakeId: string): Promise<WebhookAttempt
       reason: claimed.reason,
       taskId: claimed.taskId,
       createdAt: claimed.createdAt,
-      notice: await noticeForTask(db, claimed.taskId),
+      notice: await noticeForTask(db, claimed.taskId, claimed.reason),
     });
     const call = buildWebhookCall(agent, body, claimed.id);
     const response = await fetch(call.url, {
@@ -304,6 +324,7 @@ export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
       const nudge = localNudgeOf(row);
       if (!nudge) return [];
       const guest = row.taskId != null && guestTaskIds.has(row.taskId);
+      const review = row.reason === 'review_needed';
       return [
         {
           id: row.id,
@@ -313,7 +334,7 @@ export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
           reason: row.reason,
           task_id: row.taskId,
           agent_name: row.agentName,
-          ...(guest ? { notice: GUEST_WAKE_NOTICE } : {}),
+          ...(review ? { notice: REVIEW_NEEDED_NOTICE } : guest ? { notice: GUEST_WAKE_NOTICE } : {}),
         },
       ];
     });

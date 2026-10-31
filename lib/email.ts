@@ -23,6 +23,14 @@ export type PendingCustomersEmail = {
   dashboardUrl: string;
 };
 
+/** Owner notice for review_first requests waiting for review. Count and link only: no customer email or task text. */
+export type ReviewNeededEmail = {
+  to: string;
+  agentName: string;
+  waitingCount: number;
+  reviewUrl: string;
+};
+
 /** Valetto early-access request. Every field but `to` is submitter input; the body is plain text. */
 export type EarlyAccessNoticeEmail = {
   to: string;
@@ -44,11 +52,26 @@ export interface EmailSender {
   sendFirstAgentAlert(message: FirstAgentAlertEmail): Promise<void>;
   sendPendingCustomers(message: PendingCustomersEmail): Promise<void>;
   sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void>;
+  sendReviewNeeded(message: ReviewNeededEmail): Promise<void>;
 }
 
 const GENERIC_SUBJECT = 'Your ReplySlip sign-in code';
 const FIRST_AGENT_SUBJECT = 'ReplySlip: first agent';
 const PENDING_CUSTOMERS_SUBJECT = 'New customer requests are waiting';
+const REVIEW_NEEDED_SUBJECT = 'Requests are waiting for your review';
+
+export function reviewNeededText(message: Omit<ReviewNeededEmail, 'to'>): string {
+  const n = message.waitingCount;
+  return [
+    `${n} ${n === 1 ? 'item is' : 'items are'} waiting for your review on ${message.agentName}.`,
+    '',
+    `Review them: ${message.reviewUrl}`,
+    '',
+    'Your bot cannot see a new request until you approve it, and customers see no answer until you release it.',
+    '',
+    "You get at most one of these emails per hour per bot. Turn them off in the bot's review settings.",
+  ].join('\n');
+}
 
 export function pendingCustomersText(message: Omit<PendingCustomersEmail, 'to'>): string {
   const n = message.pendingCount;
@@ -146,6 +169,10 @@ class ConsoleEmailSender implements EmailSender {
     console.info(`[replyslip] pending-customers notice\n${pendingCustomersText(message)}`);
   }
 
+  async sendReviewNeeded(message: ReviewNeededEmail): Promise<void> {
+    console.info(`[replyslip] review-needed notice\n${reviewNeededText(message)}`);
+  }
+
   async sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void> {
     console.info(`[replyslip] Valetto early-access notice for ${message.to}\n${earlyAccessNoticeText(message)}`);
   }
@@ -171,6 +198,10 @@ class UnconfiguredEmailSender implements EmailSender {
 
   async sendEarlyAccessNotice(): Promise<void> {
     this.fail('Valetto early-access notice');
+  }
+
+  async sendReviewNeeded(): Promise<void> {
+    this.fail('review-needed notice');
   }
 }
 
@@ -198,6 +229,10 @@ class ResendEmailSender implements EmailSender {
 
   async sendPendingCustomers(message: PendingCustomersEmail): Promise<void> {
     await this.post(message.to, PENDING_CUSTOMERS_SUBJECT, pendingCustomersText(message), 'pending-customers notice');
+  }
+
+  async sendReviewNeeded(message: ReviewNeededEmail): Promise<void> {
+    await this.post(message.to, REVIEW_NEEDED_SUBJECT, reviewNeededText(message), 'review-needed notice');
   }
 
   async sendEarlyAccessNotice(message: EarlyAccessNoticeEmail): Promise<void> {
