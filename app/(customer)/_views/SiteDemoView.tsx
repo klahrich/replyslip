@@ -19,13 +19,6 @@ type State =
   | { kind: 'gone'; why: GoneKind }
   | { kind: 'error'; rateLimited: boolean };
 
-// The visitor's own language choice, kept per demo link. Without one, the page follows the business's site language.
-const langKey = (token: string) => `vt-demo-lang:${token}`;
-const savedLang = (token: string): Lang | null => {
-  const saved = localStorage.getItem(langKey(token));
-  return saved === 'en' || saved === 'fr' ? saved : null;
-};
-
 /** One load of the demo, as the next screen state. Never throws. */
 async function fetchDemo(token: string): Promise<{ next: State; pageLang: Lang | null }> {
   try {
@@ -44,13 +37,13 @@ export function SiteDemoView({ token, initialLang }: { token: string; initialLan
   const [state, setState] = useState<State>({ kind: 'loading' });
   const t = SITE_STRINGS[lang];
 
-  const changeLang = useCallback(
-    (l: Lang) => {
-      setLang(l);
-      localStorage.setItem(langKey(token), l);
-    },
-    [token],
-  );
+  // The visitor's own language choice, for this visit only. Nothing goes to browser storage: the demo token
+  // must never end up there.
+  const chosenLang = useRef<Lang | null>(null);
+  const changeLang = useCallback((l: Lang) => {
+    chosenLang.current = l;
+    setLang(l);
+  }, []);
 
   // Only the latest load may set state, so a slow first request can't overwrite a retry.
   const loadSeq = useRef(0);
@@ -59,7 +52,7 @@ export function SiteDemoView({ token, initialLang }: { token: string; initialLan
     fetchDemo(token).then(({ next, pageLang }) => {
       if (seq !== loadSeq.current) return;
       // The visitor's own choice wins; else the business's site language; else the browser's (initialLang).
-      const chosen = savedLang(token) ?? pageLang;
+      const chosen = chosenLang.current ?? pageLang;
       if (chosen) setLang(chosen);
       setState(next);
     });
