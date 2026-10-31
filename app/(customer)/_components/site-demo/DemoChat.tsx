@@ -34,6 +34,17 @@ type Item = {
 
 const DEFAULT_MAX = 1000;
 
+/** The short reason shown (and announced) under the input after a failed send. */
+type Inline = 'tooLong' | 'badRequest' | 'rateLimited' | 'busy' | 'network' | 'server';
+
+/** Failures that can work on a second try. 400s can't, so they say what to change instead. */
+function retryReason(err: DemoApiError): Inline {
+  if (err.status === 0) return 'network';
+  if (err.status === 429) return 'rateLimited';
+  if (err.status >= 500) return 'server';
+  return 'busy';
+}
+
 function toItem(m: DemoMessage, fresh?: boolean): Item {
   return { key: m.id, role: m.role, body: m.body, status: m.status, note: m.demo_note ?? null, fresh };
 }
@@ -67,7 +78,7 @@ export function DemoChat({
   const [text, setText] = useState('');
   const [thinking, setThinking] = useState(false);
   const [capped, setCapped] = useState(false);
-  const [inline, setInline] = useState<'tooLong' | 'rateLimited' | 'busy' | null>(null);
+  const [inline, setInline] = useState<Inline | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const suggestions = useMemo(() => pickSuggestions(conversation.suggested_questions, lang), [conversation.suggested_questions, lang]);
@@ -103,9 +114,13 @@ export function DemoChat({
       setText((cur) => cur || body);
       return setCapped(true);
     }
-    if (err.status === 429) setInline('rateLimited');
-    if (err.status === 400 && err.code === 'message_too_long') setInline('tooLong');
-    if (err.status === 409) setInline('busy');
+    if (err.status === 400) {
+      // Sending it again would fail the same way: put the words back in the input to change, and say what to change.
+      setItems((xs) => xs.filter((x) => x.key !== clientId));
+      setText((cur) => cur || body);
+      return setInline(err.code === 'message_too_long' ? 'tooLong' : 'badRequest');
+    }
+    setInline(retryReason(err));
     // Each message has its own client_message_id and Try again reuses it. If the server says the id
     // already belongs to another question, Try again sends this one under a fresh id instead.
     const key = err.status === 409 && err.code === 'client_message_id_reused' ? crypto.randomUUID() : clientId;
@@ -160,7 +175,7 @@ export function DemoChat({
       // A suggestion withdrawn since the page loaded keeps its answer on screen; any other 404 is a dead link.
       if (err.status === 404) return err.code === 'suggested_question_not_found' ? undefined : onGone('dead');
       // Not recorded: the answer stays, the question gets the same Not sent / Try again as a typed message.
-      setInline('busy');
+      setInline(retryReason(err));
       setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: true } : x)));
     });
   }
@@ -227,7 +242,7 @@ export function DemoChat({
         </div>
 
         {thinking && (
-          <div role="status" className="mt-2.5 flex items-center gap-2 text-[13px] text-muted-foreground animate-in fade-in duration-150">
+          <div role="status" data-testid="thinking" className="mt-2.5 flex items-center gap-2 text-[13px] text-muted-foreground animate-in fade-in duration-150">
             <span aria-hidden className="flex gap-1 rounded-2xl rounded-bl-md border border-border bg-card px-3 py-2.5">
               {[0, 150, 300].map((d) => (
                 <span key={d} className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 motion-reduce:animate-none" style={{ animationDelay: `${d}ms` }} />
@@ -260,11 +275,10 @@ export function DemoChat({
 
       <form onSubmit={submit} className="sticky bottom-0 border-t border-border bg-card px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         {capped && <p className="mb-2 px-1 text-[13px] text-muted-foreground">{t.demoCap}</p>}
-        {inline && (
-          <p role="alert" className="mb-2 px-1 text-[13px] text-destructive">
-            {inline === 'tooLong' ? t.tooLong(max) : inline === 'busy' ? t.busy : t.rateLimited}
-          </p>
-        )}
+        {/* Always in the DOM so screen readers announce each new reason politely. */}
+        <p role="status" aria-live="polite" aria-atomic="true" data-testid="send-reason" className={cn('px-1 text-[13px] text-destructive', inline && 'mb-2')}>
+          {inline === 'tooLong' ? t.tooLong(max) : inline ? t[inline] : ''}
+        </p>
         <div className="flex items-end gap-2">
           <label htmlFor="vt-demo-input" className="sr-only">
             {t.inputLabel}
@@ -278,7 +292,7 @@ export function DemoChat({
             placeholder={t.inputLabel}
             onChange={(e) => {
               setText(e.target.value);
-              if (inline === 'tooLong' && e.target.value.trim().length <= max) setInline(null);
+              if ((inline === 'tooLong' && e.target.value.trim().length <= max) || inline === 'badRequest') setInline(null);
             }}
             onKeyDown={onKey}
             aria-describedby={[notice && items.length === 0 ? 'vt-demo-notice' : null, text.length > max - 100 ? 'vt-demo-count' : null].filter(Boolean).join(' ') || undefined}
