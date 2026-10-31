@@ -2,7 +2,7 @@
 
 /**
  * /s/demo/<token>: the private site assistant demo (spec Story 1 and 3, slim story 0 cut; PR #112's routes).
- * Mobile first: banner, a strip of the business's site, then the chat. From 768px the site fills
+ * Mobile first: banner, the top of the business's site (about 38% of the screen), then the chat. From 768px the site fills
  * the screen and the chat docks on the right. The page scrolls normally; nothing locks scrolling.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -102,7 +102,7 @@ export function SiteDemoView({ token, initialLang }: { token: string; initialLan
       <div className="relative flex flex-1 flex-col md:min-h-0">
         {/* The shot loads only once the token checks out, so a dead or expired link never requests it. */}
         {conversation ? (
-          <DemoBackdrop token={token} className="relative h-[120px] shrink-0 md:absolute md:inset-0 md:h-auto" />
+          <DemoBackdrop token={token} className="relative h-[38dvh] max-h-[360px] min-h-[120px] shrink-0 md:absolute md:inset-0 md:h-auto" />
         ) : (
           <div aria-hidden className="relative h-[120px] shrink-0 bg-muted md:absolute md:inset-0 md:h-auto" />
         )}
