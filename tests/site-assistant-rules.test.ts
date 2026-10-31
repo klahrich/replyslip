@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { answerVisitorMessage, buildPromptInput, SITE_INSTRUCTIONS } from '@/lib/site-assistant/answer';
 import { parseContextMarkdown } from '@/lib/site-assistant/context';
-import { detectVisitorLanguage, findOwnerKeyword, guessLanguage, SITE_KEYWORDS } from '@/lib/site-assistant/keywords';
+import { detectVisitorLanguage, findOwnerKeyword, nonLatinLetterShare, guessLanguage, SITE_KEYWORDS } from '@/lib/site-assistant/keywords';
 import { buildResponsesBody } from '@/lib/site-assistant/llm';
 import { handoffReason } from '@/lib/site-assistant/rules';
 import { bannerText, cappedReply, demoNote, needsOwnerReply, noticeText, offTopicReply } from '@/lib/site-assistant/replies';
@@ -377,18 +377,56 @@ describe('server language check (spec 6b)', () => {
     expect(['en', 'fr']).toContain(result.language);
   });
 
-  it("falls back to the business's language on short text, not other", async () => {
+  it("uses the business's language on short text only when the model doesn't say other", async () => {
     for (const [text, businessLanguage] of [['hi', 'fr'], ['bonjour', 'en'], ['hi', 'en'], ['bonjour', 'fr']] as const) {
-      // Even if the model calls it "other", short text is the business's language.
-      const { result, calls } = await ask(text, answer({ language: 'other' }), { businessLanguage });
-      expect(calls, text).toHaveLength(1);
-      expect(result, `${text}/${businessLanguage}`).toMatchObject({ status: 'answered', language: businessLanguage });
-      // And a fixed reply with no model call uses it too.
+      // A fixed reply with no model call is in the business's language.
       const unconfigured = await answerVisitorMessage({ ...base, visitorMessage: text, businessLanguage }, { config: { ...TEST_LLM_CONFIG, apiKey: null } });
       expect(unconfigured).toMatchObject({ decidedBy: 'llm_unconfigured', language: businessLanguage, body: needsOwnerReply(businessLanguage) });
+      // A model "other" on short text still goes to the owner.
+      const { result, calls } = await ask(text, answer({ language: 'other' }), { businessLanguage });
+      expect(calls, text).toHaveLength(1);
+      expect(result, `${text}/${businessLanguage}`).toMatchObject({ status: 'needs_owner', decidedBy: 'language_other', language: 'other' });
     }
-    // A short text the model tags en or fr keeps that tag.
-    expect((await ask('bonjour', answer({ language: 'fr' }), { businessLanguage: 'en' })).result.language).toBe('fr');
+    // Undecided and the model says en or fr: the model's tag stands, whatever the business's language.
+    expect((await ask('bonjour', answer({ language: 'fr' }), { businessLanguage: 'en' })).result).toMatchObject({ status: 'answered', language: 'fr' });
+    expect((await ask('hi', answer({ language: 'en' }), { businessLanguage: 'fr' })).result).toMatchObject({ status: 'answered', language: 'en' });
+  });
+
+  it('sends 3+ words the server cannot place to the owner when the model says other', async () => {
+    for (const text of ['Lavorate sabato mattina presto?', 'Pracujecie rano czasami?', 'Gumagawa kayo bubong?']) {
+      expect(detectVisitorLanguage(text), text).toBeNull();
+      const { result, calls } = await ask(text, answer({ language: 'other' }), { businessLanguage: 'en' });
+      expect(calls).toHaveLength(1);
+      expect(result, text).toMatchObject({ status: 'needs_owner', decidedBy: 'language_other', language: 'other' });
+    }
+  });
+
+  it('never makes French from accented letters alone, and reads non-Latin script as other', () => {
+    expect(detectVisitorLanguage('Tôi muốn hỏi về dịch vụ')).toBe('other');
+    expect(detectVisitorLanguage('Café crème brûlée')).toBeNull();
+    expect(detectVisitorLanguage('Élégant, très économique, idéal')).toBeNull();
+    expect(detectVisitorLanguage('Ça coûte combien, la tonte ?')).toBe('fr');
+    for (const text of ['你好', 'مرحبا', 'Привет', '你们提供免费估价吗？', 'Сколько стоит покраска дома?']) expect(detectVisitorLanguage(text), text).toBe('other');
+    // A few non-Latin letters in Latin text are not enough.
+    expect(nonLatinLetterShare('Do you have a store in the 東 district, or is it far from the city?')).toBeLessThan(0.3);
+    expect(detectVisitorLanguage('Do you have a store in the 東 district, or is it far from the city?')).toBe('en');
+  });
+
+  it('keeps the two French fixture questions French, and no fixture question other', () => {
+    expect(detectVisitorLanguage('Pouvez-vous venir cette semaine?')).toBe('fr');
+    expect(detectVisitorLanguage('Avez-vous un catalogue?')).toBe('fr');
+    let count = 0;
+    for (const file of ['questions.json', 'more-questions.json']) {
+      const questions = JSON.parse(readFileSync(join(FIXTURE_DIR, file), 'utf8')) as Record<string, string[] | string>;
+      for (const list of Object.values(questions)) {
+        if (!Array.isArray(list)) continue;
+        for (const q of list) {
+          count += 1;
+          expect(detectVisitorLanguage(q), q).not.toBe('other');
+        }
+      }
+    }
+    expect(count).toBe(120);
   });
 });
 

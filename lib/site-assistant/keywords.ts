@@ -116,88 +116,123 @@ export function guessPageLanguage(text: string): 'en' | 'fr' {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Server-side language check (spec 6b). Cheap and deterministic: common function words plus letters that only
-// some languages use. It only has to tell English and French from "clearly something else"; anything short or
-// close is left undecided, and the caller falls back to the business's language.
+// Server-side language check (spec 6b). Cheap and deterministic. It only has to tell English and French from
+// "something else": common function words decide English and French (accented letters alone never make French),
+// while non-Latin script, letters French doesn't use, and other languages' function words point to "other".
+// Anything short or close is left undecided (null).
 
-type DetectLanguage = 'en' | 'fr' | 'de' | 'es' | 'it' | 'pt' | 'nl';
+type OtherLanguage = 'de' | 'es' | 'it' | 'pt' | 'nl' | 'pl' | 'tl';
 
-const STOPWORDS: Record<DetectLanguage, ReadonlySet<string>> = {
-  en: new Set([
-    'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'with', 'at', 'by', 'from', 'is', 'are', 'was',
-    'be', 'do', 'does', 'did', 'have', 'has', 'you', 'your', 'we', 'our', 'i', 'my', 'me', 'it', 'this', 'that',
-    'what', 'which', 'how', 'can', 'could', 'would', 'will', 'when', 'where', 'who', 'why', 'any', 'there', 'if',
-    'not', 'hi', 'hello', 'thanks', 'please', 'offer', 'about', 'much', 'many', 't', 'll', 're', 've', 'm',
-  ]),
-  fr: new Set([
-    'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'et', 'ou', 'à', 'au', 'aux', 'en', 'dans', 'sur', 'pour',
-    'avec', 'par', 'est', 'sont', 'je', 'vous', 'nous', 'votre', 'vos', 'notre', 'mon', 'ma', 'mes', 'ce', 'cette',
-    'ces', 'que', 'qui', 'quel', 'quelle', 'quels', 'quelles', 'quoi', 'comment', 'combien', 'où', 'quand',
-    'pourquoi', 'est-ce', 'avez', 'faites', 'pouvez', 'offrez', 'êtes', 'pas', 'ne', 'oui', 'non', 'bonjour',
-    'merci', 'svp', 'il', 'elle', 'y', 'a', 'c', 'l', 'qu', 'j', 'n', 'ça',
-  ]),
+const EN_WORDS: ReadonlySet<string> = new Set([
+  'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'with', 'at', 'by', 'from', 'is', 'are', 'was',
+  'be', 'do', 'does', 'did', 'have', 'has', 'you', 'your', 'we', 'our', 'i', 'my', 'me', 'it', 'this', 'that',
+  'what', 'which', 'how', 'can', 'could', 'would', 'will', 'when', 'where', 'who', 'why', 'any', 'there', 'if',
+  'not', 'hi', 'hello', 'thanks', 'please', 'offer', 'about', 'much', 'many', 't', 'll', 're', 've', 'm',
+]);
+const FR_WORDS: ReadonlySet<string> = new Set([
+  'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'et', 'ou', 'à', 'au', 'aux', 'en', 'dans', 'sur', 'pour',
+  'avec', 'par', 'est', 'sont', 'je', 'vous', 'nous', 'votre', 'vos', 'notre', 'mon', 'ma', 'mes', 'ce', 'cette',
+  'ces', 'que', 'qui', 'quel', 'quelle', 'quels', 'quelles', 'quoi', 'comment', 'combien', 'où', 'quand',
+  'pourquoi', 'avez', 'faites', 'pouvez', 'offrez', 'êtes', 'pas', 'ne', 'oui', 'non', 'bonjour', 'merci', 'svp',
+  'il', 'elle', 'y', 'a', 'c', 'l', 'qu', 'j', 'n', 'ça', 'parlez',
+]);
+const OTHER_WORDS: Record<OtherLanguage, ReadonlySet<string>> = {
   de: new Set([
     'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einen', 'und', 'oder', 'ist', 'sind', 'ich', 'sie',
     'wir', 'ihr', 'ihre', 'haben', 'hat', 'mit', 'für', 'auf', 'von', 'zu', 'nicht', 'was', 'wie', 'wo', 'wann',
     'warum', 'welche', 'können', 'kann', 'bieten', 'auch', 'es', 'im', 'am', 'bei', 'nach', 'hallo', 'danke',
-    'bitte', 'gibt', 'mein', 'meine', 'noch',
+    'bitte', 'gibt', 'mein', 'meine', 'noch', 'kostet', 'machen', 'ihnen',
   ]),
   es: new Set([
     'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'y', 'o', 'de', 'del', 'en', 'con', 'por', 'para', 'es', 'son',
     'está', 'están', 'yo', 'usted', 'ustedes', 'nosotros', 'su', 'sus', 'mi', 'qué', 'que', 'cuál', 'cómo',
     'cuánto', 'cuánta', 'dónde', 'cuándo', 'tienen', 'tiene', 'hacen', 'ofrecen', 'puedo', 'pueden', 'no', 'sí',
-    'hola', 'gracias', 'también', 'al', 'lo', 'se', 'me', 'hay',
+    'hola', 'gracias', 'también', 'al', 'lo', 'se', 'me', 'hay', 'cuesta',
   ]),
   it: new Set([
-    'il', 'lo', 'la', 'gli', 'le', 'un', 'una', 'e', 'o', 'di', 'del', 'della', 'in', 'con', 'per', 'è', 'sono',
-    'io', 'voi', 'noi', 'che', 'cosa', 'come', 'quanto', 'dove', 'quando', 'avete', 'fate', 'offrite', 'potete',
-    'non', 'ciao', 'grazie', 'anche', 'mi', 'vostro', 'vostra',
+    'il', 'lo', 'la', 'gli', 'le', 'un', 'una', 'e', 'o', 'di', 'del', 'della', 'delle', 'dei', 'degli', 'nel',
+    'nella', 'alla', 'in', 'con', 'per', 'è', 'sono', 'io', 'voi', 'noi', 'che', 'cosa', 'come', 'quanto', 'dove',
+    'quando', 'avete', 'fate', 'offrite', 'potete', 'non', 'ciao', 'grazie', 'anche', 'mi', 'vostro', 'vostra',
+    'costa', 'vorrei', 'buongiorno',
   ]),
   pt: new Set([
     'o', 'a', 'os', 'as', 'um', 'uma', 'e', 'ou', 'de', 'do', 'da', 'dos', 'das', 'em', 'no', 'na', 'com', 'por',
     'para', 'é', 'são', 'eu', 'você', 'vocês', 'nós', 'seu', 'sua', 'que', 'qual', 'como', 'quanto', 'onde',
     'quando', 'têm', 'tem', 'fazem', 'oferecem', 'podem', 'não', 'sim', 'olá', 'obrigado', 'obrigada', 'também',
+    'custa',
   ]),
   nl: new Set([
     'de', 'het', 'een', 'en', 'of', 'van', 'in', 'op', 'voor', 'met', 'is', 'zijn', 'ik', 'u', 'jullie', 'wij',
-    'we', 'uw', 'mijn', 'wat', 'welke', 'hoe', 'waar', 'wanneer', 'waarom', 'hebben', 'heeft', 'kunnen', 'kan',
-    'bieden', 'niet', 'ook', 'hallo', 'bedankt', 'dank', 'graag', 'er', 'dit', 'dat',
+    'we', 'uw', 'mijn', 'wat', 'welke', 'hoe', 'hoeveel', 'waar', 'wanneer', 'waarom', 'hebben', 'heeft',
+    'kunnen', 'kan', 'bieden', 'niet', 'ook', 'hallo', 'bedankt', 'dank', 'graag', 'er', 'dit', 'dat', 'doen',
+    'kost',
+  ]),
+  pl: new Set([
+    'i', 'w', 'z', 'na', 'się', 'nie', 'jest', 'czy', 'to', 'że', 'jak', 'co', 'ile', 'pan', 'pani', 'państwo',
+    'mają', 'robicie', 'oferują', 'dzień', 'dobry', 'dziękuję', 'proszę', 'kosztuje', 'jaki', 'jaka', 'gdzie',
+    'kiedy', 'za', 'dla', 'mnie', 'macie', 'można',
+  ]),
+  tl: new Set([
+    'ang', 'ng', 'mga', 'sa', 'na', 'ay', 'ko', 'mo', 'po', 'ba', 'kayo', 'ako', 'ninyo', 'namin', 'magkano',
+    'saan', 'kailan', 'paano', 'ano', 'may', 'meron', 'salamat', 'opo', 'hindi', 'oo', 'ito', 'iyan', 'nyo',
   ]),
 };
 
-/** Letters one language uses and the others here (mostly) don't. Each word with one adds 2 to that language. */
-const LETTERS: Partial<Record<DetectLanguage, RegExp>> = {
-  fr: /[àâçèêëîïôûùœÿ]/,
-  de: /[äöüß]/,
-  es: /[ñ¿¡áíóú]/,
-  pt: /[ãõ]/,
-};
-
+/** Accented letters French uses. They add to French only alongside French words, never alone. */
+const FRENCH_LETTERS = /[àâæçéèêëîïôœùûüÿ]/;
+/** Accented Latin letters French doesn't use (á ñ ã ł ß ơ ư ă đ ạ ố…): each word with one points to "other". */
+const NON_FRENCH_LETTER = /[^\x00-\x7fàâæçéèêëîïôœùûüÿ]/;
+/** Over this share of non-Latin letters (Chinese, Arabic, Cyrillic…) is "other", however short the text. */
+const NON_LATIN_SHARE = 0.3;
 const MIN_WORDS = 3;
+
+/** Share of letters that are not Latin script (counted by Unicode script, not by accents). */
+export function nonLatinLetterShare(text: string): number {
+  const letters = text.match(/\p{L}/gu) ?? [];
+  if (letters.length === 0) return 0;
+  const latin = letters.filter((ch) => /\p{Script=Latin}/u.test(ch)).length;
+  return (letters.length - latin) / letters.length;
+}
 
 /**
  * Server-side language of a visitor message: 'en', 'fr', 'other' when it is confidently another language, or null
- * when the text is too short (under 3 words) or too close to call. Confident means the top language scores at
- * least 2 and at least twice the runner-up. Shared words (de, la, in, a…) count for every language that has them.
+ * when the text is too short (under 3 words) or too close to call.
+ * - Over 30% non-Latin letters: 'other', at any length.
+ * - Scores: English and French count their function words; French letters add only when French words are there;
+ *   "other" is the best other-language word count plus 2 per word with a letter French doesn't use.
+ * - Confident means the top score is at least 2 and at least twice the runner-up; English or French also need at
+ *   least 2 of their own function words.
  */
 export function detectVisitorLanguage(text: string): 'en' | 'fr' | 'other' | null {
-  const lower = text.toLowerCase().replace(/[’‘]/g, "'");
+  if (nonLatinLetterShare(text) > NON_LATIN_SHARE) return 'other';
+  const lower = text.normalize('NFC').toLowerCase().replace(/[’‘]/g, "'");
   // Hyphens and apostrophes split too, so "faites-vous", "qu'est-ce" and "don't" count piece by piece.
   const words = lower.split(/[^\p{L}]+/u).filter(Boolean);
   if (words.length < MIN_WORDS) return null;
-  const scores = new Map<DetectLanguage, number>();
-  for (const lang of Object.keys(STOPWORDS) as DetectLanguage[]) {
-    let score = 0;
-    for (const w of words) {
-      if (STOPWORDS[lang].has(w)) score += 1;
-      const letters = LETTERS[lang];
-      if (letters && letters.test(w)) score += 2;
+
+  let enWords = 0;
+  let frWords = 0;
+  let frLetters = 0;
+  let foreignLetters = 0;
+  const otherWords = new Map<OtherLanguage, number>();
+  for (const w of words) {
+    if (EN_WORDS.has(w)) enWords += 1;
+    if (FR_WORDS.has(w)) frWords += 1;
+    if (NON_FRENCH_LETTER.test(w)) foreignLetters += 1;
+    else if (FRENCH_LETTERS.test(w)) frLetters += 1;
+    for (const lang of Object.keys(OTHER_WORDS) as OtherLanguage[]) {
+      if (OTHER_WORDS[lang].has(w)) otherWords.set(lang, (otherWords.get(lang) ?? 0) + 1);
     }
-    if (lang === 'es' && /[¿¡]/.test(lower)) score += 2;
-    scores.set(lang, score);
   }
-  const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+  const scores = {
+    en: enWords,
+    fr: frWords + (frWords > 0 ? frLetters : 0),
+    other: Math.max(0, ...otherWords.values()) + 2 * foreignLetters + (/[¿¡]/.test(lower) ? 2 : 0),
+  };
+  const ranked = (Object.entries(scores) as ['en' | 'fr' | 'other', number][]).sort((a, b) => b[1] - a[1]);
   const [top, second] = [ranked[0]!, ranked[1]!];
   if (top[1] < 2 || top[1] < second[1] * 2) return null;
-  return top[0] === 'en' || top[0] === 'fr' ? top[0] : 'other';
+  if (top[0] === 'en' && enWords < 2) return null;
+  if (top[0] === 'fr' && frWords < 2) return null;
+  return top[0];
 }

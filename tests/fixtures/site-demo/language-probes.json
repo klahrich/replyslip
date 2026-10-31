@@ -1,0 +1,109 @@
+{
+ "_note": "Invented visitor questions in languages other than English and French, for the server language check. Some are short or plain enough that the server can't place them; the model must then say other.",
+ "probes": [
+  {
+   "language": "Chinese",
+   "text": "你们提供免费估价吗？"
+  },
+  {
+   "language": "Chinese",
+   "text": "你好"
+  },
+  {
+   "language": "Arabic",
+   "text": "هل تقدمون خدمة تنظيف الحدائق؟"
+  },
+  {
+   "language": "Arabic",
+   "text": "مرحبا"
+  },
+  {
+   "language": "Russian",
+   "text": "Сколько стоит покраска дома?"
+  },
+  {
+   "language": "Russian",
+   "text": "Привет"
+  },
+  {
+   "language": "Vietnamese",
+   "text": "Tôi muốn hỏi về dịch vụ"
+  },
+  {
+   "language": "Vietnamese",
+   "text": "Các bạn có làm việc vào cuối tuần không?"
+  },
+  {
+   "language": "Portuguese",
+   "text": "Quanto custa pintar uma casa de dois andares?"
+  },
+  {
+   "language": "Portuguese",
+   "text": "Vocês fazem orçamento grátis?"
+  },
+  {
+   "language": "Italian",
+   "text": "Quanto costa la pulizia delle finestre?"
+  },
+  {
+   "language": "Italian",
+   "text": "Lavorate anche nel fine settimana?"
+  },
+  {
+   "language": "German",
+   "text": "Was kostet eine Fassadenreinigung und wann haben Sie Zeit?"
+  },
+  {
+   "language": "German",
+   "text": "Arbeiten Sie auch am Wochenende?"
+  },
+  {
+   "language": "Polish",
+   "text": "Ile kosztuje malowanie domu?"
+  },
+  {
+   "language": "Polish",
+   "text": "Czy pracujecie w weekendy?"
+  },
+  {
+   "language": "Tagalog",
+   "text": "Magkano po ang pagpipinta ng bahay?"
+  },
+  {
+   "language": "Tagalog",
+   "text": "Bukas ba kayo tuwing Sabado?"
+  },
+  {
+   "language": "Spanish",
+   "text": "Hola, ¿hacen trabajos de jardinería en Ottawa?"
+  },
+  {
+   "language": "Spanish",
+   "text": "Trabajan los fines de semana"
+  },
+  {
+   "language": "Dutch",
+   "text": "Hoeveel kost het schilderen van een huis?"
+  },
+  {
+   "language": "Dutch",
+   "text": "Werken jullie ook in het weekend?"
+  },
+  {
+   "language": "Italian",
+   "text": "Lavorate sabato mattina presto?"
+  },
+  {
+   "language": "Polish",
+   "text": "Pracujecie rano czasami?"
+  },
+  {
+   "language": "Tagalog",
+   "text": "Gumagawa kayo bubong?"
+  },
+  {
+   "language": "German",
+   "text": "Malerarbeiten Fassaden Garten?"
+  }
+ ]
+}

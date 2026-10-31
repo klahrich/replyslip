@@ -38,6 +38,7 @@ import {
 import { resetSitePriceWarningsForTests, siteFallbackLlmConfig, siteLlmConfig, type SiteLlmConfig } from '@/lib/site-assistant/config';
 import { setSiteLlmTransportForTests, type SiteLlmTransport } from '@/lib/site-assistant/llm';
 import { siteRateKey } from '@/lib/site-assistant/routes';
+import { detectVisitorLanguage } from '@/lib/site-assistant/keywords';
 import { RATE_LIMITS } from '@/lib/constants';
 import { cappedReply, needsOwnerReply } from '@/lib/site-assistant/replies';
 import { call } from './helpers';
@@ -319,6 +320,29 @@ describe('messages', () => {
     expect(res.data.message).toMatchObject({ status: 'needs_owner', body: needsOwnerReply('en'), handoff_reason: 'other_language', language: 'other' });
     expect(res.data.message.demo_note).toMatch(/^I can chat in English and French\./);
     expect(model.calls).toHaveLength(0);
+  });
+
+  it('sends every non-English, non-French probe to the owner through the route, whatever the model says', async () => {
+    const { probes } = JSON.parse(readFileSync(join(FIXTURE_DIR, 'language-probes.json'), 'utf8')) as { probes: { language: string; text: string }[] };
+    expect(probes.length).toBeGreaterThanOrEqual(22);
+    const rows: string[] = [];
+    let i = 0;
+    for (const probe of probes) {
+      const { token } = await createSiteDemo();
+      const detected = detectVisitorLanguage(probe.text);
+      // Wrong on purpose: en/fr where the server is sure, "other" only where it can't tell.
+      const tag = detected === null ? 'other' : i++ % 2 ? 'fr' : 'en';
+      const model = fakeModel(() => answer({ language: tag }));
+      setSiteLlmTransportForTests(model.transport);
+      const res = await send(token, { client_message_id: randomUUID(), text: probe.text });
+      expect(res.status, probe.text).toBe(200);
+      expect(res.data.message, probe.text).toMatchObject({ status: 'needs_owner', handoff_reason: 'other_language', language: 'other' });
+      expect(res.data.message.demo_note, probe.text).toMatch(/^I can chat in English and French\./);
+      // The server decides before the call when it knows; otherwise the model's "other" decides.
+      expect(model.calls, probe.text).toHaveLength(detected === 'other' ? 0 : 1);
+      rows.push(`${probe.language} | ${detected ?? 'undecided'} | ${tag} | ${res.data.message.status} | ${model.calls.length}`);
+    }
+    console.log(`[site-assistant] language probes (language | server | model tag | status | model calls)\n${rows.join('\n')}`);
   });
 
   it('rejects bad bodies, long text and cross-site posts', async () => {

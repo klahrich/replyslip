@@ -21,8 +21,9 @@ export type SiteAnswerInput = {
 
 /**
  * The server's view of the visitor's language (spec 6b). `detected` is the confident server detection ('en', 'fr',
- * 'other') or null; `reply` is the en/fr to answer in when the server must decide: the detection when it is en/fr,
- * else the business's language, else the old accent/function-word guess.
+ * 'other') or null. `reply` only picks the language of a fixed reply when the server must decide without the
+ * model: the detection when it is en/fr, else the business's language, else the old guess. It never turns a
+ * model "other" into en/fr.
  */
 export function visitorLanguage(input: SiteAnswerInput): { detected: 'en' | 'fr' | 'other' | null; reply: 'en' | 'fr' } {
   const detected = detectVisitorLanguage(input.visitorMessage);
@@ -218,9 +219,9 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
   const parsed = siteAnswerSchema.safeParse(parsedJson);
   if (!parsed.success) return fixedOwner(input, 'invalid_output', guessed, { ...usage, rawOutput: parsedJson });
 
-  // The model's language tag is a suggestion. A confident server detection wins; with none, a model "other" on
-  // short or close text means the business's language, not the owner.
-  const answer = { ...parsed.data, language: detected ?? (parsed.data.language === 'other' ? guessed : parsed.data.language) };
+  // A confident server detection wins over the model's tag. Undecided (short or close text): the model's tag
+  // stands, so a model "other" still sends the message to the owner (rules.ts, language_other).
+  const answer = { ...parsed.data, language: detected ?? parsed.data.language };
   const outcome = applyRules(answer, normalizeForMatch(input.contextMd), contactIndex(input.contextMd));
   const language = answer.language;
   const base = {
