@@ -14,7 +14,7 @@ import {
   type AgentShareRow,
   type CustomerInviteRow,
 } from '@/db/schema';
-import { brandingRow, ownerDisplayName, serializeBranding } from './customer-branding';
+import { brandingFor, brandingRow, ownerDisplayName, serializeBranding } from './customer-branding';
 import {
   CUSTOMER_DEFAULT_DAILY_CAP,
   CUSTOMER_INVITE_MAX_ACTIVE_PER_AGENT,
@@ -70,10 +70,19 @@ export function customerInviteStatus(invite: CustomerInviteRow, now = new Date()
   return 'active';
 }
 
-function statusError(status: Exclude<CustomerInviteStatus, 'active'>): HttpError {
+/**
+ * A dead link. `invite_used_up` carries the business's public branding in `details.bot.branding` (the same object
+ * R1 returns), so the page can still show who sent it. Nothing else: no agent id, offers, handle, or owner data.
+ */
+async function statusError(
+  db: Db,
+  status: Exclude<CustomerInviteStatus, 'active'>,
+  agent: { id: string; workspaceId: string },
+): Promise<HttpError> {
   if (status === 'revoked') return notFound();
   if (status === 'expired') return new HttpError(410, 'invite_expired', LINK_EXPIRED);
-  return new HttpError(410, 'invite_used_up', LINK_USED_UP);
+  const branding = await brandingFor(db, agent);
+  return new HttpError(410, 'invite_used_up', LINK_USED_UP, { bot: { branding } });
 }
 
 /**
@@ -581,7 +590,7 @@ export async function resolveCustomerLink(token: string, viewer: CustomerViewer,
   // Someone who already holds a share can always see where they stand, even on a used-up personal invite.
   if (!share) {
     const status = customerInviteStatus(invite);
-    if (status !== 'active') throw statusError(status);
+    if (status !== 'active') throw await statusError(db, status, agent);
   }
   const shareStatus = (share?.status as ShareStatus | undefined) ?? null;
   const row = await brandingRow(db, agent.id);
@@ -723,7 +732,7 @@ export async function acceptCustomerInvite(
     if (existing) return { share: existing, notice: null };
 
     const status = customerInviteStatus(invite);
-    if (status !== 'active') throw statusError(status);
+    if (status !== 'active') throw await statusError(tx, status, agent);
 
     const approved =
       invite.kind === 'personal' ||
@@ -760,7 +769,7 @@ export async function acceptCustomerInvite(
         ),
       )
       .returning({ id: customerInvites.id });
-    if (!bumped) throw statusError('used_up');
+    if (!bumped) throw await statusError(tx, 'used_up', agent);
     const notice = approved ? null : await claimPendingNotice(tx, agent);
     return { share, notice };
   });

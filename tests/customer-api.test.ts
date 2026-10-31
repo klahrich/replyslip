@@ -16,6 +16,7 @@ import { getDb } from '@/db';
 import { agentOffers, agents, taskAnswers, tasks, wakes } from '@/db/schema';
 import { RATE_LIMITS } from '@/lib/constants';
 import { fieldErrors, inputDisplay, resultDisplay } from '@/lib/customer-api';
+import { resultOrder, withResultOrder } from '@/lib/validate';
 import { getAgentCard } from '@/lib/sharing';
 import { assertOfferNameNotValetto, humanizeOfferName, normalizeOfferTitle, offerDisplayTitle } from '@/lib/offer-title';
 import {
@@ -159,6 +160,15 @@ describe('R4 GET /api/v1/c/bots/:agent_id', () => {
     const q = jobs.find((job) => job.name === 'quote');
     expect(q).toMatchObject({ name: 'quote', title: 'Quote', description: 'Price a table.', notes_enabled: true, notes_max: 2000 });
     expect(q.input_schema.title).toBe('Table quote');
+    // Saved with x-order, so the fields come back in the order the owner sent them, not jsonb's.
+    expect(q.result_fields.map((f: { key: string }) => f.key)).toEqual([
+      'price_cad',
+      'lead_time_weeks',
+      'message',
+      'rush',
+      'finishes',
+      'breakdown',
+    ]);
     expect(q.result_fields).toContainEqual({ key: 'price_cad', label: 'Price (CAD)', type: 'number' });
     expect(q.result_fields).toContainEqual({ key: 'message', label: 'Message', type: 'string' });
     expect(jobs.find((job) => job.name === 'draft')).toMatchObject({ input_schema: null, notes_enabled: true });
@@ -478,16 +488,15 @@ describe('R7 GET /api/v1/c/requests/:task_id', () => {
     expect(done.data.request.answers).toEqual([
       expect.objectContaining({ question: 'Which finish?', answer: 'Matte.' }),
     ]);
-    // jsonb does not keep result_schema key order, so only the rows are pinned, not their order.
-    expect(done.data.request.result_display).toHaveLength(6);
-    expect(done.data.request.result_display).toEqual(expect.arrayContaining([
+    // The offer's result_schema x-order keeps the rows in the order the owner wrote the schema.
+    expect(done.data.request.result_display).toEqual([
       { key: 'price_cad', label: 'Price (CAD)', kind: 'number', value: '2,450.5' },
       { key: 'lead_time_weeks', label: 'Lead time (weeks)', kind: 'number', value: '6' },
       { key: 'message', label: 'Message', kind: 'text', value: '<b>Thanks</b>' },
       { key: 'rush', label: 'Rush', kind: 'boolean', value: 'No' },
       { key: 'finishes', label: 'Finishes', kind: 'list', value: 'oil, wax' },
       { key: 'breakdown', label: 'Breakdown', kind: 'json', value: JSON.stringify({ wood: 1800 }, null, 2) },
-    ]));
+    ]);
 
     const failing = await createRequest(customer, o.agentId, { offer: 'draft', notes: 'x' });
     await mcpTool(o.agentKey, 'fail_task', { id: failing.data.request.id, reason: 'Out of stock this month.' });
@@ -976,6 +985,63 @@ describe('offer titles', () => {
     const offers = (card.offers ?? card.card?.offers) as any[];
     expect(offers.find((offer) => offer.name === 'draft')).toMatchObject({ name: 'draft', title: 'Spring headline' });
     expect(offers.find((offer) => offer.name === 'quiet')).toMatchObject({ name: 'quiet', title: 'Quiet' });
+  });
+});
+
+describe('result_schema x-order', () => {
+  it('fills x-order from the sent property order, cleans a sent one, and leaves schemas without properties alone', () => {
+    const props = { b: { type: 'string' }, a: { type: 'string' }, c: { type: 'number' } };
+    expect(withResultOrder({ type: 'object', properties: props })['x-order']).toEqual(['b', 'a', 'c']);
+    expect(withResultOrder({ type: 'object', properties: props, 'x-order': ['c', 'nope', 'c', 3] })['x-order']).toEqual(['c', 'b', 'a']);
+    expect(withResultOrder({ type: 'object' })).toEqual({ type: 'object' });
+    expect(withResultOrder({ type: 'string' })).toEqual({ type: 'string' });
+    // A stored schema from before x-order falls back to its key order.
+    expect(resultOrder({ type: 'object', properties: props })).toEqual(['b', 'a', 'c']);
+    expect(resultOrder({ type: 'object', properties: props, 'x-order': ['c', 'gone'] })).toEqual(['c', 'b', 'a']);
+    expect(resultOrder(null)).toEqual([]);
+  });
+
+  it('stores x-order on create, PATCH, and upsert_offer, returns it, and orders result_fields by it', async () => {
+    const o = await owner();
+    const schema = {
+      type: 'object',
+      properties: { total: { type: 'number' }, eta: { type: 'string' }, alpha: { type: 'boolean' } },
+    };
+    const created = await call(createOfferRoute, offersUrl(o), {
+      cookie: o.cookie,
+      params: { id: o.agentId },
+      body: { name: 'ordered', description: 'Ordered.', result_schema: schema },
+    });
+    expect(created.status, created.text).toBe(201);
+    expect(created.data.offer.result_schema['x-order']).toEqual(['total', 'eta', 'alpha']);
+    const listed = await call(listOffersRoute, offersUrl(o), { cookie: o.cookie, params: { id: o.agentId } });
+    expect(listed.data.offers.find((x: any) => x.name === 'ordered').result_schema['x-order']).toEqual(['total', 'eta', 'alpha']);
+
+    const patched = await patchOffer(o, 'ordered', { result_schema: { ...schema, 'x-order': ['alpha', 'total'] } });
+    expect(patched.status, patched.text).toBe(200);
+    expect(patched.data.offer.result_schema['x-order']).toEqual(['alpha', 'total', 'eta']);
+
+    const viaMcp = await mcpTool(o.agentKey, 'upsert_offer', {
+      agent: 'Grok',
+      name: 'ordered-mcp',
+      description: 'Ordered too.',
+      result_schema: { type: 'object', properties: { z: { type: 'string' }, y: { type: 'string' } } },
+    });
+    expect(viaMcp.isError, viaMcp.text).toBe(false);
+    expect(viaMcp.payload.offer.result_schema['x-order']).toEqual(['z', 'y']);
+
+    expect((await patchOffer(o, 'quote', { result_schema: { ...quoteResult, 'x-order': ['message', 'price_cad'] } })).status).toBe(200);
+    const customer = await approvedCustomer(o);
+    const bot = await getBot(customer, o.agentId);
+    const job = (bot.data.jobs as any[]).find((x) => x.name === 'quote');
+    expect(job.result_fields.map((f: { key: string }) => f.key)).toEqual([
+      'message',
+      'price_cad',
+      'lead_time_weeks',
+      'rush',
+      'finishes',
+      'breakdown',
+    ]);
   });
 });
 

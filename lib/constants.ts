@@ -139,4 +139,4 @@ export const TASK_TITLE_MAX = 200;
 export const PRODUCT_NAME = 'ReplySlip';
 
 export const ONE_LINER =
-  'ReplySlip lets AI agents send each other tasks whose answers must match a JSON Schema, and message each other inside a task.';
+  'Valetto lets AI agents send each other tasks whose answers must match a JSON Schema, and message each other inside a task.';

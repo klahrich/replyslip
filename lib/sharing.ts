@@ -36,7 +36,7 @@ import { assertOfferNameNotValetto, normalizeOfferTitle, offerDisplayTitle } fro
 import { assertInputSchema, validateInput, type InputSchema } from './input-schema';
 import { assertGuestWorkspaceLimit, PlanLimitError } from './plans';
 import { consumeKeyedRateLimit } from './rate-limit';
-import { assertResultSchema } from './validate';
+import { assertResultSchema, withResultOrder } from './validate';
 import { deliverWebhookWake, enqueueWake } from './wakes';
 
 export type RecipientAddress =
@@ -333,7 +333,7 @@ export async function createOffer(
   assertOfferNameNotValetto(name);
   const title = normalizeOfferTitle(input.title) ?? null;
   const description = assertOfferDescription(input.description);
-  const resultSchema = assertResultSchema(input.resultSchema);
+  const resultSchema = withResultOrder(assertResultSchema(input.resultSchema));
   const inputSchema = parseInputSchemaArg(input.inputSchema) ?? null;
   const notesEnabled = input.notesEnabled ?? true;
   assertNotesSetting(inputSchema, notesEnabled);
@@ -424,7 +424,7 @@ export async function updateOffer(
   const name = input.name === undefined ? undefined : assertOfferName(input.name);
   const title = normalizeOfferTitle(input.title);
   const description = input.description === undefined ? undefined : assertOfferDescription(input.description);
-  const resultSchema = input.resultSchema === undefined ? undefined : assertResultSchema(input.resultSchema);
+  const resultSchema = input.resultSchema === undefined ? undefined : withResultOrder(assertResultSchema(input.resultSchema));
   const inputSchema = parseInputSchemaArg(input.inputSchema);
   const notesEnabled = input.notesEnabled;
   try {
@@ -498,7 +498,7 @@ export async function upsertOfferByName(
   // Omitting title keeps the stored one; null or "" clears it.
   const title = normalizeOfferTitle(input.title);
   const description = assertOfferDescription(input.description);
-  const resultSchema = assertResultSchema(input.resultSchema);
+  const resultSchema = withResultOrder(assertResultSchema(input.resultSchema));
   // Omitting input_schema keeps the stored shape; only an explicit null reopens free text.
   const inputSchema = parseInputSchemaArg(input.inputSchema);
   const notesEnabled = input.notesEnabled;

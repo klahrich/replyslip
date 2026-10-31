@@ -31,6 +31,7 @@ import { HttpError, isUniqueViolation } from './errors';
 import { validateInput, type InputError, type InputSchema } from './input-schema';
 import { weakEtag } from './http';
 import { answerTask, createTask, serializeAnswer, taskAnswersFor } from './tasks';
+import { resultOrder } from './validate';
 
 /**
  * Customer API R3-R8 (spec 15, 17). A customer is the signed-in user's workspace, and a bot is
@@ -166,8 +167,11 @@ type ResultField = { key: string; label: string; type: string };
 
 export function resultFields(schema: unknown): ResultField[] {
   if (!isRecord(schema) || !isRecord(schema.properties)) return [];
-  return Object.entries(schema.properties)
+  const properties = schema.properties;
+  // x-order: jsonb does not keep key order (lib/validate withResultOrder).
+  return resultOrder(schema)
     .slice(0, 20)
+    .map((key) => [key, properties[key]] as const)
     .map(([key, prop]) => ({
       key,
       label: labelFor(key, prop),
@@ -311,7 +315,7 @@ export function resultDisplay(schema: Record<string, unknown> | null, result: un
   if (!isRecord(result)) return [resultRow('_value', 'Value', result)];
   const properties = schema && isRecord(schema.properties) ? schema.properties : {};
   const keys = [
-    ...Object.keys(properties).filter((key) => key in result),
+    ...resultOrder(schema).filter((key) => key in result),
     ...Object.keys(result).filter((key) => !(key in properties)),
   ];
   return keys.map((key) => resultRow(key, labelFor(key, properties[key]), result[key]));

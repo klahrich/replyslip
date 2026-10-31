@@ -74,6 +74,38 @@ export function assertResultSchema(schema: unknown): Record<string, unknown> {
   return record;
 }
 
+/**
+ * Postgres jsonb does not keep object key order, so a stored result_schema loses the order its properties were
+ * written in. Like input_schema, the root gets an `x-order` list (Ajv ignores the keyword): the sender's own
+ * `x-order` when it sends one (unknown and repeated names dropped, missing ones appended), else the property order
+ * of the JSON as sent. Call it on the parsed request, before the schema is stored. Schemas without root
+ * `properties` are returned as is.
+ */
+export function withResultOrder(schema: Record<string, unknown>): Record<string, unknown> {
+  const properties = schema.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return schema;
+  const names = Object.keys(properties);
+  const sent = Array.isArray(schema['x-order']) ? (schema['x-order'] as unknown[]) : [];
+  const order: string[] = [];
+  for (const name of sent) {
+    if (typeof name === 'string' && names.includes(name) && !order.includes(name)) order.push(name);
+  }
+  for (const name of names) if (!order.includes(name)) order.push(name);
+  return { ...schema, 'x-order': order };
+}
+
+/** The display order of a stored result_schema's root properties: x-order first, then any others. */
+export function resultOrder(schema: unknown): string[] {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return [];
+  const record = schema as Record<string, unknown>;
+  const properties = record.properties && typeof record.properties === 'object' && !Array.isArray(record.properties) ? record.properties : {};
+  const names = Object.keys(properties);
+  const listed = Array.isArray(record['x-order'])
+    ? (record['x-order'] as unknown[]).filter((key): key is string => typeof key === 'string' && names.includes(key))
+    : [];
+  return [...new Set(listed), ...names.filter((name) => !listed.includes(name))];
+}
+
 /** Least-recently-used compiled validators keyed by the schema's JSON text (which includes $schema). */
 const validators = new Map<string, ValidateFunction>();
 

@@ -161,7 +161,7 @@ describe('agent sharing', () => {
       description: 'CANARY-GUEST-TASK',
     });
     expect(created.isError).toBe(false);
-    expect(created.payload.task.result_schema).toEqual(offerSchema);
+    expect(created.payload.task.result_schema).toEqual({ ...offerSchema, 'x-order': ['headline'] });
     expect(created.payload.task).toMatchObject({
       cross_workspace: true,
       untrusted: true,
@@ -180,7 +180,7 @@ describe('agent sharing', () => {
         name: 'draft',
         title: 'Draft',
         description: 'Draft the requested page.',
-        result_schema: offerSchema,
+        result_schema: { ...offerSchema, 'x-order': ['headline'] },
         input_schema: null,
         notes_enabled: true,
         notes_max: null,
@@ -492,7 +492,7 @@ describe('agent sharing', () => {
       description: 'Granted.',
     });
     expect(created.isError).toBe(false);
-    expect(created.payload.task.result_schema).toEqual(offerSchema);
+    expect(created.payload.task.result_schema).toEqual({ ...offerSchema, 'x-order': ['headline'] });
     const unshared = await mcpTool(plannerKey, 'set_agent_sharing', { agent: 'Planner', shared: false });
     expect(unshared.payload.agent.shared).toBe(false);
     const after = await mcpTool(guestKey, 'get_task', { id: created.payload.task.id });
