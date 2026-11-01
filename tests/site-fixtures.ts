@@ -103,3 +103,32 @@ export async function createSiteDemo(overrides: Partial<typeof siteBusinesses.$i
   const { token, link } = await createDemoLink(getDb(), business.id);
   return { business, token, link };
 }
+
+/** The question in a suggested-question translation request, or null when `req` is a visitor-answer request. */
+export function translationRequest(req: SiteLlmHttpRequest): { question: string; to: 'en' | 'fr' } | null {
+  const body = JSON.parse(req.body) as { instructions: string; text: { format: { name: string } }; input: { content: { text: string }[] }[] };
+  if (body.text.format.name !== 'site_question_translation') return null;
+  const question = body.input[0]!.content[0]!.text.replace(/^<question>\n/, '').replace(/\n<\/question>$/, '');
+  return { question, to: /to Canadian French/.test(body.instructions) ? 'fr' : 'en' };
+}
+
+/** The visitor message in a visitor-answer request. */
+export function visitorMessageOf(req: SiteLlmHttpRequest): string {
+  const text = (JSON.parse(req.body) as { input: { content: { text: string }[] }[] }).input[0]!.content[0]!.text;
+  return /<visitor_message>\n([\s\S]*)\n<\/visitor_message>/.exec(text)?.[1] ?? '';
+}
+
+/**
+ * A fake model for bilingual suggestions: translations come back as `[fr] <question>` / `[en] <question>`, and
+ * answers from `reply` (default: an answer tagged with the question's marker language).
+ */
+export function bilingualModel(reply?: (req: SiteLlmHttpRequest, question: string) => unknown) {
+  return fakeModel((req) => {
+    const translation = translationRequest(req);
+    if (translation) return { question: `[${translation.to}] ${translation.question}` };
+    const question = visitorMessageOf(req);
+    if (reply) return reply(req, question);
+    const language = question.startsWith('[fr] ') ? 'fr' : question.startsWith('[en] ') ? 'en' : 'en';
+    return answer({ reply: `Answer to: ${question}`, language });
+  });
+}

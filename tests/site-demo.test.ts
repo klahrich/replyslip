@@ -42,7 +42,7 @@ import { detectVisitorLanguage } from '@/lib/site-assistant/keywords';
 import { RATE_LIMITS } from '@/lib/constants';
 import { cappedReply, needsOwnerReply } from '@/lib/site-assistant/replies';
 import { call } from './helpers';
-import { answer, createSiteBusiness, createSiteDemo, FIXTURE_DIR, fakeModel, MAPLE_CONTEXT, NO_MODEL, TEST_LLM_CONFIG } from './site-fixtures';
+import { answer, createSiteBusiness, createSiteDemo, FIXTURE_DIR, fakeModel, MAPLE_CONTEXT, NO_MODEL, TEST_LLM_CONFIG, translationRequest } from './site-fixtures';
 
 const URL_BASE = 'http://localhost';
 
@@ -109,17 +109,25 @@ function expectSiteHeaders(res: Response) {
   expect(res.headers.get('cache-control')).toBe('private, no-store');
 }
 
-async function addSuggestion(businessId: string, checked: boolean, question = 'What areas do you serve?') {
+let nextSuggestionPosition = 0;
+
+/** A suggested answer row. Each call takes a new position unless one is given (one row per position and language). */
+async function addSuggestion(
+  businessId: string,
+  checked: boolean,
+  question = 'What areas do you serve?',
+  { position = nextSuggestionPosition++, language = 'en', answer = 'We serve Ottawa, Kanata and Orleans.' } = {},
+) {
   const [row] = await getDb()
     .insert(siteSuggestedAnswers)
     .values({
       businessId,
-      position: 0,
+      position,
       question,
-      answer: 'We serve Ottawa, Kanata and Orleans.',
+      answer,
       status: 'answered',
       topic: 'general',
-      language: 'en',
+      language,
       decidedBy: 'answered',
       sourcesKept: ['serving Ottawa, Kanata and Orleans'],
       checkedAt: checked ? new Date() : null,
@@ -147,7 +155,7 @@ describe('demo info and conversation', () => {
     );
     expect(res.data.notice.en).toMatch(/demo/i);
     expect(res.data.suggested_questions).toEqual([
-      { id: checked.id, question: checked.question, answer: checked.answer, language: 'en', checked_at: checked.checkedAt!.toISOString() },
+      { id: checked.id, position: checked.position, question: checked.question, answer: checked.answer, language: 'en', checked_at: checked.checkedAt!.toISOString() },
     ]);
     expect(JSON.stringify(res.data)).not.toContain(business.id);
   });
@@ -888,6 +896,8 @@ describe('import', () => {
     const dir = mkdtempSync(join(tmpdir(), 'site-import-'));
     const linkFile = join(dir, 'links.txt');
     const model = fakeModel((req) => {
+      const translation = translationRequest(req);
+      if (translation) return { question: `[${translation.to}] ${translation.question}` };
       const text = JSON.parse(req.body).input[0].content[0].text as string;
       return text.includes('Peinture') ? answer({ reply: 'Oui.', language: 'fr', sources: ['Peinture extérieure : revêtement, galeries et clôtures'] }) : answer({});
     });
@@ -909,9 +919,10 @@ describe('import', () => {
     const meta = await sharp(maple!.desktopShot!).metadata();
     expect(meta.width).toBe(1440);
     expect(meta.height).toBeLessThanOrEqual(2000);
-    expect(model.calls).toHaveLength(6);
+    // Per question: its answer, a translation, and the translation's answer.
+    expect(model.calls).toHaveLength(18);
     const unchecked = await listUncheckedSuggestedAnswers(db, 'maple-ridge-landscaping');
-    expect(unchecked).toHaveLength(3);
+    expect(unchecked.map((row) => [row.position, row.language])).toEqual([[0, 'en'], [0, 'fr'], [1, 'en'], [1, 'fr'], [2, 'en'], [2, 'fr']]);
 
     // The page shows nothing until Karim checks one.
     const token = lines[0]!.split('\t')[1]!.split('/').pop()!;
@@ -919,10 +930,11 @@ describe('import', () => {
     expect(await setSuggestedAnswerChecked(db, unchecked[0]!.id, true)).toBe(true);
     expect((await info(token)).data.suggested_questions).toHaveLength(1);
 
-    // Re-run: no new link, checked answers kept, unchecked ones regenerated.
+    // Re-run: no new link, checked answers kept, unchecked ones regenerated (the checked row's unchecked
+    // translation too: translate and answer again).
     await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', transport: model.transport, config: TEST_LLM_CONFIG, log: () => {} });
     expect(readFileSync(linkFile, 'utf8').trim().split('\n')).toHaveLength(2);
-    expect(model.calls).toHaveLength(6 + 5);
+    expect(model.calls).toHaveLength(18 + 17);
     expect((await info(token)).data.suggested_questions).toHaveLength(1);
   });
 

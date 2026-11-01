@@ -701,6 +701,8 @@ export const siteConversations = pgTable(
 /**
  * Pre-generated answers to a business's suggested questions. Karim checks each one (checked_at) before a demo
  * link goes out; unchecked rows never reach the page. Re-generating clears checked_at.
+ * `position` is the question's index in the business's list; each position has one row per language (en, fr),
+ * the second a translation of the first, each checked on its own.
  */
 export const siteSuggestedAnswers = pgTable(
   'site_suggested_answers',
@@ -724,7 +726,9 @@ export const siteSuggestedAnswers = pgTable(
   },
   (table) => [
     unique('site_suggested_answers_id_business_unique').on(table.id, table.businessId),
-    uniqueIndex('site_suggested_answers_question_unique').on(table.businessId, table.question),
+    // One row per (position, language): the same suggested question in English and in French (0017).
+    uniqueIndex('site_suggested_answers_position_language_unique').on(table.businessId, table.position, table.language),
+    check('site_suggested_answers_position_check', sql`${table.position} >= 0`),
     check('site_suggested_answers_question_check', sql`char_length(${table.question}) between 1 and 1000`),
     check(
       'site_suggested_answers_status_check',
