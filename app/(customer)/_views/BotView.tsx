@@ -11,6 +11,7 @@ import { Notice } from '../_components/Notice';
 import { StatusBadge } from '../_components/StatusBadge';
 import { usePoll } from '../_components/usePoll';
 import { Account, ConnectError, Loading, NotFound, loadFailure, retryable, useEmail, when, type LoadFailure } from './common';
+import { endSentence } from '@/app/(customer)/_lib/sentence';
 
 export function BotView({ agentId }: { agentId: string }) {
   const [data, setData] = useState<BotResponse | null>(null);
@@ -98,7 +99,7 @@ export function BotView({ agentId }: { agentId: string }) {
       {capped && (
         <Notice icon={<Clock />} title="You've reached today's limit" level="h2" className="mt-6">
           <p>
-            You can send up to {share.daily_cap} {share.daily_cap === 1 ? 'request' : 'requests'} a day to {name}. {resetText(share.resets_at)}
+            You can send up to {share.daily_cap} {share.daily_cap === 1 ? 'request' : 'requests'} a day to {endSentence(name)} {resetText(share.resets_at)}
           </p>
         </Notice>
       )}

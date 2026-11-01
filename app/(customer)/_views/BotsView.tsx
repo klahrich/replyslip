@@ -12,6 +12,7 @@ import { EmailSignIn, SignInCard } from '../_components/EmailSignIn';
 import { CenteredFrame, LogoTile, PlainFrame } from '../_components/Frame';
 import { Notice } from '../_components/Notice';
 import { ConnectError, Loading, homeAfterSignIn, loadFailure, retryable, type LoadFailure } from './common';
+import { endSentence } from '@/app/(customer)/_lib/sentence';
 
 const shareLabel = { approved: '', pending: 'Waiting for approval', revoked: 'Access turned off' } as const;
 
@@ -42,7 +43,7 @@ export function BotsView({ signedOut, from = null }: { signedOut: boolean; from?
         <SignInCard>
           <EmailSignIn
             title="You're signed out"
-            intro={`To come back, enter the email you used with ${fromBranding?.display_name ?? 'this business'}. We'll send you a 6-digit code.`}
+            intro={`To come back, enter the email you used with ${endSentence(fromBranding?.display_name ?? 'this business')} We'll send you a 6-digit code.`}
             onSignedIn={async () => router.replace(await homeAfterSignIn(from))}
           />
         </SignInCard>
