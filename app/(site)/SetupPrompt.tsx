@@ -5,7 +5,7 @@ import './setup-prompt.css';
 
 export type SetupTab = { key: string; label: string; prompt: string; note: string | null };
 
-const REPLYSLIP_TABS: readonly SetupTab[] = [
+const DEFAULT_TABS: readonly SetupTab[] = [
   {
     key: 'local',
     label: 'Local',
@@ -45,7 +45,7 @@ async function copyText(text: string) {
  * valetto.tech/agent-to-agent. `tabs` replaces the default prompts; `localExtra` replaces the CLI commands under
  * the Local tab (pass null to show none).
  */
-export function SetupPrompt({ tabs = REPLYSLIP_TABS, localExtra }: { tabs?: readonly SetupTab[]; localExtra?: ReactNode } = {}) {
+export function SetupPrompt({ tabs = DEFAULT_TABS, localExtra }: { tabs?: readonly SetupTab[]; localExtra?: ReactNode } = {}) {
   const id = useId();
   const [sel, setSel] = useState(0);
   const [copied, setCopied] = useState<number | null>(null);
