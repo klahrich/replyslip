@@ -1,4 +1,4 @@
-import type { Lang, SuggestedQuestion } from './site-demo-types';
+import type { DemoConversation, Lang, SuggestedQuestion } from './site-demo-types';
 
 /** The most suggestion chips the demo shows. */
 export const MAX_SUGGESTIONS = 3;
@@ -6,7 +6,7 @@ export const MAX_SUGGESTIONS = 3;
 /**
  * The suggestion chips for the page's current language: only rows whose `language` is exactly `lang` (the server
  * stores 'en', 'fr' or 'other', never regional tags). No fallback to another language: a French page with only
- * English rows shows no chips, and each chip carries its own row's stored answer.
+ * English rows shows no chips. A tap sends the chip's question as a typed message; nothing stored is shown.
  *
  * Rows with a `position` come first, lowest first; rows without one follow in the server's order. The sort is
  * stable, so equal positions also keep the server's order.
@@ -22,4 +22,9 @@ export function pickSuggestions(all: SuggestedQuestion[], lang: Lang): Suggested
 
 function rank(s: SuggestedQuestion): number {
   return typeof s.position === 'number' && Number.isFinite(s.position) ? s.position : Number.POSITIVE_INFINITY;
+}
+
+/** The payload's suggestion rows: `suggestions` (newer servers) or `suggested_questions` (older ones), else none. */
+export function suggestionsOf(conversation: Pick<DemoConversation, 'suggestions' | 'suggested_questions'>): SuggestedQuestion[] {
+  return (conversation.suggestions ?? conversation.suggested_questions ?? []).filter((s) => typeof s?.question === 'string' && s.question.trim() !== '');
 }

@@ -13,8 +13,8 @@ import { ArrowUp, MessageCircle, Minus, RotateCw } from 'lucide-react';
 import { LogoTile } from '../Frame';
 import { brandStyle } from '../../_lib/brand';
 import { demoApi } from '../../_lib/site-demo-api';
-import { pickSuggestions } from '../../_lib/site-demo-suggestions';
-import { DemoApiError, type DemoConversation, type DemoMessage, type Lang, type ReplyStatus, type SuggestedQuestion } from '../../_lib/site-demo-types';
+import { pickSuggestions, suggestionsOf } from '../../_lib/site-demo-suggestions';
+import { DemoApiError, type DemoConversation, type DemoMessage, type Lang, type ReplyStatus } from '../../_lib/site-demo-types';
 import { SITE_STRINGS } from '../../_lib/site-strings';
 import { cn } from '../../_lib/utils';
 
@@ -29,25 +29,11 @@ type Item = {
   failed?: boolean;
   /** New in this visit: animate in. Restored rows don't. */
   fresh?: boolean;
-  /** Visitor rows from a suggestion tap: the suggestion, so Try again records the same tap. */
-  tapId?: string;
-  /** Tap rows whose stored answer isn't on screen yet (refused before it showed): Try again runs the whole tap again. */
-  tapAnswer?: string;
   /** needs_owner only: the server's demo note (why it went to the owner). */
   note?: string | null;
 };
 
 const DEFAULT_MAX = 1000;
-
-/** A tapped suggestion's stored answer waits this long (random in the range) behind the typing indicator, so it reads
- * like a reply rather than a canned pop-up. It also waits for the tap's request, but no longer than TAP_FALLBACK_MS
- * from the tap: a slow network shouldn't hold back an answer the page already has. */
-const TAP_DELAY_MIN_MS = 1200;
-const TAP_DELAY_MAX_MS = 2000;
-const TAP_FALLBACK_MS = 5000;
-const tapDelay = () => TAP_DELAY_MIN_MS + Math.random() * (TAP_DELAY_MAX_MS - TAP_DELAY_MIN_MS);
-
-type TapResult = { ok: true } | { ok: false; err: DemoApiError };
 
 /** What the minimized bubble flags: a reply that came in, or a send that failed. */
 type Mark = 'reply' | 'error';
@@ -100,8 +86,6 @@ export function DemoChat({
   const [mark, setMark] = useState<Mark | null>(null);
   /** Screen-reader text for what happened while minimized (the hidden chat's own live regions aren't heard). */
   const [announce, setAnnounce] = useState('');
-  /** Pending tap delays, cleared if the chat unmounts. */
-  const timers = useRef(new Set<number>());
   const openRef = useRef(true);
   /** The page's scroll position when minimized (on phones the page scrolls, not the chat), restored on reopen. */
   const pageY = useRef(0);
@@ -110,7 +94,7 @@ export function DemoChat({
   const sectionRef = useRef<HTMLElement>(null);
   const minimizeRef = useRef<HTMLButtonElement>(null);
   const bubbleRef = useRef<HTMLButtonElement>(null);
-  const suggestions = useMemo(() => pickSuggestions(conversation.suggested_questions, lang), [conversation.suggested_questions, lang]);
+  const suggestions = useMemo(() => pickSuggestions(suggestionsOf(conversation), lang), [conversation, lang]);
   const branding = useMemo(
     () => ({
       display_name: business.name,
@@ -130,24 +114,6 @@ export function DemoChat({
     // Hidden chat: leave its scroll alone. Reopening after a new reply scrolls to it.
     if (openRef.current && (items.length || thinking)) endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [items.length, thinking]);
-
-  useEffect(() => {
-    const pending = timers.current;
-    return () => {
-      pending.forEach((id) => window.clearTimeout(id));
-      pending.clear();
-    };
-  }, []);
-
-  function wait(ms: number) {
-    return new Promise<void>((resolve) => {
-      const id = window.setTimeout(() => {
-        timers.current.delete(id);
-        resolve();
-      }, ms);
-      timers.current.add(id);
-    });
-  }
 
   /** A reply is on screen. If the chat is minimized, flag it on the bubble and announce it. */
   function replied() {
@@ -254,85 +220,23 @@ export function DemoChat({
 
   function submit(ev?: FormEvent) {
     ev?.preventDefault();
-    if (disabled) return;
-    const body = text.trim();
-    if (!body) return;
-    if (body.length > max) return setInline('tooLong');
-    const clientId = crypto.randomUUID();
-    setItems((xs) => [...xs, { key: clientId, role: 'visitor', body, status: null, fresh: true }]);
-    setText('');
-    void post(clientId, body);
-  }
-
-  function tap(sq: SuggestedQuestion) {
-    if (disabled) return;
-    const clientId = crypto.randomUUID();
-    setItems((xs) => [...xs, { key: clientId, role: 'visitor', body: sq.question, status: null, fresh: true, tapId: sq.id, tapAnswer: sq.answer }]);
-    void runTap(clientId, sq.id, sq.question, sq.answer);
+    if (send(text.trim())) setText('');
   }
 
   /**
-   * The stored answer is already checked (no model call). The question is on screen; the answer follows behind the
-   * typing indicator after the random delay, once the tap's request succeeds or TAP_FALLBACK_MS pass with no reply.
-   * A refusal (any error response) before that shows the usual error instead of the answer. A refusal after the
-   * fallback leaves the answer and marks the question Not sent. No response at all (network error, timeout) counts as
-   * no answer back: the answer shows and the question gets Not sent / Try again.
+   * Sends one visitor message: the typed text, or a tapped suggestion's question (the same live reply, limits and
+   * errors either way; the model answers from the business's content). Returns whether it went out.
    */
-  async function runTap(clientId: string, tapId: string, question: string, answer: string) {
-    setInline(null);
-    setThinking(true);
-    setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: false } : x)));
-    const delay = wait(tapDelay());
-    const request: Promise<TapResult> = demoApi.send(token, { client_message_id: clientId, suggested_question_id: tapId }).then(
-      () => ({ ok: true }),
-      (e: unknown) => ({ ok: false, err: e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', '') }),
-    );
-    const first = await Promise.race([request, wait(TAP_FALLBACK_MS).then(() => null)]);
-    if (first && !first.ok && first.err.status !== 0) {
-      // Refused before the answer showed: no stored answer, the same handling as a typed message. A suggestion
-      // withdrawn since the page loaded goes back in the input to send as a typed question.
-      setThinking(false);
-      const err = first.err.status === 404 && first.err.code === 'suggested_question_not_found' ? new DemoApiError(400, first.err.code, '') : first.err;
-      fail(err, clientId, question);
-      return requestAnimationFrame(() => openRef.current && inputRef.current?.focus());
+  function send(body: string): boolean {
+    if (disabled || !body) return false;
+    if (body.length > max) {
+      setInline('tooLong');
+      return false;
     }
-    await delay;
-    setThinking(false);
-    const lost = first && !first.ok ? first.err : null;
-    setItems((xs) => [
-      ...xs.map((x) => (x.key === clientId ? { ...x, tapAnswer: undefined, failed: lost ? true : x.failed } : x)),
-      { key: `${clientId}-a`, role: 'assistant', body: answer, status: 'answered', fresh: true },
-    ]);
-    replied();
-    if (lost) tapNotRecorded(lost, clientId);
-    // Shown on the fallback: a late refusal (or timeout) still marks the question.
-    if (!first) void request.then((r) => !r.ok && tapNotRecorded(r.err, clientId));
-    requestAnimationFrame(() => openRef.current && inputRef.current?.focus());
-  }
-
-  /** Try again on a tap whose answer is already on screen: record the tap in the background. */
-  function recordTap(clientId: string, tapId: string) {
-    setInline(null);
-    setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: false } : x)));
-    demoApi.send(token, { client_message_id: clientId, suggested_question_id: tapId }).catch((e: unknown) => {
-      tapNotRecorded(e instanceof DemoApiError ? e : new DemoApiError(0, 'network_error', ''), clientId);
-    });
-  }
-
-  /** A tap whose answer is on screen wasn't recorded. The answer stays; the question gets Not sent and the reason. */
-  function tapNotRecorded(err: DemoApiError, clientId: string) {
-    if (err.status === 410) return onGone('expired');
-    // A suggestion withdrawn since the page loaded keeps its answer on screen; any other 404 is a dead link.
-    if (err.status === 404) return err.code === 'suggested_question_not_found' ? undefined : onGone('dead');
-    setItems((xs) => xs.map((x) => (x.key === clientId ? { ...x, failed: true } : x)));
-    if (err.status === 429 && err.code === 'daily_limit') {
-      // The daily cap closes the input and says so, as for a typed message.
-      failedHidden(t.demoCap);
-      return setCapped(true);
-    }
-    const why: Inline = err.status === 400 ? 'badRequest' : retryReason(err);
-    setInline(why);
-    failedHidden(reasonText(why));
+    const clientId = crypto.randomUUID();
+    setItems((xs) => [...xs, { key: clientId, role: 'visitor', body, status: null, fresh: true }]);
+    void post(clientId, body);
+    return true;
   }
 
   function onKey(ev: KeyboardEvent<HTMLTextAreaElement>) {
@@ -400,9 +304,7 @@ export function DemoChat({
                   <button
                     type="button"
                     disabled={disabled}
-                    onClick={() =>
-                      it.tapId ? (it.tapAnswer ? void runTap(it.key, it.tapId, it.body, it.tapAnswer) : recordTap(it.key, it.tapId)) : void post(it.key, it.body)
-                    }
+                    onClick={() => void post(it.key, it.body)}
                     className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 font-medium underline underline-offset-4 disabled:opacity-50"
                   >
                     <RotateCw className="size-3.5" aria-hidden />
@@ -435,12 +337,12 @@ export function DemoChat({
           <div className="mt-4">
             <p className="mb-2 text-[13px] text-muted-foreground">{t.youCanAsk}</p>
             <div className="flex flex-col items-start gap-2">
-              {suggestions.map((sq) => (
+              {suggestions.map((sq, i) => (
                 <button
-                  key={sq.id}
+                  key={`${i}-${sq.question}`}
                   type="button"
                   disabled={disabled}
-                  onClick={() => void tap(sq)}
+                  onClick={() => send(sq.question.trim())}
                   className="max-w-full rounded-full border border-border bg-background px-3.5 py-2 text-left text-[14px] leading-snug transition-colors hover:border-primary/40 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.98] disabled:opacity-50 [overflow-wrap:anywhere]"
                 >
                   {sq.question}
