@@ -141,6 +141,44 @@ describe('replyslip register', () => {
 });
 
 describe('replyslip watch --key-file', () => {
+  it('defaults --url to https://valetto.tech, then REPLYSLIP_URL, then --url', async () => {
+    const cases: [string[], NodeJS.ProcessEnv, string][] = [
+      [[], {}, 'https://valetto.tech'],
+      [[], { REPLYSLIP_URL: 'http://localhost:3000' }, 'http://localhost:3000'],
+      [['--url', 'https://relay.example'], { REPLYSLIP_URL: 'http://localhost:3000' }, 'https://relay.example'],
+    ];
+    for (const [extra, env, expected] of cases) {
+      const home = await mkdtemp(path.join(tmpdir(), 'replyslip-watch-'));
+      const urls: string[] = [];
+      const fetchImpl: typeof fetch = async (input) => {
+        urls.push(String(input));
+        if (String(input).endsWith('/ack')) return new Response('{"acked":0}', { status: 200 });
+        return new Response('{"wakes":[]}', { status: 200 });
+      };
+      const io = capture();
+      const code = await runReplyslip(['watch', '--once', '--key', 'rsw_default_test', ...extra], {
+        home,
+        env,
+        fetchImpl,
+        stdout: io.stdout,
+        stderr: io.stderr,
+      });
+      expect(code, io.err.join('\n')).toBe(0);
+      expect(urls.length).toBeGreaterThan(0);
+      for (const url of urls) expect(url.startsWith(`${expected}/`), url).toBe(true);
+    }
+  });
+
+  it('still requires a watcher key when --url is omitted', async () => {
+    const io = capture();
+    const fetchImpl: typeof fetch = async () => {
+      throw new Error('must not poll without a key');
+    };
+    const code = await runReplyslip(['watch', '--once'], { env: {}, fetchImpl, stdout: io.stdout, stderr: io.stderr });
+    expect(code).toBe(1);
+    expect(io.err.join('\n')).toContain('--key-file');
+  });
+
   it('sends the file key, prefers it over --key, and does not print it', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'replyslip-watch-'));
     const keyFile = path.join(home, 'watcher-box.key');

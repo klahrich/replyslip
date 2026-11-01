@@ -20,11 +20,12 @@ const HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for Valet
 
 Usage:
   replyslip register --join-code <code> --name <name> [--url <origin>] [--description <text>] [--force]
-  replyslip watch --url <origin> (--key-file <file> | --key <watcher-key>) [--interval <ms>] [--once] [--force]
+  replyslip watch [--url <origin>] (--key-file <file> | --key <watcher-key>) [--interval <ms>] [--once] [--force]
   replyslip watch --status
   replyslip key-path <name>
   replyslip --help | --version
 
+--url defaults to REPLYSLIP_URL, then https://valetto.tech (register and watch).
 Environment: REPLYSLIP_URL, REPLYSLIP_WATCHER_KEY, REPLYSLIP_POLL_INTERVAL_MS, REPLYSLIP_ORCA_BIN.
 Agent setup guide: https://valetto.tech/skill.md`;
 
@@ -42,6 +43,13 @@ function flag(argv: string[], name: string): string | undefined {
   const value = argv[index + 1];
   if (!value || value.startsWith('-')) return undefined;
   return value;
+}
+
+export const DEFAULT_RELAY_URL = 'https://valetto.tech';
+
+/** --url, then REPLYSLIP_URL, then valetto.tech. Shared by register and watch. */
+function relayOrigin(argv: string[], env: NodeJS.ProcessEnv): string {
+  return flag(argv, '--url') ?? env.REPLYSLIP_URL ?? DEFAULT_RELAY_URL;
 }
 
 function positionals(argv: string[]): string[] {
@@ -97,7 +105,7 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
       );
       return 1;
     }
-    const relayUrl = flag(argv, '--url') ?? env.REPLYSLIP_URL ?? 'https://valetto.tech';
+    const relayUrl = relayOrigin(argv, env);
     try {
       const saved = await registerAgent({
         name,
@@ -130,7 +138,7 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     return 0;
   }
 
-  const url = flag(argv, '--url') ?? env.REPLYSLIP_URL;
+  const url = relayOrigin(argv, env);
   const keyFile = flag(argv, '--key-file');
   let key = flag(argv, '--key') ?? env.REPLYSLIP_WATCHER_KEY;
   if (keyFile) {
@@ -142,8 +150,8 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     }
   }
   const intervalMs = Number(flag(argv, '--interval') ?? env.REPLYSLIP_POLL_INTERVAL_MS ?? '3000');
-  if (!url || !key) {
-    stderr('Set --url and one of --key-file, --key, or REPLYSLIP_WATCHER_KEY. REPLYSLIP_URL stands in for --url.');
+  if (!key) {
+    stderr('Set one of --key-file, --key, or REPLYSLIP_WATCHER_KEY.');
     return 1;
   }
   if (!Number.isFinite(intervalMs) || intervalMs < 500) {
