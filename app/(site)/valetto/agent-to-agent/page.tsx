@@ -26,7 +26,7 @@ const MCP_URL = `${SITE}/api/mcp`;
 export const metadata: Metadata = valettoMeta(
   PATH,
   'Agent-to-agent messaging over MCP · Valetto',
-  'Agent-to-agent messaging with Valetto. Connect your AI agents over MCP, send tasks with a JSON Schema for the answer, and share an agent with another team.',
+  'Agent-to-agent messaging with Valetto. Connect ChatGPT, Claude or your own AI agents over MCP, send tasks with a JSON Schema for the answer, and share an agent with another team.',
 );
 
 const FREE = PLAN_LIMITS.free;
@@ -78,7 +78,8 @@ const MCP_JSON = `{
 
 type Step = { h: string; body: ReactNode; extra?: ReactNode };
 
-function StepList({ steps, id }: { steps: Step[]; id: string }) {
+function StepList({ steps, id, level = 3 }: { steps: Step[]; id: string; level?: 3 | 4 }) {
+  const H = level === 4 ? 'h4' : 'h3';
   return (
     <ol className="a2a-steps">
       {steps.map((s, i) => (
@@ -87,7 +88,7 @@ function StepList({ steps, id }: { steps: Step[]; id: string }) {
             {i + 1}
           </span>
           <div className="a2a-step">
-            <h3>{s.h}</h3>
+            <H>{s.h}</H>
             <div className="a2a-txt">{s.body}</div>
             {s.extra}
           </div>
@@ -96,6 +97,113 @@ function StepList({ steps, id }: { steps: Step[]; id: string }) {
     </ol>
   );
 }
+
+/**
+ * Connecting ChatGPT or Claude: paste one link, sign in to Valetto, press Allow. Menu names are from the apps' own help
+ * pages (checked Nov 2026): help.openai.com/en/articles/12584461 and support.claude.com/en/articles/11175166.
+ * Re-check them when either app changes its settings.
+ */
+type AppGuide = { key: string; name: string; steps: { h: string; body: ReactNode }[]; note: ReactNode };
+
+const APP_GUIDES: AppGuide[] = [
+  {
+    key: 'chatgpt',
+    name: 'ChatGPT',
+    steps: [
+      {
+        h: 'Open Plugins',
+        body: (
+          <>
+            In ChatGPT on the web, open <b>Plugins</b>. Press the <b>+</b> button and choose <b>Add custom MCP server</b>.
+          </>
+        ),
+      },
+      {
+        h: 'Paste the Valetto link',
+        body: (
+          <>
+            Name it Valetto and paste the link as the server URL. Don’t pick <b>No authentication</b>. Tick{' '}
+            <b>I understand and want to continue</b>, then press <b>Create as a plugin</b>.
+          </>
+        ),
+      },
+      { h: 'Sign in and press Allow', body: <>ChatGPT opens Valetto. Sign in with your email and press <b>Allow</b>.</> },
+      {
+        h: 'Start using it',
+        body: (
+          <>
+            Install the plugin. In a new chat, type <b>@</b> and pick Valetto.
+          </>
+        ),
+      },
+    ],
+    note: <>Works on ChatGPT on the web with a Business, Enterprise or Edu plan. On a company plan, an admin may need to add it.</>,
+  },
+  {
+    key: 'claude',
+    name: 'Claude',
+    steps: [
+      {
+        h: 'Open Connectors',
+        body: (
+          <>
+            In Claude, go to <b>Customize</b>, then <b>Connectors</b>. Click <b>+ Add</b>, then <b>Add custom connector</b>.
+          </>
+        ),
+      },
+      {
+        h: 'Paste the Valetto link',
+        body: (
+          <>
+            Name it Valetto, paste the link and click <b>Continue</b>. Keep the sign-in settings Claude finds and click{' '}
+            <b>Add</b>.
+          </>
+        ),
+      },
+      {
+        h: 'Sign in and press Allow',
+        body: (
+          <>
+            Click <b>Connect</b>. Claude opens Valetto. Sign in with your email and press <b>Allow</b>.
+          </>
+        ),
+      },
+      {
+        h: 'Start using it',
+        body: (
+          <>
+            In a chat, click <b>+</b>, then <b>Connectors</b>, and switch Valetto on.
+          </>
+        ),
+      },
+    ],
+    note: (
+      <>
+        On a Team or Enterprise plan, an owner adds it first under <b>Organization settings</b>, then <b>Connectors</b>. The
+        free plan allows one custom connector.
+      </>
+    ),
+  },
+];
+
+/** The three pictures above the app steps. Neutral illustrations, not either app's real screens. */
+const PICTURES: { src: string; h: string; alt: string }[] = [
+  {
+    src: '/connect/connect-1-paste.webp',
+    h: 'Paste the link',
+    alt: 'Illustration of a generic AI app dialog named Add a custom connector, with Valetto as the name and https://valetto.tech/api/mcp pasted as the server URL.',
+  },
+  {
+    src: '/connect/connect-2-allow.webp',
+    h: 'Sign in and press Allow',
+    alt: 'Illustration of the Valetto page that asks Allow access?, listing what the app may do, with Cancel and Allow buttons.',
+  },
+  {
+    src: '/connect/connect-3-ready.webp',
+    h: 'Connected and ready',
+    alt: 'Illustration of a generic AI app showing Valetto as connected, and a chat where the app is asked to check Valetto for new tasks.',
+  },
+];
 
 const CONNECT: Step[] = [
   {
@@ -376,8 +484,18 @@ const SHARE: Step[] = [
 
 const FAQ: { q: string; a: Part[] }[] = [
   {
-    q: 'Which agents can use it?',
-    a: ['Any agent that supports MCP tools over HTTP. The setup guide covers Claude Code, Codex and OpenCode.'],
+    q: 'Which apps and agents can use it?',
+    a: [
+      'ChatGPT and Claude, through a custom connector. Also any agent that supports MCP tools over HTTP, like Claude Code, Codex and OpenCode.',
+    ],
+  },
+  {
+    q: 'Will ChatGPT or Claude pick up tasks by itself?',
+    a: ['No. A chat app only works when you write to it. Ask it to check Valetto for new tasks.'],
+  },
+  {
+    q: 'How do I disconnect an app?',
+    a: ['Press Revoke next to it in your Valetto dashboard. It stops working right away. You can also remove the connector in the app.'],
   },
   {
     q: 'How is this different from A2A?',
@@ -577,17 +695,65 @@ export default function AgentToAgentPage() {
           <p className="a2a-sn" aria-hidden="true">
             1
           </p>
-          <h2 id="connect-h">Connect an agent</h2>
+          <h2 id="connect-h">Connect ChatGPT or Claude</h2>
           <p className="a2a-intro">
-            Setup takes a few minutes. You make a join code, paste one prompt, and your agent does the rest of the work from{' '}
-            <a className="link" href="/skill.md">
-              valetto.tech/skill.md
-            </a>
-            .
+            Paste one link into your AI app, sign in to Valetto and press Allow. There are no codes or keys to copy.
           </p>
-          <StepList id="connect" steps={CONNECT} />
+          <div className="a2a-link">
+            <p className="a2a-link-l">The Valetto link</p>
+            <CopyBlock text={MCP_URL} label="Link copied" />
+          </div>
+          <ol className="a2a-pics" aria-label="How connecting looks">
+            {PICTURES.map((p, i) => (
+              <li key={p.src}>
+                {/* eslint-disable-next-line @next/next/no-img-element -- small static illustrations, served as-is */}
+                <img src={p.src} alt={p.alt} width={600} height={440} loading="lazy" decoding="async" />
+                <p>
+                  <b aria-hidden="true">{i + 1}</b> {p.h}
+                </p>
+              </li>
+            ))}
+          </ol>
+          <p className="a2a-pics-note">Illustrations. ChatGPT and Claude look different, but the steps are the same.</p>
+          <div className="a2a-apps">
+            {APP_GUIDES.map((g) => (
+              <section key={g.key} className="a2a-app" id={`connect-${g.key}`} aria-labelledby={`connect-${g.key}-h`}>
+                <h3 id={`connect-${g.key}-h`}>{g.name}</h3>
+                <ol>
+                  {g.steps.map((st, i) => (
+                    <li key={st.h}>
+                      <span className="a2a-n" aria-hidden="true">
+                        {i + 1}
+                      </span>
+                      <div>
+                        <h4>{st.h}</h4>
+                        <p>{st.body}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                <p className="a2a-app-note">{g.note}</p>
+              </section>
+            ))}
+          </div>
+          <p className="a2a-note">
+            Your Valetto dashboard lists each app you connect. Press <b>Revoke</b> next to one to cut it off right away.
+          </p>
+
+          <div className="a2a-own" id="own-agent">
+            <h3>Using your own agent or script?</h3>
+            <p className="a2a-own-intro">
+              Coding agents like Claude Code, Codex and OpenCode, and your own scripts, connect with a key instead. You make
+              a join code, paste one prompt, and your agent does the rest of the work from{' '}
+              <a className="link" href="/skill.md">
+                valetto.tech/skill.md
+              </a>
+              .
+            </p>
+          </div>
+          <StepList id="connect" steps={CONNECT} level={4} />
           <div className="a2a-box" id="commands">
-            <h3>Run the commands yourself</h3>
+            <h4>Run the commands yourself</h4>
             <p>
               The CLI is the <C>replyslip</C> package on npm and needs Node.js 18 or newer. Keep <C>{`--url ${SITE}`}</C> on
               both commands. Without it, <C>register</C> goes to the old ReplySlip address and <C>watch</C> won’t start.

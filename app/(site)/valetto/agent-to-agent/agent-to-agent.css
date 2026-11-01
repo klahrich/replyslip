@@ -63,7 +63,8 @@
 .a2a .a2a-steps>li{display:grid;grid-template-columns:24px minmax(0,1fr);gap:16px;scroll-margin-top:24px}
 .a2a .a2a-n{margin-top:1px}
 .a2a .a2a-step{min-width:0}
-.a2a .a2a-step h3{font-size:var(--s-body);font-weight:700;line-height:1.3}
+.a2a .a2a-step h4,.a2a .a2a-box h4{margin:0}
+.a2a .a2a-step h3,.a2a .a2a-step h4{font-size:var(--s-body);font-weight:700;line-height:1.3}
 .a2a .a2a-txt{margin-top:6px;color:var(--ink);line-height:1.55}
 .a2a .a2a-txt p+p{margin-top:10px}
 .a2a .a2a-txt b{font-weight:600}
@@ -71,7 +72,7 @@
 .a2a .a2a-code{margin:16px 0 0;background:var(--paper);color:var(--paper-ink);border-radius:6px;padding:16px 18px;overflow-x:auto}
 .a2a .a2a-code pre{margin:0;white-space:pre;font-size:.8125rem;line-height:1.6}
 .a2a .a2a-box{margin-top:clamp(40px,5vw,56px);padding:clamp(18px,3vw,28px);border-radius:8px;background:var(--surface)}
-.a2a .a2a-box h3,.a2a .a2a-tools h3{font-size:var(--s-body);font-weight:700}
+.a2a .a2a-box h3,.a2a .a2a-box h4,.a2a .a2a-tools h3{font-size:var(--s-body);font-weight:700}
 .a2a .a2a-box>p{margin-top:8px;color:var(--muted);line-height:1.55}
 .a2a .a2a-box .hw-cp{margin-top:12px}
 .a2a .a2a-cmd{margin-top:18px}
@@ -86,6 +87,38 @@
 .a2a .a2a-table caption{text-align:left;font-weight:600;color:var(--muted);padding-bottom:6px}
 .a2a .a2a-table th,.a2a .a2a-table td{text-align:left;vertical-align:top;padding:9px 0;border-top:1px solid var(--surface-2);line-height:1.45}
 .a2a .a2a-table th{width:13.5em;padding-right:16px;font-weight:500}
+
+/* connect ChatGPT or Claude: the link with Copy, three illustrations, then one short step list per app */
+.a2a .a2a-link{margin-top:clamp(24px,3.5vw,32px);max-width:560px}
+.a2a .a2a-link-l{margin:0 0 8px;font-size:var(--s-small);font-weight:600;color:var(--ink)}
+.a2a .a2a-link .hw-cp{margin-top:0;flex-direction:row;align-items:center;gap:12px;padding:8px 8px 8px 16px}
+.a2a .a2a-link .hw-cp-t{font-size:.9375rem;overflow-wrap:normal;white-space:nowrap;overflow-x:auto}
+.a2a .a2a-pics{list-style:none;margin:clamp(32px,4vw,44px) 0 0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.a2a .a2a-pics img{display:block;width:100%;height:auto;border-radius:8px;box-shadow:0 0 0 1px var(--surface-2)}
+.a2a .a2a-pics p{margin-top:10px;display:flex;align-items:center;gap:8px;font-size:var(--s-small);font-weight:600;line-height:1.3}
+.a2a .a2a-pics b{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-size:.6875rem;flex:none}
+.a2a .a2a-pics-note{margin-top:12px;font-size:var(--s-small);color:var(--muted)}
+.a2a .a2a-apps{margin-top:clamp(32px,4vw,44px);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.a2a .a2a-app{padding:clamp(18px,2.5vw,24px);border-radius:8px;background:var(--surface)}
+.a2a .a2a-app h3{margin:0;font-family:var(--vt-mono);font-size:1.0625rem;font-weight:500;letter-spacing:-.03em}
+.a2a .a2a-app ol{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:16px}
+.a2a .a2a-app li{display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px}
+.a2a .a2a-app h4{margin:0;font-size:var(--s-body);font-weight:700;line-height:1.3}
+.a2a .a2a-app li p{margin:4px 0 0;line-height:1.5}
+.a2a .a2a-app li b{font-weight:600}
+.a2a .a2a-app-note{margin-top:18px;padding-top:14px;border-top:1px solid var(--surface-2);font-size:var(--s-small);line-height:1.5;color:var(--muted)}
+.a2a .a2a-app-note b{font-weight:600;color:var(--ink)}
+.a2a .a2a-note b{font-weight:600;color:var(--ink)}
+.a2a .a2a-own{margin-top:clamp(56px,7vw,80px);padding-top:clamp(28px,4vw,40px);border-top:1px solid var(--surface-2)}
+.a2a .a2a-own h3{font-size:clamp(1.25rem,1.1rem + .6vw,1.5rem);font-weight:700;line-height:1.25}
+.a2a .a2a-own-intro{margin-top:10px;line-height:1.55;max-width:38em;color:var(--muted)}
+.a2a .a2a-own+.a2a-steps{margin-top:clamp(24px,3vw,32px)}
+@media (max-width:759px){
+  .a2a .a2a-apps{grid-template-columns:1fr}
+  .a2a .a2a-pics{grid-template-columns:1fr;gap:20px}
+  .a2a .a2a-pics img{max-width:440px}
+}
+@media (max-width:480px){.a2a .a2a-link .hw-cp{gap:10px;padding-left:12px}.a2a .a2a-link .hw-cp-t{font-size:.8125rem}}
 
 /* questions */
 .a2a .a2a-faq dl{margin:24px 0 0;display:grid;gap:22px}
