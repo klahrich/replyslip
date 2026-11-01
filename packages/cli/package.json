@@ -1,10 +1,10 @@
 {
   "name": "replyslip",
-  "version": "0.1.1",
-  "description": "ReplySlip watcher and register CLI: connect local AI agents (Claude Code, Codex, herdr, Orca) to ReplySlip async tasks and messages.",
+  "version": "0.1.2",
+  "description": "Valetto watcher and register CLI: connect local AI agents (Claude Code, Codex, herdr, Orca) to Valetto async tasks and messages.",
   "license": "Apache-2.0",
   "author": "ClaireVue",
-  "homepage": "https://replyslip.com",
+  "homepage": "https://valetto.tech",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/klahrich/replyslip.git",

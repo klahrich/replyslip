@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { Dashboard } from '@/components/dashboard/Dashboard';
 import { currentUser } from '@/components/dashboard/session';
-import { SITE_URL } from '@/components/site/seo';
+import { VALETTO_URL } from '@/components/site/valetto/seo';
 import { agentDocs } from '@/lib/agent-docs';
 import { FREE_GUEST_WORKSPACES, workspacePlanUsage } from '@/lib/plans';
 
@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic';
 export default async function DashboardPage() {
   const user = await currentUser();
   if (!user) redirect('/sign-in');
-  const origin = SITE_URL;
+  // Join-code prompts and doc links point at valetto.tech, the production origin.
+  const origin = VALETTO_URL;
 
   if (!user.workspace) {
     // verify-code creates the workspace on first sign-in, so this should not happen.

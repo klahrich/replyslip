@@ -221,7 +221,7 @@ export function JoinCodes({
   );
 }
 
-const PROMPT_REST = 'and set yourself up on ReplySlip. Register with this join code: ';
+const PROMPT_REST = 'and set yourself up on Valetto. Register with this join code: ';
 
 function setupPrompt(skillUrl: string, code: string): string {
   return `Read ${skillUrl} ${PROMPT_REST}${code}`;

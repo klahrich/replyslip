@@ -23,7 +23,7 @@ describe('replyslip --help and --version', () => {
       expect(await runReplyslip(argv, { ...io, fetchImpl, env: {} })).toBe(0);
       expect(io.out.join('\n')).toContain('Usage:');
       expect(io.out.join('\n')).toContain('replyslip watch');
-      expect(io.out.join('\n')).toContain('https://replyslip.com/skill.md');
+      expect(io.out.join('\n')).toContain('https://valetto.tech/skill.md');
       expect(io.err).toEqual([]);
     }
   });
