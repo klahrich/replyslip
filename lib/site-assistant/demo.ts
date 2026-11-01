@@ -27,6 +27,7 @@ import {
 import { SITE_DEMO_LINK_TTL_DAYS, SITE_DEMO_RETENTION_DAYS, SITE_MESSAGE_MAX_CHARS } from './config';
 import type { SiteLlmTransport } from './llm';
 import { bannerText, cappedReply, demoNote, noticeText, replyLanguage } from './replies';
+import { detectVisitorLanguage } from './keywords';
 import { handoffReason } from './rules';
 
 /**
@@ -68,6 +69,7 @@ const businessColumns = {
   dailyCostCapMicroUsd: siteBusinesses.dailyCostCapMicroUsd,
   tileColor: siteBusinesses.tileColor,
   language: siteBusinesses.language,
+  suggestedQuestions: siteBusinesses.suggestedQuestions,
   hasDesktopShot: sql<boolean>`${siteBusinesses.desktopShot} is not null`,
   hasMobileShot: sql<boolean>`${siteBusinesses.mobileShot} is not null`,
 };
@@ -83,6 +85,7 @@ export type DemoBusiness = Pick<
   | 'dailyCostCapMicroUsd'
   | 'tileColor'
   | 'language'
+  | 'suggestedQuestions'
 > & { hasDesktopShot: boolean; hasMobileShot: boolean };
 
 export type ResolvedDemo = { link: SiteDemoLinkRow; business: DemoBusiness };
@@ -160,8 +163,34 @@ async function findConversation(demo: ResolvedDemo, visitor: string) {
 // Response shapes.
 
 /**
- * One checked suggestion. Each `position` has up to one row per language (en, fr), the second a translation of
- * the first; the page keeps the rows in its own language. A tap sends the row's `id`, whichever language it is.
+ * One suggestion chip. `position` is the question's index in site_businesses.suggested_questions, so it stays the
+ * same if a later version adds a translation at the same position. A tap sends `question` as a normal typed message
+ * (POST .../messages with `text`): it is answered live from the business's context, with the same rules and limits.
+ */
+export type DemoSuggestion = { position: number; language: 'en' | 'fr'; question: string };
+
+/**
+ * The business's suggested questions, each tagged with its own language so the page shows a chip only in that
+ * language (no translation: RedBot writes one list, in one language). The language comes from the question itself
+ * when the cheap detector is sure, else from the whole list, else from the business's site language.
+ */
+export function demoSuggestions(business: Pick<DemoBusiness, 'suggestedQuestions' | 'language'>): DemoSuggestion[] {
+  const questions = Array.isArray(business.suggestedQuestions)
+    ? business.suggestedQuestions.map((q, position) => ({ position, question: typeof q === 'string' ? q.trim() : '' }))
+    : [];
+  const listed = questions.filter((q) => q.question !== '' && q.question.length <= SITE_MESSAGE_MAX_CHARS);
+  const sure = (text: string) => {
+    const language = detectVisitorLanguage(text);
+    return language === 'en' || language === 'fr' ? language : null;
+  };
+  const fallback = sure(listed.map((q) => q.question).join('\n')) ?? (business.language === 'fr' ? 'fr' : 'en');
+  return listed.map(({ position, question }) => ({ position, language: sure(question) ?? fallback, question }));
+}
+
+/**
+ * @deprecated Stored, checked answers (site_suggested_answers), for the page deployed before `suggestions`, which
+ * shows a chip's stored answer itself. Kept until LandingBot's page sends chip taps as typed messages; then this,
+ * the `suggested_question_id` tap and the table can go.
  */
 export type PublicSuggestedQuestion = {
   id: string;
@@ -172,6 +201,7 @@ export type PublicSuggestedQuestion = {
   checked_at: string;
 };
 
+/** @deprecated See PublicSuggestedQuestion. */
 async function checkedSuggestions(businessId: string): Promise<PublicSuggestedQuestion[]> {
   const rows = await getDb()
     .select()
@@ -235,9 +265,10 @@ async function conversationMessages(conversationId: string, businessId: string) 
 }
 
 /**
- * GET /api/v1/s/demo/:token. LandingBot's DemoConversation: business, banner, suggested_questions (checked rows
- * only) and this visitor's messages (from the visitor cookie; none without one). Plus notice, expires_at and
- * message_max_chars, which the page may ignore.
+ * GET /api/v1/s/demo/:token. LandingBot's DemoConversation: business, banner, suggestions (the business's own
+ * suggested questions, answered live when tapped) and this visitor's messages (from the visitor cookie; none without
+ * one). Plus notice, expires_at and message_max_chars, which the page may ignore. `suggested_questions` (stored,
+ * checked answers) is deprecated and stays only for the page deployed before `suggestions`.
  */
 export async function demoView(demo: ResolvedDemo, visitorValue: string | null) {
   const { business, link } = demo;
@@ -251,6 +282,8 @@ export async function demoView(demo: ResolvedDemo, visitorValue: string | null) 
       language: business.language,
     },
     banner: bannerText(business.displayName),
+    suggestions: demoSuggestions(business),
+    /** @deprecated Use `suggestions`; a tap is then a typed message. */
     suggested_questions: await checkedSuggestions(business.id),
     messages: rows.map((row) => publicMessage(row, business)),
     notice: noticeText(),
@@ -264,6 +297,7 @@ export async function demoView(demo: ResolvedDemo, visitorValue: string | null) 
 
 export type PostMessageInput =
   | { clientMessageId: string; text: string; suggestedQuestionId?: undefined }
+  /** @deprecated The stored-answer tap of the page deployed before `suggestions`. A chip tap now sends `text`. */
   | { clientMessageId: string; suggestedQuestionId: string; text?: undefined };
 
 export type PostMessageDeps = {
@@ -435,7 +469,8 @@ async function claimRequest(demo: ResolvedDemo, visitorValue: string, clientMess
  *
  * A daily cap is 429 daily_limit and keeps no rows, so the same id can go through tomorrow. A throw mid-reply
  * gives back the counts and the cost reservation and marks the request failed, so a retry can take it over.
- * Suggested-question taps are never capped (no model call).
+ * A suggestion chip tap is a typed message (`text`): live answer, same caps. Only the deprecated stored-answer tap
+ * (`suggestedQuestionId`, from the page deployed before `suggestions`) skips the model and the caps.
  */
 export async function postDemoMessage(
   demo: ResolvedDemo,
@@ -494,7 +529,7 @@ export async function postDemoMessage(
     let result: SiteAnswerResult;
     let suggestedDecidedBy: string | null = null;
     if (suggestion) {
-      // A tap on a Karim-checked suggestion: the stored answer, no model call, no cap.
+      // Deprecated: a tap on a Karim-checked stored answer (old page). No model call, no cap.
       result = {
         status: suggestion.status as SiteAnswerResult['status'],
         body: suggestion.answer,

@@ -14,7 +14,11 @@ export type ParsedContext = {
   suggestedQuestions: string[];
 };
 
-const SUGGESTED_HEADING = /^(#{1,6})\s*(suggested questions|questions sugg[ée]r[ée]es)\b.*$/i;
+/**
+ * "Suggested questions", "Suggested customer questions (for the assistant)" (RedBot's newer files) or the French
+ * "Questions suggérées". The rest of the heading line is ignored.
+ */
+const SUGGESTED_HEADING = /^(#{1,6})\s*(suggested (?:customer )?questions|questions sugg[ée]r[ée]es)\b.*$/i;
 
 function cleanListItem(line: string): string | null {
   const m = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/.exec(line);
