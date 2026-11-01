@@ -31,12 +31,22 @@ export type SiteLlmCallResult =
   | { kind: 'error'; detail: string; inputTokens: number; outputTokens: number; httpStatus?: number; errorCode?: string }
   | { kind: 'timeout' };
 
-export function buildResponsesBody(config: SiteLlmConfig, instructions: string, input: string): Record<string, unknown> {
+/** The strict JSON schema the model must answer with. Defaults to the visitor answer (SITE_ANSWER_JSON_SCHEMA). */
+export type SiteLlmFormat = { name: string; schema: Record<string, unknown> };
+
+const SITE_ANSWER_FORMAT: SiteLlmFormat = { name: 'site_answer', schema: SITE_ANSWER_JSON_SCHEMA };
+
+export function buildResponsesBody(
+  config: SiteLlmConfig,
+  instructions: string,
+  input: string,
+  format: SiteLlmFormat = SITE_ANSWER_FORMAT,
+): Record<string, unknown> {
   return {
     model: config.model,
     instructions,
     input: [{ role: 'user', content: [{ type: 'input_text', text: input }] }],
-    text: { format: { type: 'json_schema', name: 'site_answer', strict: true, schema: SITE_ANSWER_JSON_SCHEMA } },
+    text: { format: { type: 'json_schema', name: format.name, strict: true, schema: format.schema } },
     max_output_tokens: config.maxOutputTokens,
     ...(config.reasoningEffort ? { reasoning: { effort: config.reasoningEffort } } : {}),
     store: false,
@@ -64,6 +74,7 @@ export async function callSiteLlm(
   instructions: string,
   input: string,
   transport: SiteLlmTransport = currentSiteLlmTransport(),
+  format: SiteLlmFormat = SITE_ANSWER_FORMAT,
 ): Promise<SiteLlmCallResult> {
   if (!config.apiKey) return { kind: 'error', detail: 'SITE_LLM_API_KEY is not set', inputTokens: 0, outputTokens: 0 };
   const controller = new AbortController();
@@ -77,7 +88,7 @@ export async function callSiteLlm(
     const call = transport({
       url: `${config.baseUrl}/responses`,
       headers: { authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify(buildResponsesBody(config, instructions, input)),
+      body: JSON.stringify(buildResponsesBody(config, instructions, input, format)),
       signal: controller.signal,
     });
     // A transport that ignores the signal still loses the race.

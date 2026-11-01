@@ -6,14 +6,21 @@
  *   npx tsx scripts/site-demo-import.ts --db-name <db> --list-unchecked [--slug <slug>]
  *   npx tsx scripts/site-demo-import.ts --db-name <db> --check <id> [--check <id> ...] | --uncheck <id>
  *   npx tsx scripts/site-demo-import.ts --db-name <db> --revoke-links <slug>
+ *   npx tsx scripts/site-demo-import.ts --db-name <db> --backfill-translations [--slug <slug>] [--dry-run]
  *
  * DATABASE_URL comes from the environment (or .env); --db-name must match its database. Demo URLs are appended to
  * --link-file (default ~/.valetto-site-demo-links.txt, mode 600) and never printed. Base URL: SITE_DEMO_BASE_URL,
  * default https://valetto.tech. Without SITE_LLM_API_KEY the suggested answers are skipped, and the run says so.
+ *
+ * --backfill-translations adds the missing English or French row for each suggested question that has only one
+ * (businesses imported before both languages were generated). New rows are unchecked; existing rows, checked or
+ * not, are never changed. Safe to re-run: a second run finds nothing to add. --dry-run lists what it would add,
+ * with no model calls and no writes.
  */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  backfillSuggestedTranslations,
   importRedbotBusinesses,
   listUncheckedSuggestedAnswers,
   loadRedbotBusinesses,
@@ -44,7 +51,7 @@ async function main(): Promise<void> {
       const rows = await listUncheckedSuggestedAnswers(db, str('slug'));
       if (rows.length === 0) console.log('No unchecked suggested answers.');
       for (const row of rows) {
-        console.log(`\n[${row.id}] ${row.slug} #${row.position + 1} (${row.status}, ${row.decidedBy})`);
+        console.log(`\n[${row.id}] ${row.slug} #${row.position + 1} ${row.language} (${row.status}, ${row.decidedBy})`);
         console.log(`Q: ${row.question}`);
         console.log(`A: ${row.answer}`);
         for (const source of row.sourcesKept) console.log(`   source: "${source}"`);
@@ -60,6 +67,18 @@ async function main(): Promise<void> {
           const ok = await setSuggestedAnswerChecked(db, id, checked);
           console.log(`${id}: ${ok ? (checked ? 'checked' : 'unchecked') : 'not found'}`);
         }
+      }
+      return;
+    }
+    if (flags.has('backfill-translations')) {
+      const dryRun = flags.has('dry-run');
+      const rows = await backfillSuggestedTranslations(db, { slug: str('slug'), dryRun, log: (line) => console.log(line) });
+      const count = (outcome: string) => rows.filter((row) => row.outcome === outcome).length;
+      if (rows.length === 0) console.log('Nothing to backfill: every position has both languages.');
+      else if (dryRun) console.log(`Dry run: ${rows.length} row(s) would be generated. Nothing was written.`);
+      else {
+        console.log(`Done: ${count('generated')} generated (unchecked), ${count('failed')} failed, ${count('exists')} already there.`);
+        console.log('Next: --list-unchecked, then --check <id> for each answer you approve.');
       }
       return;
     }

@@ -159,8 +159,13 @@ async function findConversation(demo: ResolvedDemo, visitor: string) {
 // ---------------------------------------------------------------------------------------------------------------
 // Response shapes.
 
+/**
+ * One checked suggestion. Each `position` has up to one row per language (en, fr), the second a translation of
+ * the first; the page keeps the rows in its own language. A tap sends the row's `id`, whichever language it is.
+ */
 export type PublicSuggestedQuestion = {
   id: string;
+  position: number;
   question: string;
   answer: string;
   language: string;
@@ -172,9 +177,10 @@ async function checkedSuggestions(businessId: string): Promise<PublicSuggestedQu
     .select()
     .from(siteSuggestedAnswers)
     .where(and(eq(siteSuggestedAnswers.businessId, businessId), isNotNull(siteSuggestedAnswers.checkedAt)))
-    .orderBy(asc(siteSuggestedAnswers.position));
+    .orderBy(asc(siteSuggestedAnswers.position), asc(siteSuggestedAnswers.language));
   return rows.map((row) => ({
     id: row.id,
+    position: row.position,
     question: row.question,
     answer: row.answer,
     language: row.language,
