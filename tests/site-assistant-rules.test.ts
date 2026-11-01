@@ -6,7 +6,7 @@ import { parseContextMarkdown } from '@/lib/site-assistant/context';
 import { detectVisitorLanguage, findOwnerKeyword, nonLatinLetterShare, guessLanguage, SITE_KEYWORDS } from '@/lib/site-assistant/keywords';
 import { buildResponsesBody } from '@/lib/site-assistant/llm';
 import { handoffReason } from '@/lib/site-assistant/rules';
-import { bannerText, cappedReply, demoNote, needsOwnerReply, noticeText, offTopicReply } from '@/lib/site-assistant/replies';
+import { bannerText, cappedReply, demoNote, endSentence, needsOwnerReply, noticeText, offTopicReply } from '@/lib/site-assistant/replies';
 import { SITE_ANSWER_JSON_SCHEMA } from '@/lib/site-assistant/schema';
 import { answer, FIXTURE_DIR, fakeModel, MAPLE_CONTEXT, NO_MODEL, responsesPayload, TEST_LLM_CONFIG } from './site-fixtures';
 
@@ -298,6 +298,41 @@ describe('fixed text', () => {
       en: "Demo built by Valetto from Maple's public pages. Not operated by Maple. Answers may be wrong.",
       fr: 'Démo créée par Valetto à partir des pages publiques de Maple. Non exploitée par Maple. Les réponses peuvent être erronées.',
     });
+  });
+
+  it('ends a sentence on a business name with one period, even when the name ends in one', () => {
+    expect(endSentence('Maple')).toBe('Maple.');
+    expect(endSentence('613 Fencing Inc.')).toBe('613 Fencing Inc.');
+    expect(endSentence('613 Fencing Inc. ')).toBe('613 Fencing Inc.');
+  });
+
+  it('does not double the period in the banner when the name ends in one', () => {
+    expect(bannerText('613 Fencing Inc.')).toEqual({
+      en: "Demo built by Valetto from 613 Fencing Inc.'s public pages. Not operated by 613 Fencing Inc. Answers may be wrong.",
+      fr: 'Démo créée par Valetto à partir des pages publiques de 613 Fencing Inc. Non exploitée par 613 Fencing Inc. Les réponses peuvent être erronées.',
+    });
+  });
+
+  it('does not double the period in the off-topic reply when the name ends in one', () => {
+    expect(offTopicReply('en', '613 Fencing Inc.')).toBe('I can only help with questions about 613 Fencing Inc.');
+    expect(offTopicReply('fr', '613 Fencing Inc.')).toBe('Je peux seulement répondre aux questions sur 613 Fencing Inc.');
+    expect(offTopicReply('en', 'Maple')).toBe('I can only help with questions about Maple.');
+    expect(offTopicReply('fr', 'Maple')).toBe('Je peux seulement répondre aux questions sur Maple.');
+  });
+
+  it('does not double the period in the demo notes when the name ends in one', () => {
+    expect(demoNote('owner_topic', 'en', '613 Fencing Inc.')).toMatch(/^Prices, availability, bookings and complaints always go straight to 613 Fencing Inc\. On the live site/);
+    expect(demoNote('owner_topic', 'fr', '613 Fencing Inc.')).toMatch(/^Les questions de prix, de disponibilités, de réservations et de plaintes vont directement à 613 Fencing Inc\. Sur le vrai site/);
+    expect(demoNote('other_language', 'en', '613 Fencing Inc.')).toMatch(/^I can chat in English and French\. For other languages, I'd pass your question to 613 Fencing Inc\. On the live site/);
+    expect(demoNote('other_language', 'fr', '613 Fencing Inc.')).toMatch(/^Je peux discuter en français et en anglais\. Pour les autres langues, je transmettrais votre question à 613 Fencing Inc\. Sur le vrai site/);
+    expect(demoNote('owner_topic', 'en', 'Maple')).toMatch(/go straight to Maple\. On the live site/);
+    expect(demoNote('other_language', 'fr', 'Maple')).toMatch(/question à Maple\. Sur le vrai site/);
+    for (const reason of ['owner_topic', 'not_in_context', 'other_language', 'check_failed'] as const) {
+      for (const language of ['en', 'fr'] as const) {
+        const text = demoNote(reason, language, '613 Fencing Inc.');
+        expect(text, text).not.toContain('..');
+      }
+    }
   });
 
   it('never asks the visitor for contact details', () => {
