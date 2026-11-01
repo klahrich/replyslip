@@ -267,7 +267,9 @@ npm run dev
 
 The app listens on `http://localhost:3000`. With `RESEND_API_KEY` empty, the sign-in code is in the dev server log.
 
-`npm test` does not read `.env`. `vitest.config.ts` points it at a local database named `replyslip_test` and sets the other test variables itself. Create that database before running tests.
+`npm test` does not read `.env`. `vitest.config.ts` sets the test variables itself. Each run creates its own database on the local server at `127.0.0.1:5432` (role `replyslip`, password `replyslip`, which needs `CREATEDB`), named `replyslip_test_<pid>_<random>`. `tests/global-setup.ts` migrates it before the tests and drops it afterwards, also when the tests fail. A run that was killed before teardown leaves its database behind; the next run on the same machine drops it when that pid is gone. Several runs can go at once without sharing rows.
+
+To use one existing database instead, set `TEST_DATABASE_URL`, for example `TEST_DATABASE_URL=postgres://replyslip:replyslip@127.0.0.1:5432/replyslip_test npm test`. That database is migrated but never created or dropped, and parallel runs against it share rows again.
 
 | Script | Command |
 | --- | --- |

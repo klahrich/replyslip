@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { defineConfig } from 'vitest/config';
+import { testDatabase } from './tests/test-database';
 
-const TEST_DATABASE_URL = 'postgres://replyslip:replyslip@127.0.0.1:5432/replyslip_test';
+// A fresh database per run (tests/global-setup.ts creates, migrates, and drops it). TEST_DATABASE_URL overrides.
+const TEST_DATABASE_URL = testDatabase().url;
 // Fixtures only. They decrypt data and sign unsubscribe links in the test suite, not production secrets.
 const TEST_ENCRYPTION_KEY = 'mhcGYy/QQSaUWHD/IIlKtlSADRzkjC+s70BxMUduK2w=';
 const TEST_UNSUBSCRIBE_SECRET = 'test-unsubscribe-secret';
