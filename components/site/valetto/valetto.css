@@ -1,24 +1,32 @@
 /* Valetto preview (/valetto). Reuses the landing tokens, glow and type; everything is scoped under .vt.
    Narrow column: content holds to 960px. Motion never pins or locks scroll; content is visible without script. */
 .vt{--m:max(var(--m-edge),calc((100vw - 960px) / 2))}
+/* type: Bricolage Grotesque for text, Martian Mono for the hero headline, wordmark, nav, badge and URL bar
+   (fonts loaded in app/(site)/valetto/layout.tsx). The wrapper only carries the font variables. */
+.vt-type{display:contents}
+.vt{--font:var(--font-vt-sans),ui-sans-serif,system-ui,sans-serif;--vt-mono:var(--font-vt-mono),ui-monospace,monospace;font-family:var(--font)}
+.vt .mark,.vt .top nav,.vt-badge,.vt-url{font-family:var(--vt-mono)}
+.vt .mark{letter-spacing:-.04em}
+.vt .top nav{font-variation-settings:"wdth" 87.5;letter-spacing:-.02em}
+.vt-url{letter-spacing:-.02em}
 .vt .top nav a.go{color:var(--accent)}
 
 /* hero */
 .vt-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:clamp(32px,5vw,72px);align-items:center;padding:clamp(36px,7vh,72px) var(--m) 0}
-.vt-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 12px 5px 10px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:999px;font-size:.8125rem;color:var(--accent);background:color-mix(in srgb,var(--bg) 60%,transparent)}
+.vt-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 12px 5px 10px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:999px;font-size:.75rem;font-variation-settings:"wdth" 87.5;letter-spacing:-.02em;color:var(--accent);background:color-mix(in srgb,var(--bg) 60%,transparent)}
 .vt-badge-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
-.vt-hero h1{margin-top:22px;font-size:clamp(2.125rem,1.2rem + 3vw,3.5rem);line-height:1.04;letter-spacing:-.03em;font-weight:500}
+.vt-hero h1{margin-top:22px;font-family:var(--vt-mono);font-stretch:87.5%;font-variation-settings:"wdth" 87.5;font-size:clamp(2.375rem,1.2rem + 4.2vw,4.25rem);line-height:1.04;letter-spacing:-.05em;font-weight:450}
 .vt-hero h1 .l{display:block}
 .vt-hero h1 .vt-dim{color:var(--accent)}
-.vt-sub{margin-top:22px;font-size:var(--s-lead);line-height:1.4;max-width:28em;letter-spacing:-.005em}
-.vt-eg{margin-top:10px;font-size:var(--s-small);color:var(--muted)}
+/* the second sentence: a medium sage line in the text face, so only the first sentence reads big */
+.vt-hero h1 .vt-h1-2{margin-top:14px;font-family:var(--font);font-stretch:normal;font-variation-settings:"opsz" 48;font-size:clamp(1.375rem,1.1rem + 1.1vw,1.875rem);line-height:1.2;font-weight:500;letter-spacing:-.02em}
+.vt-sub{margin-top:18px;font-size:clamp(.9375rem,.9rem + .2vw,1.0625rem);line-height:1.5;max-width:30em;letter-spacing:-.01em;text-wrap:balance;color:color-mix(in srgb,var(--ink) 78%,var(--muted))}
 .vt-cta{margin-top:28px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 24px}
 .vt-btn{display:inline-flex;align-items:center;text-decoration:none}
 .vt-cta-2{font-size:var(--s-small);font-weight:500}
 @media (max-width:859px){
   .vt-hero{grid-template-columns:1fr}
   .vt-hero-stage{margin-top:44px;justify-self:center}
-  .vt-sub{font-size:var(--s-body);line-height:1.5}
 }
 @media (max-width:420px){.vt .top nav li:not(:last-child){display:none}}
 
@@ -190,7 +198,7 @@
 .vt-cap-row{display:flex;justify-content:space-between}
 .vt-cap-bar{margin-top:10px;height:10px;border-radius:5px;background:var(--paper-2);overflow:hidden}
 .vt-cap-bar i{display:block;height:100%;width:70%;background:var(--dash-accent);border-radius:5px}
-.vt-revoke{display:flex;justify-content:space-between;align-items:center;gap:12px;font-family:var(--mono);font-size:.8125rem}
+.vt-revoke{display:flex;justify-content:space-between;align-items:center;gap:12px;font-family:var(--vt-mono);font-size:.8125rem}
 .vt-revoke-btn{font-family:var(--font);font-weight:600;padding:7px 14px;border-radius:var(--r);border:1.5px solid var(--err);color:var(--err)}
 .vt-log li{padding:6px}
 .vt-log li:first-child{background:var(--paper-2)}
@@ -211,7 +219,7 @@
 .vt-num{font-size:clamp(3rem,2rem + 3vw,4.75rem);line-height:.85;font-weight:600;letter-spacing:-.04em;color:var(--accent);min-width:1.1ch}
 .vt-steps h3{font-size:var(--s-lead);line-height:1.25;letter-spacing:-.018em;font-weight:500}
 .vt-steps p{margin-top:10px;color:var(--muted);max-width:36em;line-height:1.55}
-.vt-link{display:block;width:max-content;max-width:100%;margin-top:12px;padding:8px 12px;border-radius:var(--r);background:var(--paper);color:var(--paper-ink);font-size:.8125rem;overflow-wrap:anywhere}
+.vt-link{display:block;font-family:var(--vt-mono);width:max-content;max-width:100%;margin-top:12px;padding:8px 12px;border-radius:var(--r);background:var(--paper);color:var(--paper-ink);font-size:.8125rem;overflow-wrap:anywhere}
 @media (prefers-reduced-motion:no-preference){
   .vt-steps li.anim:not(.play){opacity:0;transform:translateY(18px)}
   .vt-steps li.play{animation:vt-rise 520ms var(--ease-out) both}

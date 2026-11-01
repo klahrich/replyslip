@@ -227,15 +227,11 @@ export default function ValettoPage() {
               <span className="l">
                 <Words text="Share your bot with customers." />
               </span>{' '}
-              <span className="l vt-dim">
+              <span className="l vt-dim vt-h1-2">
                 <Words text="Only the jobs you choose." from={5} />
               </span>
             </h1>
-            <p className="vt-sub">
-              Your bot understands your business as well as you do. Valetto lets customers send it the requests you allow,
-              by private link or a widget on your site.
-            </p>
-            <p className="vt-eg">Customers open the link on their phone. Nothing to install.</p>
+            <p className="vt-sub">Customers send it the requests you allow, by private link or a widget on your site.</p>
             <div className="vt-cta">
               <Link className="btn vt-btn" href={EARLY_ACCESS}>
                 Ask for early access
@@ -314,7 +310,7 @@ export default function ValettoPage() {
 
         <section className="close vt-close" aria-label="Get early access">
           <p className="say">Start with one customer and one job.</p>
-          <p className="vt-close-sub">Valetto is in early access for Grok Bot owners.</p>
+          <p className="vt-close-sub">Valetto is in early access for Grok&nbsp;Bot owners.</p>
           <Link className="btn vt-btn" href={EARLY_ACCESS}>
             Ask for early access
           </Link>
