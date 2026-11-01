@@ -13,6 +13,8 @@ export const dynamic = 'force-dynamic';
 export const metadata: Metadata = {
   title: { absolute: 'Dashboard · Valetto', template: '%s · Valetto' },
   robots: { index: false, follow: false, nocache: true },
+  // Connected apps live here; links out never carry a Referer (docs/design/mcp-oauth.md §5.4).
+  referrer: 'no-referrer',
 };
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
