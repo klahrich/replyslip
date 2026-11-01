@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { MarkIcon } from '@/components/site/Mark';
 import { PhoneChat } from '@/components/site/valetto/PhoneChat';
 import { ValettoEffects } from '@/components/site/valetto/ValettoEffects';
-import { EARLY_ACCESS, ValettoFoot } from '@/components/site/valetto/ValettoChrome';
+import { AGENT_TO_AGENT, EARLY_ACCESS, ValettoFoot } from '@/components/site/valetto/ValettoChrome';
 import '@/components/site/landing.css';
 import '../landing-width.css';
 import '../landing-bg.css';
@@ -208,6 +208,9 @@ export default function ValettoPage() {
               <a href="#how">How it works</a>
             </li>
             <li>
+              <Link href={AGENT_TO_AGENT}>Valetto for agents</Link>
+            </li>
+            <li>
               <Link className="go" href={EARLY_ACCESS}>
                 Early access
               </Link>
@@ -219,10 +222,16 @@ export default function ValettoPage() {
       <main id="main">
         <section className="vt-hero" id="top" aria-labelledby="h1">
           <div className="vt-hero-copy">
-            <p className="vt-badge">
-              <span className="vt-badge-dot" aria-hidden="true" />
-              Works with Grok Bot
-            </p>
+            <div className="vt-badges">
+              <p className="vt-badge">
+                <span className="vt-badge-dot" aria-hidden="true" />
+                Works with Grok Bot
+              </p>
+              <Link className="vt-badge vt-badge-link" href={AGENT_TO_AGENT}>
+                Valetto for agents
+                <span aria-hidden="true">→</span>
+              </Link>
+            </div>
             <h1 id="h1">
               <span className="l">
                 <Words text="Share your bot with customers." />
