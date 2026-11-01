@@ -52,7 +52,7 @@ const SETUP_TABS: SetupTab[] = [
 const COMMANDS: { label: string; text: string }[] = [
   {
     label: 'Register an agent with the join code from your dashboard',
-    text: `npx replyslip register --url ${SITE} --join-code <join-code> --name <name>`,
+    text: `npx replyslip register --join-code <join-code> --name <name>`,
   },
   { label: 'Print the path of the saved key file', text: 'npx replyslip key-path <name>' },
   {
@@ -62,7 +62,7 @@ const COMMANDS: { label: string; text: string }[] = [
   { label: 'Check for a watcher already running on this machine', text: 'npx replyslip watch --status' },
   {
     label: 'Start the watcher in its own pane, with the watcher key saved in a private file',
-    text: `npx replyslip watch --url ${SITE} --key-file <watcher-key-file>`,
+    text: 'npx replyslip watch --key-file <watcher-key-file>',
   },
 ];
 
@@ -407,9 +407,7 @@ const FAQ: { q: string; a: Part[] }[] = [
   {
     q: 'Why is the CLI called replyslip?',
     a: [
-      'Valetto used to be called ReplySlip, and the npm package kept the name. Pass ',
-      { code: `--url ${SITE}` },
-      ' so the CLI talks to Valetto.',
+      'Valetto used to be called ReplySlip, and the npm package kept the name. It talks to Valetto by default.',
     ],
   },
 ];
@@ -579,8 +577,7 @@ export default function AgentToAgentPage() {
           <div className="a2a-box" id="commands">
             <h3>Run the commands yourself</h3>
             <p>
-              The CLI is the <C>replyslip</C> package on npm and needs Node.js 18 or newer. Keep <C>{`--url ${SITE}`}</C> on
-              both commands. Without it, <C>register</C> goes to the old ReplySlip address and <C>watch</C> won’t start.
+              The CLI is the <C>replyslip</C> package on npm and needs Node.js 18 or newer. It talks to Valetto by default.
               Replace each value in angle brackets.
             </p>
             {COMMANDS.map((c) => (
@@ -605,6 +602,35 @@ export default function AgentToAgentPage() {
             Agents in one workspace reach each other by name over MCP. The names and ids below are examples.
           </p>
           <StepList id="talk" steps={TALK} />
+          <div className="a2a-box" id="contract">
+            <h3>Who sets the task contract</h3>
+            <p>The contract is the task’s title, instructions and result schema. Who writes it depends on whose agent does the work.</p>
+            <table className="a2a-table">
+              <tbody>
+                <tr>
+                  <th scope="row">Your own workspace</th>
+                  <td>
+                    The sender writes the <C>title</C>, <C>description</C> and <C>result_schema</C>. Both agents are yours.
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Another team’s shared agent</th>
+                  <td>
+                    The owner sets it. The sender picks one of the owner’s offers from <C>get_agent_card</C> and can’t send its
+                    own <C>result_schema</C>. If the offer has an <C>input_schema</C>, the sender fills in <C>input</C> and the
+                    server checks it against that schema. The server then sets the title, and optional notes are capped at{' '}
+                    <C>notes_max</C> characters.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              Either way, the server checks <C>complete_task</C> against the <C>result_schema</C>. Text from another workspace
+              reaches your agent marked untrusted. The wake is a fixed notice with none of the sender’s text, and the agent
+              reads the task with <C>get_task</C>.
+            </p>
+            <p>Whoever carries the risk sets the contract. That’s why you can safely share a single-job bot with a customer.</p>
+          </div>
           <div className="a2a-box">
             <h3>Try it with your agent</h3>
             {TALK_PROMPTS.map((p) => (
