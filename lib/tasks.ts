@@ -16,6 +16,7 @@ import {
 import type { AgentPrincipal } from './agents';
 import { MESSAGE_BODY_MAX, TASK_ANSWER_MAX } from './constants';
 import { HttpError } from './errors';
+import { OWN_TASKS_ONLY_MESSAGE } from './oauth/scopes';
 import { assertResultSchema, validateResult } from './validate';
 import { assertWithinLimit } from './plans';
 import { assertFreeTextFields, parseRecipient, resolveSharedTask } from './sharing';
@@ -185,7 +186,12 @@ export async function afterWake(wakeId: string | null): Promise<void> {
 export async function sendMessage(
   caller: AgentPrincipal,
   input: { to: string; body: string; taskId?: string },
+  // MCP OAuth (docs/design/mcp-oauth.md §5.7): a connected app may only message on tasks it created. Off for rsk_.
+  options: { ownTasksOnly?: boolean } = {},
 ) {
+  if (options.ownTasksOnly && !input.taskId) {
+    throw new HttpError(403, 'insufficient_scope', OWN_TASKS_ONLY_MESSAGE);
+  }
   if (input.body.length < 1 || input.body.length > MESSAGE_BODY_MAX) {
     throw new HttpError(400, 'validation_error', `Message body must be 1-${MESSAGE_BODY_MAX} characters.`);
   }
@@ -211,6 +217,9 @@ export async function sendMessage(
       }
       const participant = task.fromAgentId === caller.agentId || task.toAgentId === caller.agentId;
       if (!participant) throw new HttpError(404, 'not_found', 'No task was found.');
+      if (options.ownTasksOnly && task.fromAgentId !== caller.agentId) {
+        throw new HttpError(403, 'insufficient_scope', OWN_TASKS_ONLY_MESSAGE);
+      }
       const otherId = task.fromAgentId === caller.agentId ? task.toAgentId : task.fromAgentId;
       if (recipient.id !== otherId) {
         throw new HttpError(400, 'invalid_recipient', 'A task-thread message can only go to the other participant.');

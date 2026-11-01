@@ -380,5 +380,7 @@ export async function requireHumanOwner(
     await authenticateAgentKey(token, { recordUse: false });
     throw new HttpError(403, 'human_required', message);
   }
+  // An MCP OAuth access token (docs/design/mcp-oauth.md §4) is an agent credential too, never a human.
+  if (token?.startsWith('rsoa_')) throw new HttpError(403, 'human_required', message);
   return requireUser(req);
 }

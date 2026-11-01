@@ -22,6 +22,10 @@ import {
 import { agentGuestsEnabled } from './constants';
 import { redeemInvite } from './invites';
 import { answerTask, askTask, completeTask, createTask, failTask, getTask, listTasks, sendMessage } from './tasks';
+import { OAUTH_SCOPE, RSK_SCOPES, SCOPE_RESPOND, oauthEnabled, oauthIssuer, oauthResource } from './oauth/config';
+import { PROTECTED_RESOURCE_METADATA_PATH } from './oauth/metadata';
+import { INSUFFICIENT_SCOPE_MESSAGE, TOOL_SCOPES, hasScope, type ToolName } from './oauth/scopes';
+import { authenticateOAuthAccessToken } from './oauth/verify';
 
 type ToolCtx = {
   http?: {
@@ -46,6 +50,13 @@ function principalFrom(ctx: ToolCtx): AgentPrincipal {
     agentName: extra.agentName,
     keyId: extra.keyId,
   };
+}
+
+/** §5.7: the per-tool scope check. rsk_ keys hold every scope, so this only ever stops OAuth tokens. */
+function requireToolScope(ctx: ToolCtx, tool: ToolName): void {
+  if (!hasScope(ctx.http?.authInfo?.scopes, TOOL_SCOPES[tool])) {
+    throw new HttpError(403, 'insufficient_scope', INSUFFICIENT_SCOPE_MESSAGE);
+  }
 }
 
 function ok(payload: unknown) {
@@ -99,11 +110,13 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
-          const message = await sendMessage(principalFrom(ctx as ToolCtx), {
-            to: args.to,
-            body: args.body,
-            taskId: args.task_id,
-          });
+          requireToolScope(ctx as ToolCtx, 'send_message');
+          const message = await sendMessage(
+            principalFrom(ctx as ToolCtx),
+            { to: args.to, body: args.body, taskId: args.task_id },
+            // An OAuth app (no agent:respond) may only message on tasks it created (§5.7).
+            { ownTasksOnly: !hasScope((ctx as ToolCtx).http?.authInfo?.scopes, SCOPE_RESPOND) },
+          );
           return ok({ message });
         } catch (err) {
           return fail(err);
@@ -120,6 +133,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'create_task');
           const task = await createTask(principalFrom(ctx as ToolCtx), {
             to: args.to,
             title: args.title,
@@ -144,6 +158,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'get_task');
           return ok(await getTask(principalFrom(ctx as ToolCtx), args.id));
         } catch (err) {
           return fail(err);
@@ -160,6 +175,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'complete_task');
           const task = await completeTask(principalFrom(ctx as ToolCtx), args.id, args.result);
           return ok({ task });
         } catch (err) {
@@ -177,6 +193,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'ask');
           const task = await askTask(principalFrom(ctx as ToolCtx), args.id, args.question);
           return ok({ task });
         } catch (err) {
@@ -194,6 +211,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'fail_task');
           const task = await failTask(principalFrom(ctx as ToolCtx), args.id, args.reason);
           return ok({ task });
         } catch (err) {
@@ -211,6 +229,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'answer_task');
           const task = await answerTask(principalFrom(ctx as ToolCtx), args.id, args.answer);
           return ok({ task });
         } catch (err) {
@@ -228,6 +247,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (_args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'whoami');
           const principal = principalFrom(ctx as ToolCtx);
           const agent = await getAgent(principal.workspaceId, principal.agentId);
           const [workspace] = await getDb()
@@ -264,6 +284,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'list_tasks');
           const tasks = await listTasks(principalFrom(ctx as ToolCtx), {
             status: args.status,
             role: args.role,
@@ -284,6 +305,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (_args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'list_agents');
           return ok({ agents: await listTeammates(principalFrom(ctx as ToolCtx)) });
         } catch (err) {
           return fail(err);
@@ -300,6 +322,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'get_agent_card');
           return ok({ card: await getAgentCard(principalFrom(ctx as ToolCtx), args.address) });
         } catch (err) {
           return fail(err);
@@ -316,6 +339,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'set_workspace_handle');
           const principal = principalFrom(ctx as ToolCtx);
           const workspace = await setWorkspaceHandle(principal.workspaceId, args.handle);
           return ok({ workspace });
@@ -334,6 +358,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'set_agent_sharing');
           const principal = principalFrom(ctx as ToolCtx);
           const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
           const updated = await setAgentShared(principal.workspaceId, agent.id, args.shared);
@@ -353,6 +378,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'upsert_offer');
           const principal = principalFrom(ctx as ToolCtx);
           const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
           return ok(
@@ -380,6 +406,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'delete_offer');
           const principal = principalFrom(ctx as ToolCtx);
           const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
           await deleteOfferByName(principal.workspaceId, agent.id, args.name);
@@ -399,6 +426,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'invite_guest');
           const principal = principalFrom(ctx as ToolCtx);
           const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
           const share = await inviteGuest(principal.workspaceId, agent.id, {
@@ -422,6 +450,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'revoke_guest');
           const principal = principalFrom(ctx as ToolCtx);
           const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
           return ok(await revokeGuestByHandle(principal.workspaceId, agent.id, args.guest_handle));
@@ -440,6 +469,7 @@ export const mcpHandler = createMcpHandler(
       },
       async (args, ctx) => {
         try {
+          requireToolScope(ctx as ToolCtx, 'list_guest_shares');
           const principal = principalFrom(ctx as ToolCtx);
           const agent = await agentInWorkspaceByName(principal.workspaceId, args.agent);
           // Agent tools never see customer emails; the signed-in owner sees them in the dashboard.
@@ -462,6 +492,7 @@ export const mcpHandler = createMcpHandler(
         },
         async (args, ctx) => {
           try {
+            requireToolScope(ctx as ToolCtx, 'redeem_invite');
             const principal = principalFrom(ctx as ToolCtx);
             // MCP calls carry no client IP here, so the redeem rate limit is keyed by agent.
             const result = await redeemInvite({
@@ -489,14 +520,36 @@ export const mcpHandler = createMcpHandler(
   },
 );
 
-async function verifyAgentToken(_req: Request, bearerToken?: string): Promise<AuthInfo | undefined> {
+/**
+ * Bearer check for /api/mcp. With MCP_OAUTH_ENABLED=1 an rsoa_ token goes to the OAuth path (docs/design/mcp-oauth.md
+ * §4); every other token takes the rsk_ path exactly as before, now carrying all three scopes. Never throws with the
+ * token in the message.
+ */
+export async function verifyMcpToken(_req: Request, bearerToken?: string): Promise<AuthInfo | undefined> {
   if (!bearerToken) return undefined;
+  if (oauthEnabled() && bearerToken.startsWith('rsoa_')) {
+    const oauth = await authenticateOAuthAccessToken(bearerToken);
+    if (!oauth) return undefined;
+    return {
+      token: bearerToken,
+      clientId: oauth.clientId,
+      scopes: oauth.scopes,
+      expiresAt: oauth.expiresAt,
+      resource: new URL(oauthResource()),
+      extra: {
+        agentId: oauth.agentId,
+        workspaceId: oauth.workspaceId,
+        agentName: oauth.agentName,
+        keyId: oauth.keyId,
+      },
+    };
+  }
   const principal = await authenticateAgentKey(bearerToken);
   if (!principal) return undefined;
   return {
     token: bearerToken,
     clientId: principal.agentId,
-    scopes: ['agent'],
+    scopes: [...RSK_SCOPES],
     extra: {
       agentId: principal.agentId,
       workspaceId: principal.workspaceId,
@@ -506,4 +559,18 @@ async function verifyAgentToken(_req: Request, bearerToken?: string): Promise<Au
   };
 }
 
-export const mcpAuthHandler = withMcpAuth(mcpHandler, verifyAgentToken, { required: true });
+/**
+ * The 401 challenge's resource_metadata URL is built from the fixed issuer, never from X-Forwarded-Host (§5). The
+ * wrapper is built per request because its options are fixed at construction and the env is read at runtime.
+ */
+export function mcpAuthHandler(req: Request): Promise<Response> {
+  const wrapped = oauthEnabled()
+    ? withMcpAuth(mcpHandler, verifyMcpToken, {
+        required: true,
+        resourceUrl: oauthIssuer(),
+        resourceMetadataPath: PROTECTED_RESOURCE_METADATA_PATH,
+        requiredScopes: [OAUTH_SCOPE],
+      })
+    : withMcpAuth(mcpHandler, verifyMcpToken, { required: true, resourceUrl: oauthIssuer() });
+  return wrapped(req);
+}

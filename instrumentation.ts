@@ -3,4 +3,6 @@ export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   const { validateOriginConfig } = await import('./lib/origin');
   validateOriginConfig();
+  const { validateOAuthConfig } = await import('./lib/oauth/config');
+  validateOAuthConfig();
 }
