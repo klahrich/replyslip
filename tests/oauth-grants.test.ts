@@ -360,7 +360,14 @@ describe('reconnect', () => {
       .update(oauthGrants)
       .set({ revokedAt: null, revokedReason: null })
       .where(eq(oauthGrants.id, first.principal.grantId));
-    const claude = await connect(owner, CLAUDE_CLIENT_ID, CLAUDE_REDIRECT, { mode: 'reconnect', agentId });
+    // Claude can't reconnect to an agent only ChatGPT connected, so its grant on A is put there directly.
+    await expectOAuthError(
+      connect(owner, CLAUDE_CLIENT_ID, CLAUDE_REDIRECT, { mode: 'reconnect', agentId }),
+      'invalid_grant',
+    );
+    const claude = await connect(owner, CLAUDE_CLIENT_ID, CLAUDE_REDIRECT);
+    expect(await reconnectOptions(getDb(), owner.workspace.id, claude.client.id)).toHaveLength(1);
+    await getDb().update(oauthGrants).set({ agentId }).where(eq(oauthGrants.id, claude.principal.grantId));
     expect(await authenticateOAuthAccessToken(first.tokens.access_token)).not.toBeNull();
 
     failAfterReconnectRevokeForTests(true);
@@ -386,7 +393,7 @@ describe('reconnect', () => {
       .where(and(eq(oauthGrants.agentId, agentId), eq(oauthGrants.revokedReason, 'reconnected')));
     // Both ChatGPT grants on A (the first one was forced live again above), never the Claude grant.
     expect(reasons.length).toBe(2);
-    const options = await reconnectOptions(getDb(), owner.workspace.id);
+    const options = await reconnectOptions(getDb(), owner.workspace.id, first.client.id);
     expect(options.map((option) => option.id)).toEqual([agentId]);
   });
 
@@ -397,7 +404,9 @@ describe('reconnect', () => {
       connect(owner, CHATGPT_CLIENT_ID, CHATGPT_REDIRECT, { mode: 'reconnect', agentId: bot.id }),
       'invalid_grant',
     );
-    expect(await reconnectOptions(getDb(), owner.workspace.id)).toEqual([]);
+    const chatgpt = await connect(owner, CHATGPT_CLIENT_ID, CHATGPT_REDIRECT);
+    const options = await reconnectOptions(getDb(), owner.workspace.id, chatgpt.client.id);
+    expect(options.map((option) => option.id)).toEqual([chatgpt.principal.agentId]);
   });
 });
 

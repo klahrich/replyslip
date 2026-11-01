@@ -94,9 +94,19 @@ export function connectedAppDescription(clientName: string): string {
 }
 
 /** Agents in the workspace that an earlier OAuth grant created and that are still active, newest connection first. */
+/** The agent was created by some OAuth grant (never an rsk_ bot). Correlated on the outer agents row. */
+function createdByOAuth() {
+  return sql`exists (select 1 from oauth_grants created where created.agent_id = ${agents.id} and created.agent_created)`;
+}
+
+/**
+ * Reconnect choices: active connected-app agents this same client app connected before (any grant from it on the
+ * agent, live or ended), newest first. Agents only another app connected are not offered.
+ */
 export async function reconnectOptions(
   db: Db,
   workspaceId: string,
+  clientRowId: string,
 ): Promise<Array<{ id: string; name: string; last_connected_at: string | null }>> {
   const rows = await db
     .select({
@@ -109,7 +119,8 @@ export async function reconnectOptions(
     .where(
       and(
         eq(oauthGrants.workspaceId, workspaceId),
-        eq(oauthGrants.agentCreated, true),
+        eq(oauthGrants.clientId, clientRowId),
+        createdByOAuth(),
         eq(agents.workspaceId, workspaceId),
         eq(agents.role, 'agent'),
         isNull(agents.revokedAt),
@@ -125,11 +136,16 @@ export async function reconnectOptions(
 }
 
 /** Is this agent a valid "Reconnect as" target: active, in the workspace, created by an earlier OAuth grant? */
-export async function isReconnectTarget(db: Db, workspaceId: string, agentId: string): Promise<boolean> {
+export async function isReconnectTarget(
+  db: Db,
+  workspaceId: string,
+  agentId: string,
+  clientRowId: string,
+): Promise<boolean> {
   const [row] = await db
     .select({ id: agents.id })
     .from(agents)
-    .innerJoin(oauthGrants, and(eq(oauthGrants.agentId, agents.id), eq(oauthGrants.agentCreated, true)))
+    .innerJoin(oauthGrants, eq(oauthGrants.agentId, agents.id))
     .where(
       and(
         eq(agents.id, agentId),
@@ -137,6 +153,8 @@ export async function isReconnectTarget(db: Db, workspaceId: string, agentId: st
         eq(agents.role, 'agent'),
         isNull(agents.revokedAt),
         eq(oauthGrants.workspaceId, workspaceId),
+        eq(oauthGrants.clientId, clientRowId),
+        createdByOAuth(),
       ),
     )
     .limit(1);
@@ -317,7 +335,7 @@ export async function exchangeAuthorizationCode(input: CodeExchangeInput): Promi
       let reconnected = 0;
       if (code.agentId) {
         await tx.execute(sql`select id from agents where id = ${code.agentId} for update`);
-        if (!(await isReconnectTarget(tx, code.workspaceId, code.agentId))) {
+        if (!(await isReconnectTarget(tx, code.workspaceId, code.agentId, client.id))) {
           throw new OAuthError('invalid_grant', 'The chosen agent is no longer available.');
         }
         const revoked = await tx
