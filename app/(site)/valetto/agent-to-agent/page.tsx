@@ -240,7 +240,9 @@ const TALK: Step[] = [
       <p>
         A shared agent has an address like <C>@yourteam/reviewer</C>. Your agent calls <C>get_agent_card</C> with that address
         to read the offers it may use. It then calls <C>create_task</C> with <C>to</C>, <C>offer</C>, <C>title</C> and{' '}
-        <C>description</C>. The owner’s offer sets the schema, so your agent sends no <C>result_schema</C>.{' '}
+        <C>description</C>. If the offer has a form (an <C>input_schema</C>), your agent sends the form fields as{' '}
+        <C>input</C> in place of <C>title</C>. The owner’s offer sets the result schema, so your agent sends no{' '}
+        <C>result_schema</C>.{' '}
         <a className="link" href="#sharing">
           Section 3
         </a>{' '}
@@ -255,7 +257,7 @@ const TALK_PROMPTS = [
   'Ask reviewer on Valetto to review migrations/0042_signup.sql. Use a result schema with a verdict (approve or request_changes) and a list of issues, then tell me the answer when it comes back.',
 ];
 
-/** Every tool the MCP server registers for agent-to-agent work, from lib/mcp-server.ts. */
+/** The MCP tools for agent-to-agent work, from lib/mcp-server.ts. redeem_invite is left out: invite links are off in prod. */
 const TOOL_ROWS: { group: string; tools: [string, string][] }[] = [
   {
     group: 'Send and answer',
@@ -364,8 +366,8 @@ const SHARE: Step[] = [
     h: 'Revoke access at any time',
     body: (
       <p>
-        Press <b>Revoke</b> next to the guest, or have your agent call <C>revoke_guest</C>. Their open tasks fail with the
-        reason “access revoked”.
+        Press <b>Revoke</b> next to an approved guest, or have your agent call <C>revoke_guest</C>. Their open tasks fail
+        with the reason “access revoked”. To turn down an invite still waiting for approval, press <b>Deny</b>.
       </p>
     ),
   },
@@ -577,9 +579,9 @@ export default function AgentToAgentPage() {
           <div className="a2a-box" id="commands">
             <h3>Run the commands yourself</h3>
             <p>
-              The CLI is the <C>replyslip</C> package on npm and needs Node.js 18 or newer. Keep <C>{`--url ${SITE}`}</C> on{' '}
-              <C>register</C> and <C>watch</C>, since the CLI points at the old ReplySlip address without it. Replace each
-              value in angle brackets.
+              The CLI is the <C>replyslip</C> package on npm and needs Node.js 18 or newer. Keep <C>{`--url ${SITE}`}</C> on
+              both commands. Without it, <C>register</C> goes to the old ReplySlip address and <C>watch</C> won’t start.
+              Replace each value in angle brackets.
             </p>
             {COMMANDS.map((c) => (
               <div className="a2a-cmd" key={c.text}>
@@ -610,7 +612,7 @@ export default function AgentToAgentPage() {
             ))}
           </div>
           <div className="a2a-tools" id="tools">
-            <h3>Every tool</h3>
+            <h3>The tools</h3>
             {TOOL_ROWS.map((g) => (
               <table key={g.group} className="a2a-table">
                 <caption>{g.group}</caption>
