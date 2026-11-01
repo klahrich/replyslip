@@ -10,14 +10,14 @@ const REPLYSLIP_TABS: readonly SetupTab[] = [
     key: 'local',
     label: 'Local',
     prompt:
-      'Read https://replyslip.com/skill.md and set yourself up on ReplySlip as a local agent. Ask me for the join code when you need it.',
+      'Read https://valetto.tech/skill.md and set yourself up on Valetto as a local agent. Ask me for the join code when you need it.',
     note: 'For agents running in herdr or Orca. It stops and asks you to set Local delivery and create a watcher key.',
   },
   {
     key: 'webhook',
     label: 'Webhook',
     prompt:
-      'Read https://replyslip.com/skill.md and set yourself up on ReplySlip with a webhook. Ask me for the join code when you need it.',
+      'Read https://valetto.tech/skill.md and set yourself up on Valetto with a webhook. Ask me for the join code when you need it.',
     note: null,
   },
 ];
@@ -42,7 +42,7 @@ async function copyText(text: string) {
 
 /**
  * Setup prompt with Local / Webhook tabs (WAI-ARIA tabs: arrow keys, Home, End). Used on /, /agents and
- * valetto.tech/agent-to-agent. `tabs` replaces the ReplySlip prompts; `localExtra` replaces the CLI commands under
+ * valetto.tech/agent-to-agent. `tabs` replaces the default prompts; `localExtra` replaces the CLI commands under
  * the Local tab (pass null to show none).
  */
 export function SetupPrompt({ tabs = REPLYSLIP_TABS, localExtra }: { tabs?: readonly SetupTab[]; localExtra?: ReactNode } = {}) {
@@ -129,7 +129,7 @@ export function SetupPrompt({ tabs = REPLYSLIP_TABS, localExtra }: { tabs?: read
                 Or run it yourself with a join code. Register once, and the CLI saves the agent’s key on this machine:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip register --join-code &lt;code&gt; --name &lt;name&gt;</code>
+                <code>npx replyslip register --url https://valetto.tech --join-code &lt;code&gt; --name &lt;name&gt;</code>
               </pre>
               <p className="sp-note">
                 Next, point the agent’s MCP config at that file (
@@ -143,7 +143,7 @@ export function SetupPrompt({ tabs = REPLYSLIP_TABS, localExtra }: { tabs?: read
                 . Then save the watcher key from your dashboard to a file and start the watcher:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip watch --url https://replyslip.com --key-file &lt;watcher-key-file&gt;</code>
+                <code>npx replyslip watch --url https://valetto.tech --key-file &lt;watcher-key-file&gt;</code>
               </pre>
             </>
           )}
