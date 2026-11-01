@@ -8,7 +8,7 @@ Last checked against sources: 2026-11-01.
 
 Someone using ChatGPT or Claude pastes `https://valetto.tech/api/mcp` into "add custom connector", signs in to Valetto, clicks **Allow**, and the connector works. They don't need a join code, a terminal `register` step or a pasted Bearer key.
 
-Not changing: `Authorization: Bearer rsk_…` agent keys on `/api/mcp` keep working byte for byte, the 19 MCP tools stay as they are, and the join-code and invite flows stay as they are.
+Not changing: `Authorization: Bearer rsk_…` agent keys on `/api/mcp` keep working byte for byte, the 19 MCP tools behave exactly as today for `rsk_` keys, and the join-code and invite flows stay as they are. OAuth-connected apps get a narrower subset of the tools (§5.7).
 
 ## TL;DR of the decisions
 
@@ -20,10 +20,10 @@ Not changing: `Authorization: Bearer rsk_…` agent keys on `/api/mcp` keep work
 | Redirect URIs | Exact string match. The only exception is a port-agnostic match for `http://localhost`, `http://127.0.0.1` and `http://[::1]` loopback URIs (RFC 8252, needed by Claude Code). Wildcards are never allowed. |
 | PKCE | `S256` only. `plain` and missing challenges are refused. |
 | Issuer in the response (RFC 9207) | We send `iss` on every authorization response, errors included, and advertise `authorization_response_iss_parameter_supported: true`. That lets ChatGPT use its stable redirect `https://chatgpt.com/connector_platform_oauth_redirect`. |
-| Scopes | One scope, `agent`. `offline_access` is not advertised, and is ignored if a client asks for it. No OIDC scopes. |
+| Scopes | **Recommended, pending Karim's decision: a narrow v1 scope.** OAuth tokens get one advertised scope, `agent`, which only covers sending tasks, reading the app's own tasks and answers, and listing agents. Completing received tasks and the owner tools (workspace handle, sharing, offers, guests) stay with `rsk_` agents and the dashboard, because tasks in a chat app's inbox come from other agents or guests and could prompt-inject it into sharing or inviting. Mapping in §5.7. `offline_access` is not advertised, and is ignored if a client asks for it. No OIDC scopes. |
 | Lifetimes | Pending authorization request 20 min · code 5 min, single use · access token 1 h · refresh token 30 days idle, rotated on every use · grant at most 365 days (open question) |
-| Refresh | Rotated on each use, with reuse detection. Reusing a rotated token more than 10 s after its rotation revokes the whole grant. Inside the 10 s window the request gets `invalid_grant` without revoking anything, so a client racing two refreshes does not lose its connection. |
-| Token → principal | An OAuth access token resolves to the same `AgentPrincipal` (`workspaceId`, `agentId`, `agentName`, `keyId`) that an `rsk_` key produces. `keyId` is `oauth:<grantId>`. `principalFrom()` and every tool stay unchanged. |
+| Refresh | Rotated on each use, with reuse detection. Reusing a rotated token revokes the whole grant. The one exception is a 2 s window after rotation, and only while the replacement token is still unused: then the request gets `invalid_grant` without revoking, so a client racing two refreshes keeps its connection. If the replacement has already been used, reuse revokes even inside the window (§2.7). |
+| Token → principal | An OAuth access token resolves to the same `AgentPrincipal` (`workspaceId`, `agentId`, `agentName`, `keyId`) that an `rsk_` key produces. `keyId` is `oauth:<grantId>`. `principalFrom()` and the tool code stay unchanged; the only addition is a per-tool scope check (§5.7) that `rsk_` keys always pass. |
 | Agent mapping | **One new agent per grant** by default (e.g. `chatgpt`), and the user can rename it. Consent can also reconnect to an agent an earlier OAuth grant created. The agent is created at code exchange, so an abandoned flow leaves no orphan. |
 | Consent | Shown on every authorization, for every client, with no auto-approve. The browser is bound to the request by a cookie. Origin check and a CSRF token on the POST. |
 
@@ -132,7 +132,7 @@ sequenceDiagram
     U->>C: browser navigates to callback (GET)
     Note over C: checks state and iss
     C->>A: POST /api/oauth/token grant_type=authorization_code&code&code_verifier&redirect_uri&client_id&resource
-    A->>DB: consume code atomically, then create agent (or reuse) + oauth_grants + tokens
+    A->>DB: consume code atomically, then create agent (or reconnect, revoking that client's old grants on it) + oauth_grants + tokens
     A-->>C: { access_token: rsoa_..., token_type: Bearer, expires_in: 3600, refresh_token: rsor_..., scope: "agent" }
     C->>M: POST /api/mcp Authorization: Bearer rsoa_...
     M->>DB: hash lookup -> grant -> agent  => AgentPrincipal
@@ -314,6 +314,7 @@ Client authentication, by the client's `token_endpoint_auth_method`:
    * Mark the code consumed with `update … where consumed_at is null returning`. Losing that race means reuse, handled as in step 2.
    * Check the user still belongs to `workspace_id` and the workspace still exists.
    * The agent: if the user picked "new", create the agent with the chosen name, running `assertWithinLimit(…, 'agents')` and appending `-2` … `-9` on a name clash. Otherwise use the existing agent the user picked, which must still be active and in the same workspace.
+   * **Reconnect revokes the old connection.** When the user picked "Reconnect as <agent>", lock the agent row (`select … from agents where id = $1 for update`, which serializes two reconnects racing each other), then revoke every still-active grant on that agent from the **same client**: `update oauth_grants set revoked_at = now(), revoked_reason = 'reconnected' where agent_id = $1 and client_id = $2 and revoked_at is null`. This happens before the new grant is inserted, in the same transaction, so there is never a moment with two live ChatGPT connections on one agent, and a failed exchange leaves the old one untouched. Grants on that agent from other clients (say Claude Code next to Claude on the web) stay. Log `oauth.reconnect` with the count of revoked grants. This is also what cuts off anyone still holding the old connection's tokens: a user who reconnects because something looked wrong gets a clean slate without having to find Disconnect first.
    * Insert `oauth_grants`, `oauth_access_tokens` and `oauth_refresh_tokens`. Set `code.grant_id`.
    * If the plan cap was hit after consent, return `invalid_grant` with `"error_description":"Workspace agent limit reached"`.
 6. Response `200`:
@@ -332,8 +333,12 @@ Client authentication, by the client's `token_endpoint_auth_method`:
 1. Look up `sha256(refresh_token)`. Unknown, revoked, idle-expired, or the grant revoked or past `absolute_expires_at`: `invalid_grant`.
 2. The client must match `grant.client_id`, otherwise `invalid_grant`.
 3. If the row was **already rotated** (`rotated_at` set):
-   * Within 10 s of `rotated_at`: return `invalid_grant` and **don't** revoke, logging `oauth.refresh_race`. The parallel request that won keeps the connection.
-   * After 10 s, this is **reuse**: revoke the grant (`revoked_reason='refresh_reuse'`, which cuts off every token in the family), log `oauth.refresh_reuse` with the grant id, and return `invalid_grant`.
+   * In one transaction, lock the row and its child (the token whose `parent_id` is this row; an index on `parent_id` makes this cheap) with `for update`.
+   * If the child has **already been used** (its `rotated_at` is set), this is **reuse**, however recent: revoke the grant (`revoked_reason='refresh_reuse'`), log `oauth.refresh_reuse` with `in_window: true`, and return `invalid_grant`.
+   * Otherwise, within **2 s** of `rotated_at`: return `invalid_grant` and **don't** revoke, logging `oauth.refresh_race`. The parallel request that won keeps the connection.
+   * After 2 s, this is **reuse**: revoke the grant (`revoked_reason='refresh_reuse'`, which cuts off every token in the family), log `oauth.refresh_reuse` with the grant id, and return `invalid_grant`.
+
+   Why the child check: a grace window excuses whoever comes second, and that can be the real client. Say an attacker copies refresh token R1 off a device. They present R1 and get R2, then present R2 straight away and get R3, moving onto a token the real client has never seen. The real client's next refresh with R1 lands a moment later. With a plain 10 s window that would only fail with `invalid_grant`, nothing would be revoked, the real client would drop off, and the attacker would keep the chain until the grant's absolute expiry (365 days). An honest race between two requests from the same client never looks like that. It mints exactly one child, and that child sits unused until the winning response arrives, which takes milliseconds. So "child already used" means two different holders, and the grant is revoked. Shrinking the window to 2 s also narrows the case the check can't catch: a thief who refreshes once and then waits. If the real client hits that window it gets `invalid_grant`, the user reconnects, and reconnecting revokes the old grant from the same client (§2.7 step 5), cutting the thief off too.
 4. Otherwise, in one transaction with `for update` on the token row: set `rotated_at=now()`, insert a new refresh token (`parent_id` pointing at the old one, `expires_at = min(now+30d, grant.absolute_expires_at)`), insert a new access token, and update `grant.last_used_at`. Respond with the same shape as above. A client may hold several access tokens from the same grant at once.
 
 Errors use RFC 6749 §5.2 JSON (`{"error","error_description"}`, 400; `invalid_client` is 401). The codes are `invalid_request`, `invalid_client`, `invalid_grant`, `unauthorized_client`, `unsupported_grant_type`, `invalid_scope`, and `invalid_target` (RFC 8707).
@@ -420,7 +425,7 @@ oauth_grants                            -- one approved connection = one row
   absolute_expires_at     timestamptz not null        -- created_at + 365 d (open question)
   last_used_at            timestamptz                 -- throttled: written at most every 5 min
   revoked_at              timestamptz
-  revoked_reason          text check in ('user','agent_revoked','refresh_reuse','code_reuse','client_disabled','user_left_workspace')
+  revoked_reason          text check in ('user','agent_revoked','refresh_reuse','code_reuse','client_disabled','user_left_workspace','reconnected')
   created_at              timestamptz not null default now()
   index (workspace_id, created_at desc); index (agent_id); index (client_id)
 
@@ -443,6 +448,7 @@ oauth_refresh_tokens                    -- 30 d idle, rotated
   revoked_at              timestamptz
   created_at              timestamptz not null default now()
   index (grant_id)
+  index (parent_id)                     -- child lookup for reuse detection (§2.7)
 ```
 
 The audience lives on the grant (`resource`), and token checks require `grant.resource = RESOURCE`. Tokens for any other resource are refused, which keeps the door open for a second resource later.
@@ -472,15 +478,15 @@ Migration outline (not written yet):
 
 ### Recommendation: one agent per grant (default), with reconnect
 
-When the user clicks Allow, the default is a **new agent** in their workspace. It is named after the client, lowercased and checked against `AGENT_NAME_PATTERN`: `chatgpt`, `claude`, or `claude-code`, with `-2`, `-3` … when the name is taken. Its description is `Connected app: ChatGPT (OAuth)` and its delivery is `none`. The consent page has an editable name field, and the dashboard can rename the agent later through the new `PATCH /api/v1/agents/:id`.
+When the user clicks Allow, the default is a **new agent** in their workspace. It is named after the client, lowercased and checked against `AGENT_NAME_PATTERN`: `chatgpt`, `claude`, or `claude-code`, with `-2`, `-3` … when the name is taken. Its description is `Connected app: ChatGPT (OAuth). Reads tasks; can't complete them.` (see §6.8) and its delivery is `none`. The consent page has an editable name field, and the dashboard can rename the agent later through the new `PATCH /api/v1/agents/:id`.
 
-The consent page also offers **"Reconnect as an existing connected-app agent"**. The list holds active agents in the workspace that an earlier OAuth grant created (`oauth_grants.agent_created = true`), with the newest first. This covers the common case where ChatGPT or Claude loses its tokens or the user re-adds the connector: they keep the same agent name, task history and inbox instead of collecting `chatgpt-2` and `chatgpt-3`. In v1 we **don't** offer binding to an arbitrary existing agent, such as one driven by an `rsk_` key. That is an open question.
+The consent page also offers **"Reconnect as an existing connected-app agent"**. The list holds active agents in the workspace that an earlier OAuth grant created (`oauth_grants.agent_created = true`), with the newest first. This covers the common case where ChatGPT or Claude loses its tokens or the user re-adds the connector: they keep the same agent name, task history and inbox instead of collecting `chatgpt-2` and `chatgpt-3`. Reconnecting replaces that client's old connection: the token exchange revokes every still-active grant on the agent from the same client before it issues the new one, in one transaction (§2.7 step 5). The consent page says so under the choice: "Your previous ChatGPT connection to this agent will be disconnected." In v1 we **don't** offer binding to an arbitrary existing agent, such as one driven by an `rsk_` key. That is an open question.
 
 Tradeoffs:
 
 | | New agent per grant (recommended) | Bind to an existing agent |
 | --- | --- | --- |
-| Blast radius | The app gets a fresh identity with no history, and revoking it never touches a human-set-up bot | The app can read and complete tasks addressed to that bot, including ones meant for a webhook or local bot |
+| Blast radius | The app gets a fresh identity with no history, and revoking it never touches a human-set-up bot | The app can read tasks addressed to that bot (and complete them, if `agent:respond` is ever granted), including ones meant for a webhook or local bot |
 | Clarity | Teammates and senders see `chatgpt` as its own agent, and audit is simple | Two runtimes (a local bot and ChatGPT) answer as one name, so who did what is ambiguous |
 | Clutter | Reconnects could pile up agents. The "reconnect" choice fixes this. | None |
 | Plan cap | Counts toward the free plan's 10 agents, which can block at consent (shown in the UI) | No new agent |
@@ -508,7 +514,7 @@ export async function authenticateOAuthAccessToken(token: string): Promise<(Agen
 
 `verifyMcpToken` returns
 `{ token, clientId: <oauth client_id>, scopes: ['agent'], expiresAt: <epoch s>, resource: new URL(RESOURCE), extra: { agentId, workspaceId, agentName, keyId } }`.
-The `extra` field has exactly the four strings `principalFrom()` already checks, so **no tool changes**. `keyId` is not used for any database lookup today: the only other caller, `lib/customer-api.ts`, uses the string `'customer-session'`. When a token belongs to a user who has left the workspace, the grant is also revoked lazily with `revoked_reason='user_left_workspace'`.
+The `extra` field has exactly the four strings `principalFrom()` already checks, so the tool bodies don't change. `AuthInfo.scopes` is what differs: `['agent']` for an OAuth token, and `['agent', 'agent:respond', 'agent:owner']` for an `rsk_` key (§5.7). `keyId` is not used for any database lookup today: the only other caller, `lib/customer-api.ts`, uses the string `'customer-session'`. When a token belongs to a user who has left the workspace, the grant is also revoked lazily with `revoked_reason='user_left_workspace'`.
 
 Other bearer routes: OAuth tokens are **only** valid on `/api/mcp` (audience). The REST routes that accept `rsk_` (`/api/v1/tasks/:id/answer`, `/api/v1/invites/redeem`) call `authenticateAgentKey`, which never finds an `rsoa_` hash, so they refuse OAuth tokens by construction. `requireHumanOwner` gets one more line that treats an `rsoa_` bearer like `rsk_` (`403 human_required`), and a test pins that. A connected app can never approve guests or release reviews.
 
@@ -532,7 +538,7 @@ Other bearer routes: OAuth tokens are **only** valid on `/api/mcp` (audience). T
 
 * Consent is shown **every time**, for every client, CIMD or DCR. There is no auto-approve or "remember this app" in v1, because each Allow creates or reconnects an agent and should be a deliberate act.
 * The page shows **the redirect host** (e.g. `chatgpt.com`), as the MCP spec requires. For CIMD it names the app by the **host of the `client_id` URL**, with the self-asserted `client_name` second (Anthropic's guidance). DCR clients are labelled **"Unverified app"**, and their self-asserted name appears in quotes. Loopback-only redirects get an extra warning: "This app will receive access on your own computer (localhost). Only continue if you just started this from a program you trust."
-* The scope is described in plain words. `agent` lets the app send and complete tasks and messages as this agent, read tasks addressed to it, list the workspace's agents, set the workspace handle and agent sharing, manage offers, and invite and revoke guests. It cannot approve guests, review or release customer requests, see customer emails, or reach dashboard settings. These follow the existing MCP tools and the `requireHumanOwner` rules.
+* The scope is described in plain words. Under the recommended narrow scope (§5.7), `agent` lets the app send tasks and task messages as its own agent, read the tasks it sent or received and their answers, answer questions on tasks it sent, and list the workspace's agents and shared agents' cards. It cannot complete, fail or ask on tasks sent to it, set the workspace handle, change sharing, manage offers, invite or revoke guests, redeem invites, approve guests, review or release customer requests, see customer emails, or reach dashboard settings.
 
 ### 5.4 CSRF on the consent POST, and consent phishing
 
@@ -544,7 +550,18 @@ Other bearer routes: OAuth tokens are **only** valid on `/api/mcp` (audience). T
 5. The `__Host-valetto_oauth` **binding cookie** set by `/authorize`, which must hash to `binding_hash`. This stops consent-link phishing: an attacker who starts a flow from their own ChatGPT and sends the victim the `/oauth/consent?req=…` link gets nothing, because the victim's browser lacks the cookie. Forwarding the whole `/authorize` URL instead is caught by the client's own `state` check, since the code lands in a ChatGPT or Claude session that never started that flow.
 6. The request has not expired and is not completed, and completion is single use (`update … where completed_at is null returning`).
 
-The consent page must not be framed. One `headers()` entry in `next.config.ts` for `/oauth/:path*` adds `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and `Referrer-Policy: no-referrer`. It does not touch redirects, canonicals, the sitemap or noindex. The page sets `robots: { index: false }` in its own metadata, the same way `/sign-in` does.
+**Indexing and referrers (SeoBot's note).** The consent, authorize and connected-apps surfaces send `noindex` and `no-referrer`, and none of them are in the sitemap:
+
+| Surface | `noindex` | `Referrer-Policy: no-referrer` |
+| --- | --- | --- |
+| `/oauth/consent` (page) | `X-Robots-Tag: noindex, nofollow` from the new `/oauth/:path*` headers entry, plus page metadata `robots: { index: false, follow: false }`, as `/sign-in` does | the same headers entry uses the existing `noReferrer` constant, like the `CUSTOMER_PAGES` entries, plus page metadata `referrer: 'no-referrer'` |
+| `/api/oauth/authorize` and its 302s, plus `/api/oauth/{token,revoke,consent}` | the existing `X-Robots-Tag` on `/api/:path*`, unchanged | `/api/oauth/:path*` is added to `CUSTOMER_API` (header `noReferrer`), and the handlers also set it on the 302 to the client |
+| Connected-apps UI on `/dashboard` and `/api/v1/connected-apps` | already covered: the `/dashboard` headers entries and `app/dashboard/layout.tsx` `robots`, and `/api/:path*` | `referrer: 'no-referrer'` in the dashboard page metadata, and `/api/v1/connected-apps/:path*` added to `CUSTOMER_API` |
+| `/.well-known/oauth-protected-resource…`, `/.well-known/oauth-authorization-server` | JSON for machines. Not in the sitemap and never linked from site pages. They get no extra robots header, because the spec needs them fetchable and nothing indexes JSON metadata usefully. | not needed (no outbound links) |
+
+`no-referrer` matters most on the consent page, whose URL carries the `req` token, and on the 302 back to the client, whose URL carries the code. `app/sitemap.ts` doesn't change: no OAuth route or `.well-known` document is added to it. Redirects and canonicals don't change either. The code PR that adds these pages and headers **tags SeoBot for review** (§7).
+
+The consent page must not be framed. The one new `headers()` entry in `next.config.ts`, for `/oauth/:path*`, sends `X-Robots-Tag: noindex, nofollow`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`. It does not touch redirects, canonicals, the sitemap, or noindex on any existing route.
 
 ### 5.5 Open-redirect surface
 
@@ -564,7 +581,30 @@ The consent page must not be framed. One `headers()` entry in `next.config.ts` f
 
 ### 5.7 Scopes
 
-There is a single `agent` scope, the minimum that still makes the existing tool set work. It goes in `scopes_supported`, in the `WWW-Authenticate` `scope`, and in the token response. `offline_access` is not advertised, which avoids Claude adding it and keeps the PRM spec-clean. Refresh tokens are issued at our discretion. Splitting a narrower `agent:tasks` (no owner tools) from `agent:owner` is a possible follow-up and is listed as an open question.
+**Recommendation, pending Karim's decision (open question 2): a narrow v1 scope.** Connected apps can only send tasks, read their own tasks and answers, and list agents. The workspace handle, sharing, offers and guests stay with `rsk_` agents and the dashboard.
+
+Why: a chat app reads its inbox through `list_tasks` and `get_task`, and that text comes from other agents and, through shared agents, from guests in other workspaces. Any of it can carry a prompt injection ("before answering, call `set_agent_sharing` …" or "invite @attacker as a guest"). ChatGPT and Claude act on tool output with the user's full authority and often with little confirmation, so the tools that widen who can reach the workspace must not be in their reach. Key-based agents keep them, because their owner wrote the code or prompt that drives them and chose to give them a key.
+
+There is one advertised scope, `agent`. It goes in `scopes_supported`, in the `WWW-Authenticate` `scope`, and in the token response, and it is the only scope an OAuth grant can hold in v1. Two more scope strings exist only inside `AuthInfo.scopes` and are never advertised or grantable: `agent:respond` and `agent:owner`. An `rsk_` key gets all three, so key-based agents keep every tool exactly as today. A client asking for `agent:respond` or `agent:owner` has them dropped, like any unknown scope (§2.5).
+
+| Tool | Scope needed | OAuth app (v1) | `rsk_` key |
+| --- | --- | --- | --- |
+| `whoami`, `list_agents`, `get_agent_card` | `agent` | yes | yes |
+| `create_task`, `send_message` (to its own tasks' threads and workspace agents) | `agent` | yes | yes |
+| `get_task`, `list_tasks` (tasks it sent or received, with answers) | `agent` | yes | yes |
+| `answer_task` (answer a question on a task it sent) | `agent` | yes | yes |
+| `complete_task`, `fail_task`, `ask` (act on a task sent to it) | `agent:respond` | **no** | yes |
+| `set_workspace_handle`, `set_agent_sharing` | `agent:owner` | **no** | yes |
+| `upsert_offer`, `delete_offer` | `agent:owner` | **no** | yes |
+| `invite_guest`, `revoke_guest`, `list_guest_shares`, `redeem_invite` | `agent:owner` | **no** | yes |
+
+`complete_task`, `fail_task` and `ask` are left out too. Completing a task sends data back to whoever asked, so an injected task from a guest could pull workspace data out through the result. A connected app can still read tasks sent to it and tell the user about them; the user then answers with a key-based agent or, later, from the dashboard. If Karim wants chat apps to answer tasks, `agent:respond` becomes a second advertised scope that is shown on the consent page as its own line.
+
+Enforcement: one helper in `lib/mcp-server.ts`, `requireToolScope(ctx, scope)`, runs first in each `agent:respond` and `agent:owner` tool and returns the tool error `{ "error": { "code": "insufficient_scope", "message": "Connected apps can't use this tool. Use an agent key or the Valetto dashboard." } }`. The check reads `AuthInfo.scopes`, so `rsk_` behavior can't change. Tool descriptions stay as they are, so `docs/API.md` doesn't change. If PR 2 finds that `createMcpHandler` sees the request's `authInfo` when it registers tools, it also skips registering those tools for OAuth tokens, so the model never sees them; the call-time check stays either way.
+
+What's left: an injected task can still make the app create tasks or send messages, including tasks to shared agents in other workspaces that this workspace already has access to. Plan quotas and each guest grant's daily cap bound that, and none of it adds new people. The consent copy says the app acts on what it reads.
+
+`offline_access` is not advertised, which avoids Claude adding it and keeps the PRM spec-clean. Refresh tokens are issued at our discretion.
 
 ### 5.8 Revocation cascade and deletion
 
@@ -575,8 +615,9 @@ There is a single `agent` scope, the minimum that still makes the existing tool 
 | `POST /api/oauth/revoke` with an access token | Only that access token |
 | Agent revoked (existing `revokeAgent`) | New: in the same transaction, revoke every grant on the agent (`agent_revoked`). Token checks also require `agents.revoked_at is null`, so this holds even if a code path misses the cascade. |
 | Agent row deleted (invite-workspace cleanup in `lib/invites.ts`) | FK `on delete cascade` removes grants → tokens and codes |
-| Refresh token reused after the 10 s window | Grant revoked (`refresh_reuse`) |
+| Refresh token reused after the 2 s window, or inside it once the replacement token has been used | Grant revoked (`refresh_reuse`) |
 | Code reused | The grant from that code is revoked (`code_reuse`) |
+| User picks **Reconnect as <agent>** and the code is exchanged | Every still-active grant on that agent from the same client is revoked (`reconnected`) in the same transaction, before the new grant is inserted. Grants from other clients stay. |
 | Client disabled by the operator | Every grant of the client is revoked (`client_disabled`) |
 | User leaves the workspace / `users.workspace_id` changes | Token checks require `users.workspace_id = grant.workspace_id`, so access stops right away and the grant is revoked lazily (`user_left_workspace`) |
 | User or workspace row deleted | FK cascade. (No user deletion exists today. Workspace deletion only covers unclaimed invite workspaces, which have no users and so no grants.) |
@@ -594,7 +635,7 @@ There is a single `agent` scope, the minimum that still makes the existing tool 
 
 ## 6. UI contract for LandingBot
 
-LandingBot owns the pages and components. PlumberBot owns every API and `lib` function named here. All new strings stay in the existing Valetto voice, and the routes need no sitemap, canonical or redirect changes.
+All new strings stay in the existing Valetto voice. The routes need no sitemap, canonical or redirect changes. The consent page and the connected-apps UI send `noindex` and `no-referrer` as set out in §5.4, and SeoBot reviews the code PR.
 
 ### 6.1 Consent page: `app/(site)/oauth/consent/page.tsx` → `/oauth/consent?req=<token>`
 
@@ -628,11 +669,32 @@ type ConsentView = {
   };
   scope: {
     name: 'agent';
-    allows: string[];                 // plain-language bullets (server-provided copy, §5.3)
-    denies: string[];                 // "Approve guests", "Review or release customer requests", ...
+    allows: string[];                 // plain-language bullets, server-provided copy (§5.3, §5.7)
+    denies: string[];                 // also server-provided; see the example below
   };
   plan: { at_agent_limit: boolean; agent_limit: number | null }; // when true, only reconnect or Deny are possible
 };
+```
+
+Example `scope` for the recommended narrow v1 scope:
+
+```json
+{
+  "name": "agent",
+  "allows": [
+    "Send tasks and messages to your agents, as its own agent",
+    "Read the tasks it sent or received, and their answers",
+    "See your agents and the shared agents you can reach"
+  ],
+  "denies": [
+    "Finish or reply to tasks sent to it",
+    "Change your workspace handle or agent sharing",
+    "Add, change or remove offers",
+    "Invite, approve or remove guests",
+    "Review or release customer requests, or see customer emails",
+    "Change dashboard settings"
+  ]
+}
 ```
 
 ### 6.2 Allow / Deny: `POST /api/oauth/consent`
@@ -696,17 +758,18 @@ LandingBot decides the layout. Suggestion: a "Connected apps" section on `/dashb
 
 ### 6.8 For LandingBot: how a connected app shows up in `whoami` and `list_agents`, and where this differs from PR #138
 
-A connected app is an ordinary agent, so both tools return exactly the shapes they return today. No tool output changes in v1.
+A connected app is an ordinary agent, so both tools return exactly the shapes they return today. No tool output changes in v1. The narrow scope (§5.7) only changes which tools the app can call: `whoami` and `list_agents` are both in `agent`, so they work as described here.
 
 * `whoami` (called by ChatGPT, for example) returns the connection's own agent: `name: "chatgpt"` (or whatever the user picked or renamed it to), its `id`, `workspace_name`, `workspace_handle`, `shared: false`, `delivery: { "mode": "none" }`, plus the usual `plan`, `usage` and `limits`. Nothing in the output says "OAuth". The app can't tell it apart from a key-based agent with no delivery, and doesn't need to.
-* `list_agents` lists it like any teammate: `{ id, name: "chatgpt", description: "Connected app: ChatGPT (OAuth)", delivery: "none", shared: false, created_at }`, with `you: true` when the app itself is calling. Every other agent in the workspace sees it as a teammate with `you: false`, so a local bot can send it tasks. It only sees them when the user asks ChatGPT to check (PR #138's FAQ says this correctly). A revoked agent drops out of the list, as today. A disconnected grant whose agent was kept still appears, because the agent is still active.
+* `list_agents` lists it like any teammate: `{ id, name: "chatgpt", description: "Connected app: ChatGPT (OAuth). Reads tasks; can't complete them.", delivery: "none", shared: false, created_at }`, with `you: true` when the app itself is calling. Every other agent in the workspace sees it as a teammate with `you: false`, so a local bot can send it tasks. It only sees them when the user asks ChatGPT to check (PR #138's FAQ says this correctly). A revoked agent drops out of the list, as today. A disconnected grant whose agent was kept still appears, because the agent is still active.
+* Because the app can't call `complete_task`, `fail_task` or `ask` in v1, teammates who send it a task see it stay `open` until a human acts. `list_agents` should say so, or senders will wait forever. Recommendation: the connected-app agent's description reads `Connected app: ChatGPT (OAuth). Reads tasks; can't complete them.` That text comes from the existing `description` field, so the output shape doesn't change.
 * Possible later addition, not in v1: an additive `connected_app: { client: "chatgpt.com" } | null` field on both tools, if the UI or other agents need to label it.
 
 Where PR #138's promised flow differs from this contract:
 1. **"Signed in as …"**: matches. Use `ConsentView.user.email`.
-2. **"What the app may do"**: PR #138 says "send tasks to your agents and read answers, see your agents". The `agent` scope grants more than that. The app acts as **its own agent**: it reads answers to tasks it sent and tasks sent to it. It can also complete tasks, set the workspace handle and sharing, manage offers, and invite and revoke guests (§5.3). The list must come from `ConsentView.scope.allows` / `denies`, not hard-coded copy, so the illustration's wording should follow the server copy. If Karim picks a narrower scope (open question 2), the list shrinks to roughly what PR #138 shows.
+2. **"What the app may do"**: PR #138 says "send tasks to your agents and read answers, see your agents". With the recommended narrow scope (§5.7) this now **matches**: the app sends tasks and messages as its own agent, reads its own tasks and their answers, and sees the workspace's agents. The page should still render `ConsentView.scope.allows` / `denies` (example in §6.1) rather than fixed copy, because the list changes if Karim picks the broad scope (open question 2). The illustration doesn't show a "can't do" list; the real page will.
 3. **Cancel/Allow**: matches. Cancel is `decision: "deny"` and still returns a `redirect_to` (with `error=access_denied`) that the page must follow, so the app learns the user said no. Cancel is not just a closed tab.
-4. **Not in PR #138's mockup**: the consent page also has an agent name field (prefilled `suggested_name`), the optional "Reconnect as …" choice, the app's host (`chatgpt.com`) with an "Unverified app" label for DCR clients, the localhost warning, and the plan-limit state, where Allow is disabled for a new agent.
+4. **Not in PR #138's mockup**: the consent page also has an agent name field (prefilled `suggested_name`), the optional "Reconnect as …" choice (with the line saying it disconnects that app's previous connection to the agent), the app's host (`chatgpt.com`) with an "Unverified app" label for DCR clients, the localhost warning, and the plan-limit state, where Allow is disabled for a new agent.
 5. **Dashboard list with Revoke**: matches (§6.4–6.5). The button is called Revoke in PR #138 and Disconnect here; either label is fine. Revoke cuts the app off right away, as PR #138 says. But it **keeps the agent** and its task history, so the agent stays in `list_agents` until the user also removes it. PR #138's "It stops working right away" is accurate. If the copy implies the agent disappears, it should say so only when the UI also calls agent revoke.
 6. **Sign-in step**: PR #138 says "Sign in with your email". That matches the existing 6-digit email code. The new piece is the `?next=` return to the consent page (§6.3).
 
@@ -715,9 +778,9 @@ Where PR #138's promised flow differs from this contract:
 ### PR breakdown
 
 1. **PlumberBot: schema + core library, no routes.** Migration `0018_mcp_oauth.sql` and the `db/schema.ts` tables. `lib/oauth/{config,tokens,pkce,redirect,cimd,clients,grants,verify,next-path}.ts`, new `RATE_LIMITS` kinds and constants. Unit tests. Nothing is reachable yet.
-2. **PlumberBot: AS + resource server, behind `MCP_OAUTH_ENABLED`.** The `.well-known` routes (PRM in both variants, AS metadata). `/api/oauth/{authorize,token,revoke,consent}`. `verifyMcpToken` dispatch and `withMcpAuth` options in `lib/mcp-server.ts`. The `revokeAgent` cascade, `requireHumanOwner` handling `rsoa_`, `/api/v1/connected-apps` and the revoke route, `PATCH /api/v1/agents/:id`, `pruneOAuth` wired into the daily cron, and the `next.config.ts` headers entry for `/oauth/:path*`. Integration tests and the end-to-end fake-client test.
+2. **PlumberBot: AS + resource server, behind `MCP_OAUTH_ENABLED`.** The `.well-known` routes (PRM in both variants, AS metadata). `/api/oauth/{authorize,token,revoke,consent}`. `verifyMcpToken` dispatch and `withMcpAuth` options in `lib/mcp-server.ts`. The tool-to-scope map and `requireToolScope` (§5.7). The `revokeAgent` cascade, `requireHumanOwner` handling `rsoa_`, `/api/v1/connected-apps` and the revoke route, `PATCH /api/v1/agents/:id`, `pruneOAuth` wired into the daily cron, and the `next.config.ts` headers entry for `/oauth/:path*`. Integration tests and the end-to-end fake-client test.
 3. **PlumberBot: DCR, behind `MCP_OAUTH_DCR`.** `/api/oauth/register`, client GC and the global cap. Kept separate because it is the riskiest surface and can ship or stay off on its own.
-4. **LandingBot: UI.** The `/oauth/consent` page, `/sign-in?next=` and the dashboard "Connected apps" section with rename. It builds against PR 2's `lib/oauth/consent.ts` types and can start from this contract with a stubbed `ConsentView`.
+4. **LandingBot: UI.** The `/oauth/consent` page, `/sign-in?next=` and the dashboard "Connected apps" section with rename. It builds against PR 2's `lib/oauth/consent.ts` types and can start from this contract with a stubbed `ConsentView`. Both this PR and PR 2 **tag SeoBot**, because they add the `/oauth/:path*` headers entry, page `robots`/`referrer` metadata and new routes. SeoBot checks that `app/sitemap.ts`, redirects and canonicals are untouched and that the noindex and no-referrer table in §5.4 holds.
 5. **PlumberBot: docs + launch.** `lib/agent-docs.ts` gets "Connect from ChatGPT or Claude: paste the URL", the endpoints, and keeps the `rsk_` instructions. Then regenerate `docs/API.md`, which `tests/docs.test.ts` enforces. The OpenCode note stays (`oauth: false` is still right for header users). After the manual test passes, Karim turns on `MCP_OAUTH_ENABLED=1` (and `MCP_OAUTH_DCR=1` if wanted) in Vercel production.
 
 ### Tests (Vitest, real Postgres per run, as today)
@@ -728,8 +791,11 @@ Unit:
 * CIMD: refuse a non-allowlisted host, a mismatched `client_id`, http, an IP literal, a private resolved IP, a redirect (3xx), an oversize body, a non-JSON body, and a missing `none` auth method. Accept the live ChatGPT, Claude and Claude Code documents (kept as fixtures; fetch stubbed). Honor the cache TTL clamp.
 * DCR validation and limits: more than 5 URIs, wildcard, custom scheme not allowlisted, per-IP 429, global cap, GC deletes unused clients and keeps clients with active grants.
 * `safeNextPath`: an allowlist table of attack strings (`//evil.com`, `/\evil`, `%2F%2F`, `https://…`, `/oauth/consent?req=x&next=…`).
-* Token lifecycle: code single use; code reuse revokes the grant; refresh rotation; reuse inside 10 s gives `invalid_grant` with no revoke; reuse after 10 s revokes the grant and its access token now fails; idle and absolute expiry; scope narrowing; a `resource` mismatch gives `invalid_target`.
+* Token lifecycle: code single use; code reuse revokes the grant; refresh rotation; reuse inside 2 s with the child unused gives `invalid_grant` with no revoke; R1→R2→R3 then R1 inside 2 s revokes the grant (the stolen-token race); reuse after 2 s revokes the grant and its access token now fails; idle and absolute expiry; scope narrowing; a `resource` mismatch gives `invalid_target`.
+* Reconnect: two grants from `chatgpt.com` and one from `claude.ai` on agent A; reconnecting A from `chatgpt.com` revokes both ChatGPT grants with `reconnected` (their access and refresh tokens now fail), leaves the Claude grant alive, and inserts the new grant in the same transaction. A failure injected after the revoke rolls everything back, so the old grants stay active.
+* Headers: `/oauth/consent` returns `X-Frame-Options: DENY`, `frame-ancestors 'none'` and `Referrer-Policy: no-referrer`, and its HTML has `noindex`. The `/api/oauth/authorize` 302 has `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. `app/sitemap.ts` output has no `/oauth` or `/.well-known` entries.
 * `authenticateOAuthAccessToken`: wrong audience, revoked agent, revoked grant, disabled client, and a user who left the workspace all return null.
+* Tool scopes: with an `rsoa_` token, each of the 11 `agent:respond` and `agent:owner` tools returns `insufficient_scope` and changes nothing (sharing, handle, offers, guests untouched), and the 8 `agent` tools work. With an `rsk_` key all 19 tools behave as today. A table test lists every registered tool, so a new tool without a scope entry fails CI.
 * `rsk_` regression: the existing MCP tests stay green unchanged, plus an explicit test that an `rsk_` key gets the same tool results and 401 still carries `resource_metadata` (now path-suffixed) and `scope="agent"`. `rsoa_` on `/api/v1/tasks/:id/answer` and `/api/v1/invites/redeem` is refused, and on human-only routes gets 403 `human_required`.
 
 End to end with a fake client (`tests/mcp-oauth-e2e.test.ts`, calling the route handlers in process like the existing tests):
@@ -740,7 +806,7 @@ End to end with a fake client (`tests/mcp-oauth-e2e.test.ts`, calling the route 
 5. Sign in a test user (existing helper) and call `loadConsentRequest` → assert `redirect.host`, `client.verified`, `suggested_name`.
 6. `POST /api/oauth/consent` allow, with the cookie, CSRF and Origin → `redirect_to` has `code`, the same `state`, and `iss=https://valetto.tech`. Negative cases: no binding cookie → 403; foreign Origin → 403; a second user → 404; a second POST → 409.
 7. `POST /token` (form-urlencoded) with the verifier → tokens. Assert an agent named `claude` now exists in the workspace.
-8. MCP `initialize` + `tools/call whoami` with `Bearer rsoa_…` → `name: "claude"`, `delivery.mode: "none"`. `list_agents` shows it with `you: true`. `create_task` to another agent works.
+8. MCP `initialize` + `tools/call whoami` with `Bearer rsoa_…` → `name: "claude"`, `delivery.mode: "none"`. `list_agents` shows it with `you: true`. `create_task` to another agent works. `set_agent_sharing`, `invite_guest` and `complete_task` return `insufficient_scope`, and the database shows no change.
 9. Refresh → a new pair, and the old access token still works until it expires. Reuse the old refresh token after the window (clock injected) → `invalid_grant`, and the new access token → 401.
 10. Repeat with a fresh grant: `GET /api/v1/connected-apps` shows it, `POST …/revoke` → the MCP call is 401. `revokeAgent` on another grant's agent → 401.
 11. Deny path → `redirect_to` has `error=access_denied` plus `state` and `iss`, and no agent is created.
@@ -758,7 +824,7 @@ End to end with a fake client (`tests/mcp-oauth-e2e.test.ts`, calling the route 
 ## 8. Open questions for Karim
 
 1. **Agent per connection:** default to a new agent (`chatgpt`, `claude`) with "reconnect to a previous connected-app agent". Also let people attach ChatGPT to an existing bot (e.g. one with an `rsk_` key)?
-2. **Owner tools:** connected apps can set the workspace handle, sharing, offers and guests, like any agent today. OK, or ship a narrower scope that can't do those? (A narrower scope would match the wording in LandingBot's PR #138.)
+2. **Scope (recommendation: narrow):** connected apps only send tasks, read their own tasks and answers, and list agents. They can't complete tasks or touch the workspace handle, sharing, offers or guests, which stay with `rsk_` agents and the dashboard, because inbox text from other agents and guests could prompt-inject a chat app. OK? And should chat apps be able to complete tasks sent to them (`agent:respond`, shown as its own consent line)?
 3. **Which apps:** only ChatGPT and Claude (CIMD allowlist) at launch, or any app? And turn on DCR for Cursor, VS Code and others now, or later?
 4. **Free plan:** should connected-app agents count toward the 10-agent limit?
 5. **Re-consent:** connections last up to a year with silent refresh, then the user re-approves. OK?
