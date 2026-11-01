@@ -3,7 +3,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { AGENT_NAME_PATTERN } from '../../../lib/constants.ts';
 import { agentKeyPath, joinCodeEnvName, registerAgent, resolveJoinCode } from './register.ts';
-import { watch } from './watch.ts';
+import { watch, type WatchResult } from './watch.ts';
 import {
   WATCHER_NOT_RUNNING_MESSAGE,
   alreadyRunningMessage,
@@ -47,9 +47,19 @@ function flag(argv: string[], name: string): string | undefined {
 
 export const DEFAULT_RELAY_URL = 'https://valetto.tech';
 
-/** --url, then REPLYSLIP_URL, then valetto.tech. Shared by register and watch. */
-function relayOrigin(argv: string[], env: NodeJS.ProcessEnv): string {
-  return flag(argv, '--url') ?? env.REPLYSLIP_URL ?? DEFAULT_RELAY_URL;
+export const URL_MISSING_MESSAGE = '--url needs a value, for example --url https://valetto.tech. Leave --url off to use REPLYSLIP_URL or https://valetto.tech.';
+
+/** `--url` given as the last argument or followed by another flag. A blank value (`--url ""`) still falls back. */
+export function urlFlagMissingValue(argv: string[]): boolean {
+  const index = argv.indexOf('--url');
+  if (index === -1) return false;
+  const value = argv[index + 1];
+  return value === undefined || value.startsWith('-');
+}
+
+/** --url, then REPLYSLIP_URL, then valetto.tech. Empty or whitespace-only values fall through. Shared by register and watch. */
+export function relayOrigin(argv: string[], env: NodeJS.ProcessEnv): string {
+  return flag(argv, '--url')?.trim() || env.REPLYSLIP_URL?.trim() || DEFAULT_RELAY_URL;
 }
 
 function positionals(argv: string[]): string[] {
@@ -90,6 +100,11 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     }
     stdout(agentKeyPath(name, io.home));
     return 0;
+  }
+
+  if ((command === 'register' || command === 'watch') && !argv.includes('--status') && urlFlagMissingValue(argv)) {
+    stderr(URL_MISSING_MESSAGE);
+    return 1;
   }
 
   if (command === 'register') {
@@ -158,7 +173,7 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     stderr('--interval must be at least 500 milliseconds.');
     return 1;
   }
-  let result: { blockedPid?: number };
+  let result: WatchResult;
   try {
     result = await watch({
       url,
@@ -173,7 +188,7 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     stderr(err instanceof Error ? err.message : 'Watcher stopped.');
     return 1;
   }
-  if (result.blockedPid !== undefined) stdout(alreadyRunningMessage(result.blockedPid));
+  if (result.blockedPid !== undefined) stdout(alreadyRunningMessage(result.blockedPid, result.blockedOrigin ?? url, result.blockedPath ?? ''));
   return 0;
 }
 

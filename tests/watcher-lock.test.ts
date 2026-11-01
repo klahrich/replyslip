@@ -3,17 +3,21 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { mkdtemp, stat } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { runReplyslip } from '../packages/cli/src/cli';
+import { URL_MISSING_MESSAGE, runReplyslip } from '../packages/cli/src/cli';
+import { watch } from '../packages/cli/src/watch';
 import {
+  HOSTED_ORIGINS,
+  STALE_TEMP_MS,
   WATCHER_NOT_RUNNING_MESSAGE,
   acquireWatcherLock,
   alreadyRunningMessage,
   bindWatcherLockLifecycle,
+  legacyWatcherScopeId,
   listLiveWatcherLocks,
   machineBootId,
   normalizeOrigin,
@@ -53,12 +57,17 @@ function writeLock(
     startedAt?: string;
     hostname?: string;
     bootId?: string;
+    /** Write it the way replyslip 0.1.0 did: named from origin and workspace, no workspaceId field. */
+    legacy?: boolean;
   },
 ): string {
   const origin = normalizeOrigin(fields.origin ?? ORIGIN);
   const workspaceId = fields.workspaceId === undefined ? 'ws-1' : fields.workspaceId;
   const watcherKey = fields.watcherKey ?? KEY;
-  const file = watcherLockPath(home, watcherScopeId(origin, workspaceId, watcherKey));
+  const file = watcherLockPath(
+    home,
+    fields.legacy ? legacyWatcherScopeId(origin, workspaceId, watcherKey) : watcherScopeId(workspaceId, watcherKey),
+  );
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(
     file,
@@ -68,19 +77,21 @@ function writeLock(
       hostname: fields.hostname ?? hostname(),
       bootId: fields.bootId ?? machineBootId(),
       origin,
+      ...(!fields.legacy && workspaceId ? { workspaceId } : {}),
     })}\n`,
   );
   return file;
 }
 
 describe('watcher lock', () => {
-  it('names the lock from the origin and workspace, never the key', async () => {
+  it('names the lock from the workspace alone, never the key or the address', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
-    const scope = createHash('sha256').update(`${ORIGIN}\nws-1`).digest('hex').slice(0, 16);
-    expect(watcherScopeId(`${ORIGIN}/`, 'ws-1', KEY)).toBe(scope);
+    const scope = createHash('sha256').update('workspace\nws-1').digest('hex').slice(0, 16);
+    expect(watcherScopeId('ws-1', KEY)).toBe(scope);
     const keyHash = createHash('sha256').update(KEY).digest('hex');
-    expect(watcherScopeId(ORIGIN, null, KEY)).toBe(
-      createHash('sha256').update(`${ORIGIN}\n${keyHash}`).digest('hex').slice(0, 16),
+    expect(watcherScopeId(null, KEY)).toBe(createHash('sha256').update(`key\n${keyHash}`).digest('hex').slice(0, 16));
+    expect(legacyWatcherScopeId(`${ORIGIN}/`, 'ws-1', KEY)).toBe(
+      createHash('sha256').update(`${ORIGIN}\nws-1`).digest('hex').slice(0, 16),
     );
 
     const now = new Date('2026-10-25T12:00:00.000Z');
@@ -98,18 +109,19 @@ describe('watcher lock', () => {
       bootId: machineBootId(),
       origin: ORIGIN,
       workspaceId: 'ws-1',
+      token: expect.stringMatching(/^[0-9a-f]{16}$/),
     });
     const info = await stat(acquired.hold.path);
     expect(info.mode & 0o077).toBe(0);
 
     const second = acquireWatcherLock({ home, origin: ORIGIN, workspaceId: 'ws-1', watcherKey: KEY });
-    expect(second).toEqual({ ok: false, reason: 'running', pid: process.pid });
+    expect(second).toEqual({ ok: false, reason: 'running', pid: process.pid, origin: ORIGIN, path: acquired.hold.path });
     expect(readWatcherLock(acquired.hold.path)?.startedAt).toBe(now.toISOString());
     acquired.hold.release();
     expect(readWatcherLock(acquired.hold.path)).toBeNull();
   });
 
-  it('lets two workspaces and two servers each hold a lock in one home', async () => {
+  it('lets two workspaces each hold a lock in one home, and blocks the same workspace on another address', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
     const host = hostname();
     const bootId = 'boot-shared';
@@ -144,10 +156,11 @@ describe('watcher lock', () => {
       bootId,
       isAlive,
     });
-    expect(first.ok && second.ok && otherServer.ok).toBe(true);
-    if (!first.ok || !second.ok || !otherServer.ok) return;
-    expect(new Set([first.hold.path, second.hold.path, otherServer.hold.path]).size).toBe(3);
-    for (const hold of [first.hold, second.hold, otherServer.hold]) {
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(otherServer).toMatchObject({ ok: false, reason: 'running', pid: 11, origin: ORIGIN });
+    expect(first.hold.path).not.toBe(second.hold.path);
+    for (const hold of [first.hold, second.hold]) {
       expect(readFileSync(hold.path, 'utf8')).not.toContain('rsw_');
     }
     const again = acquireWatcherLock({
@@ -160,7 +173,7 @@ describe('watcher lock', () => {
       bootId,
       isAlive: () => true,
     });
-    expect(again).toEqual({ ok: false, reason: 'running', pid: 11 });
+    expect(again).toMatchObject({ ok: false, reason: 'running', pid: 11, origin: ORIGIN });
     expect(readWatcherLock(first.hold.path)?.pid).toBe(11);
 
     const fallbackA = acquireWatcherLock({
@@ -230,7 +243,7 @@ describe('watcher lock', () => {
     const alive = new Set([111, 222]);
     const isAlive = (pid: number) => alive.has(pid);
     writeLock(home, { pid: 50, bootId: 'boot-old', hostname: host, startedAt: '2020-01-01T00:00:00.000Z' });
-    const file = watcherLockPath(home, watcherScopeId(ORIGIN, 'ws-1', KEY));
+    const file = watcherLockPath(home, watcherScopeId('ws-1', KEY));
 
     const nested = acquireWatcherLock({
       home,
@@ -257,9 +270,14 @@ describe('watcher lock', () => {
         expect(winner.ok).toBe(true);
       },
     });
-    expect(nested).toEqual({ ok: false, reason: 'running', pid: 222 });
+    expect(nested).toMatchObject({ ok: false, reason: 'running', pid: 222, origin: ORIGIN });
     expect(readWatcherLock(file)?.pid).toBe(222);
 
+    // Drop pid 222's alias copies so only the main lock decides the race below.
+    for (const name of readdirSync(path.dirname(file))) {
+      const full = path.join(path.dirname(file), name);
+      if (full !== file && name.endsWith('.lock')) rmSync(full);
+    }
     writeLock(home, { pid: 50, bootId: 'boot-old', hostname: host, startedAt: '2020-01-01T00:00:00.000Z' });
     const replaced = acquireWatcherLock({
       home,
@@ -284,7 +302,7 @@ describe('watcher lock', () => {
         );
       },
     });
-    expect(replaced).toEqual({ ok: false, reason: 'running', pid: 222 });
+    expect(replaced).toMatchObject({ ok: false, reason: 'running', pid: 222, origin: ORIGIN });
     expect(readWatcherLock(file)).toMatchObject({ pid: 222, startedAt: '2026-10-25T12:00:03.000Z' });
   });
 
@@ -295,7 +313,7 @@ describe('watcher lock', () => {
       const pid = child.pid ?? 0;
       const file = writeLock(home, { pid, startedAt: '2026-01-01T00:00:00.000Z' });
       const acquired = acquireWatcherLock({ home, origin: ORIGIN, workspaceId: 'ws-1', watcherKey: KEY });
-      expect(acquired).toEqual({ ok: false, reason: 'running', pid });
+      expect(acquired).toEqual({ ok: false, reason: 'running', pid, origin: ORIGIN, path: file });
       expect(readWatcherLock(file)).toMatchObject({ pid, startedAt: '2026-01-01T00:00:00.000Z' });
       expect(listLiveWatcherLocks(home)).toEqual([
         expect.objectContaining({ pid, origin: ORIGIN, startedAt: '2026-01-01T00:00:00.000Z' }),
@@ -376,8 +394,8 @@ describe('watcher lock', () => {
     const childA = liveChild();
     const childB = liveChild();
     try {
-      writeLock(home, { pid: childA.pid ?? 0, origin: 'https://a.example', workspaceId: 'ws-a' });
-      writeLock(home, { pid: childB.pid ?? 0, origin: 'https://b.example', workspaceId: 'ws-b' });
+      writeLock(home, { pid: childA.pid ?? 0, origin: 'https://a.example', workspaceId: 'ws-a', legacy: true });
+      writeLock(home, { pid: childB.pid ?? 0, origin: 'https://b.example', workspaceId: 'ws-b', legacy: true });
       writeFileSync(path.join(home, '.replyslip', 'watcher.lock'), '{"pid":1}\n');
       const status = capture();
       expect(await runReplyslip(['watch', '--status'], { home, stdout: status.stdout, stderr: status.stderr })).toBe(0);
@@ -387,7 +405,7 @@ describe('watcher lock', () => {
       ]);
 
       const blockedHome = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
-      const blockedFile = writeLock(blockedHome, { pid: childA.pid ?? 0, origin: ORIGIN, workspaceId: 'ws-1' });
+      const blockedFile = writeLock(blockedHome, { pid: childA.pid ?? 0, origin: ORIGIN, workspaceId: 'ws-1', legacy: true });
       let fetches = 0;
       const blocked = capture();
       const code = await runReplyslip(['watch', '--once', '--url', ORIGIN, '--key', KEY], {
@@ -401,7 +419,7 @@ describe('watcher lock', () => {
       });
       expect(code).toBe(0);
       expect(fetches).toBe(1);
-      expect(blocked.out).toEqual([alreadyRunningMessage(childA.pid ?? 0)]);
+      expect(blocked.out).toEqual([alreadyRunningMessage(childA.pid ?? 0, ORIGIN, blockedFile)]);
       expect(readWatcherLock(blockedFile)?.pid).toBe(childA.pid);
       expect(readFileSync(blockedFile, 'utf8')).not.toContain(KEY);
 
@@ -414,11 +432,242 @@ describe('watcher lock', () => {
       });
       expect(forcedCode).toBe(0);
       expect(forced.out).toEqual([]);
-      expect(readWatcherLock(blockedFile)).toBeNull();
+      // blockedFile is a live pre-0.1.2 lock at an alias name: --force leaves it in place.
+      expect(readWatcherLock(blockedFile)).toMatchObject({ pid: childA.pid, origin: ORIGIN });
+      expect(readWatcherLock(blockedFile)?.alias).toBeUndefined();
     } finally {
       childA.kill();
       childB.kill();
       await Promise.all([once(childA, 'exit'), once(childB, 'exit')]);
     }
+  });
+  it('refuses a valetto.tech watcher while an older replyslip.com watcher runs for the same workspace', async () => {
+    const child = liveChild();
+    try {
+      for (const legacyFields of [{}, { workspaceId: 'ws-1' }]) {
+        // 0.1.0 wrote no workspaceId; 0.1.1 wrote it. Both are named sha256(origin + newline + workspace).
+        const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
+        const old = 'https://replyslip.com';
+        const file = watcherLockPath(home, legacyWatcherScopeId(old, 'ws-1', KEY));
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(
+          file,
+          `${JSON.stringify({ pid: child.pid, startedAt: '2026-01-01T00:00:00.000Z', hostname: hostname(), bootId: machineBootId(), origin: old, ...legacyFields })}\n`,
+        );
+        const io = capture();
+        const code = await runReplyslip(['watch', '--once', '--key', KEY], {
+          home,
+          env: {},
+          stdout: io.stdout,
+          stderr: io.stderr,
+          fetchImpl: async () => new Response(JSON.stringify({ wakes: [], workspace_id: 'ws-1' }), { status: 200 }),
+        });
+        expect(code).toBe(0);
+        expect(io.out).toEqual([alreadyRunningMessage(child.pid ?? 0, old, file)]);
+        expect(io.out[0]).toContain('origin https://replyslip.com');
+        expect(readdirSync(path.dirname(file)).filter((name) => name.endsWith('.lock'))).toEqual([path.basename(file)]);
+      }
+    } finally {
+      child.kill();
+      await once(child, 'exit');
+    }
+  });
+
+  it('blocks the same workspace on any address, and writes alias locks older watchers check', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
+    const host = hostname();
+    const bootId = 'boot-x';
+    const isAlive = (pid: number) => pid === 11;
+    const held = acquireWatcherLock({ home, origin: 'https://valetto.tech', workspaceId: 'ws-1', watcherKey: KEY, pid: 11, hostname: host, bootId, isAlive });
+    expect(held.ok).toBe(true);
+    if (!held.ok) return;
+    for (const origin of [...HOSTED_ORIGINS, 'http://localhost:3000']) {
+      const other = acquireWatcherLock({ home, origin, workspaceId: 'ws-1', watcherKey: 'rsw_second_key', pid: 22, hostname: host, bootId, isAlive });
+      expect(other, origin).toMatchObject({ ok: false, reason: 'running', pid: 11, origin: 'https://valetto.tech' });
+    }
+    // A pre-0.1.2 watcher on any hosted address finds a live lock under the name it checks.
+    for (const origin of HOSTED_ORIGINS) {
+      const legacy = watcherLockPath(home, legacyWatcherScopeId(origin, 'ws-1', KEY));
+      expect(readWatcherLock(legacy), origin).toMatchObject({ pid: 11, origin: 'https://valetto.tech', workspaceId: 'ws-1', alias: true });
+      expect(readFileSync(legacy, 'utf8')).not.toContain(KEY);
+    }
+    expect(listLiveWatcherLocks(home, { hostname: host, bootId, isAlive }).map((lock) => lock.pid)).toEqual([11]);
+    held.hold.release();
+    expect(readdirSync(path.join(home, '.replyslip')).filter((name) => name.endsWith('.lock'))).toEqual([]);
+  });
+
+  it('without a workspace id, scopes by key so the same key on another address is blocked', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
+    const host = hostname();
+    const isAlive = (pid: number) => pid === 11;
+    const first = acquireWatcherLock({ home, origin: 'https://replyslip.com', workspaceId: null, watcherKey: KEY, pid: 11, hostname: host, bootId: 'b', isAlive });
+    expect(first.ok).toBe(true);
+    const second = acquireWatcherLock({ home, origin: 'https://valetto.tech', workspaceId: null, watcherKey: KEY, pid: 22, hostname: host, bootId: 'b', isAlive });
+    expect(second).toMatchObject({ ok: false, reason: 'running', pid: 11, origin: 'https://replyslip.com' });
+    const otherKey = acquireWatcherLock({ home, origin: 'https://valetto.tech', workspaceId: null, watcherKey: 'rsw_other', pid: 22, hostname: host, bootId: 'b', isAlive });
+    expect(otherKey.ok).toBe(true);
+  });
+});
+
+describe('watcher lock review fixes', () => {
+  it('takes over a lock left with its own pid by an earlier process (container restart as the same pid)', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
+    const file = writeLock(home, { pid: process.pid, startedAt: '2020-01-01T00:00:00.000Z' });
+    expect(listLiveWatcherLocks(home)).toEqual([]);
+    const now = new Date('2026-10-25T12:00:00.000Z');
+    const acquired = acquireWatcherLock({ home, origin: ORIGIN, workspaceId: 'ws-1', watcherKey: KEY, now });
+    expect(acquired.ok).toBe(true);
+    if (!acquired.ok) return;
+    expect(acquired.hold.path).toBe(file);
+    expect(readWatcherLock(file)).toMatchObject({ pid: process.pid, startedAt: now.toISOString() });
+    // While this process holds it, the same pid counts as live.
+    expect(listLiveWatcherLocks(home).map((lock) => lock.startedAt)).toEqual([now.toISOString()]);
+    expect(acquireWatcherLock({ home, origin: ORIGIN, workspaceId: 'ws-1', watcherKey: KEY })).toMatchObject({ ok: false, pid: process.pid });
+    acquired.hold.release();
+    expect(readWatcherLock(file)).toBeNull();
+
+    // Through the CLI: a leftover own-pid lock does not block watch.
+    writeLock(home, { pid: process.pid, startedAt: '2020-01-01T00:00:00.000Z' });
+    const io = capture();
+    const code = await runReplyslip(['watch', '--once', '--url', ORIGIN, '--key', KEY], {
+      home,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      fetchImpl: async () => new Response(JSON.stringify({ wakes: [], workspace_id: 'ws-1' }), { status: 200 }),
+    });
+    expect(code).toBe(0);
+    expect(io.out).toEqual([]);
+    expect(readWatcherLock(file)).toBeNull();
+  });
+
+  it('names --force and the lock file in the already-running message', async () => {
+    const message = alreadyRunningMessage(4242, ORIGIN, '/home/u/.replyslip/watcher-0123456789abcdef.lock');
+    expect(message).toContain('pid 4242');
+    expect(message).toContain('origin https://replyslip.com');
+    expect(message).toContain('/home/u/.replyslip/watcher-0123456789abcdef.lock');
+    expect(message).toContain('--force');
+
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
+    const child = liveChild();
+    try {
+      const file = writeLock(home, { pid: child.pid ?? 0 });
+      const io = capture();
+      await runReplyslip(['watch', '--once', '--url', ORIGIN, '--key', KEY], {
+        home,
+        stdout: io.stdout,
+        stderr: io.stderr,
+        fetchImpl: async () => new Response(JSON.stringify({ wakes: [], workspace_id: 'ws-1' }), { status: 200 }),
+      });
+      expect(io.out).toHaveLength(1);
+      expect(io.out[0]).toContain(file);
+      expect(io.out[0]).toContain('--force');
+    } finally {
+      child.kill();
+      await once(child, 'exit');
+    }
+  });
+
+  it('--force never overwrites or deletes a live pre-0.1.2 lock at an alias name', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
+    const host = hostname();
+    const bootId = 'boot-f';
+    const isAlive = (pid: number) => pid === 11 || pid === 77;
+    // A live 0.1.1 watcher on valetto.tech: old-format name, no alias marker.
+    const old = watcherLockPath(home, legacyWatcherScopeId('https://valetto.tech', 'ws-1', KEY));
+    mkdirSync(path.dirname(old), { recursive: true });
+    const oldText = `${JSON.stringify({ pid: 77, startedAt: '2026-01-01T00:00:00.000Z', hostname: host, bootId, origin: 'https://valetto.tech', workspaceId: 'ws-1' })}\n`;
+    writeFileSync(old, oldText);
+
+    const forced = acquireWatcherLock({ home, origin: ORIGIN, workspaceId: 'ws-1', watcherKey: KEY, force: true, pid: 11, hostname: host, bootId, isAlive });
+    expect(forced.ok).toBe(true);
+    if (!forced.ok) return;
+    expect(readFileSync(old, 'utf8')).toBe(oldText);
+    // The other alias names were free, so they got our copies.
+    const replyslipAlias = watcherLockPath(home, legacyWatcherScopeId('https://replyslip.com', 'ws-1', KEY));
+    expect(readWatcherLock(replyslipAlias)).toMatchObject({ pid: 11, alias: true });
+
+    // An old watcher that overwrote one of our alias copies keeps its file on our exit too.
+    const www = watcherLockPath(home, legacyWatcherScopeId('https://www.replyslip.com', 'ws-1', KEY));
+    const wwwText = `${JSON.stringify({ pid: 77, startedAt: '2026-01-02T00:00:00.000Z', hostname: host, bootId, origin: 'https://www.replyslip.com' })}\n`;
+    writeFileSync(www, wwwText);
+
+    forced.hold.release();
+    expect(readFileSync(old, 'utf8')).toBe(oldText);
+    expect(readFileSync(www, 'utf8')).toBe(wwwText);
+    expect(existsSync(replyslipAlias)).toBe(false);
+    expect(existsSync(forced.hold.path)).toBe(false);
+  });
+
+  it('stops polling when another process replaces its lock', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
+    const logs: string[] = [];
+    let polls = 0;
+    const file = watcherLockPath(home, watcherScopeId('ws-1', KEY));
+    const other = `${JSON.stringify({ pid: 99999, startedAt: '2026-10-25T12:00:09.000Z', hostname: hostname(), bootId: machineBootId(), origin: ORIGIN, workspaceId: 'ws-1', token: 'other' })}\n`;
+    const result = await watch({
+      url: ORIGIN,
+      key: KEY,
+      intervalMs: 500,
+      log: (line) => logs.push(line),
+      lock: { home },
+      fetchImpl: async () => {
+        polls += 1;
+        return new Response(JSON.stringify({ wakes: [], workspace_id: 'ws-1' }), { status: 200 });
+      },
+      sleep: async () => {
+        if (polls === 1) writeFileSync(file, other);
+        if (polls > 3) throw new Error('watcher kept polling after losing its lock');
+      },
+    });
+    expect(result).toEqual({ lockLost: true });
+    expect(polls).toBe(2);
+    expect(logs.some((line) => line.includes(`lock ${file} is no longer held by this watcher (pid 99999`))).toBe(true);
+    // The other process's lock is left in place.
+    expect(readFileSync(file, 'utf8')).toBe(other);
+  });
+
+  it('removes stale lock temp files and keeps fresh ones from live writers', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
+    const dir = path.join(home, '.replyslip');
+    mkdirSync(dir, { recursive: true });
+    const deadTemp = path.join(dir, '.lock-55-0123456789abcdef.tmp');
+    const liveFresh = path.join(dir, '.lock-77-1111111111111111.tmp');
+    const liveOld = path.join(dir, '.lock-77-2222222222222222.tmp');
+    const unrelated = path.join(dir, '.lock-notes.tmp');
+    for (const file of [deadTemp, liveFresh, liveOld, unrelated]) writeFileSync(file, '{}\n');
+    const past = (Date.now() - STALE_TEMP_MS - 5_000) / 1000;
+    utimesSync(liveOld, past, past);
+
+    const acquired = acquireWatcherLock({ home, origin: ORIGIN, workspaceId: 'ws-1', watcherKey: KEY, pid: 11, hostname: hostname(), bootId: 'b', isAlive: (pid) => pid === 11 || pid === 77 });
+    expect(acquired.ok).toBe(true);
+    if (!acquired.ok) return;
+    expect(existsSync(deadTemp)).toBe(false);
+    expect(existsSync(liveOld)).toBe(false);
+    expect(existsSync(liveFresh)).toBe(true);
+    expect(existsSync(unrelated)).toBe(true);
+    // No temp of our own is left behind either.
+    expect(readdirSync(dir).filter((name) => name.endsWith('.tmp')).sort()).toEqual([path.basename(unrelated), path.basename(liveFresh)].sort());
+    acquired.hold.release();
+  });
+
+  it('rejects --url with no value instead of ignoring it', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-lock-'));
+    let fetches = 0;
+    const fetchImpl = async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ wakes: [] }), { status: 200 });
+    };
+    for (const argv of [
+      ['watch', '--once', '--key', KEY, '--url'],
+      ['watch', '--once', '--url', '--key', KEY],
+      ['register', '--name', 'LandingBot', '--join-code', 'join-1', '--url'],
+      ['register', '--url', '--name', 'LandingBot', '--join-code', 'join-1'],
+    ]) {
+      const io = capture();
+      expect(await runReplyslip(argv, { home, env: {}, stdout: io.stdout, stderr: io.stderr, fetchImpl }), argv.join(' ')).toBe(1);
+      expect(io.err).toEqual([URL_MISSING_MESSAGE]);
+    }
+    expect(fetches).toBe(0);
+    expect(URL_MISSING_MESSAGE).toContain('--url needs a value');
   });
 });

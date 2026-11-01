@@ -3,7 +3,7 @@
 import { GUEST_WAKE_NOTICE, REVIEW_NEEDED_NOTICE, WAKE_NOTICE } from '../../../lib/wake-notice.ts';
 import { defaultRegistry, type DriverRegistry } from './drivers/registry.ts';
 import type { CommandRunner, DriverCheck, NudgeDriver } from './drivers/types.ts';
-import { acquireWatcherLock, bindWatcherLockLifecycle, type WatcherLockHold } from './watcher-lock.ts';
+import { acquireWatcherLock, bindWatcherLockLifecycle, lockLostMessage, type WatcherLockHold } from './watcher-lock.ts';
 
 export type DueWake = {
   id: string;
@@ -194,6 +194,15 @@ async function relayRequest(
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+export type WatchResult = {
+  blockedPid?: number;
+  blockedOrigin?: string;
+  /** The lock file of the watcher that blocked this one. */
+  blockedPath?: string;
+  /** Set when another process rewrote or removed this watcher's lock while it ran. */
+  lockLost?: boolean;
+};
+
 export async function watch(options: {
   url: string;
   key: string;
@@ -209,7 +218,7 @@ export async function watch(options: {
   sleep?: (ms: number) => Promise<void>;
   /** Stops the loop after the current poll. */
   signal?: AbortSignal;
-}): Promise<{ blockedPid?: number }> {
+}): Promise<WatchResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const log = options.log ?? console.error;
   const sleep = options.sleep ?? defaultSleep;
@@ -250,10 +259,17 @@ export async function watch(options: {
             workspaceId,
             watcherKey: options.key,
           });
-          if (!acquired.ok) return { blockedPid: acquired.pid };
+          if (!acquired.ok) return { blockedPid: acquired.pid, blockedOrigin: acquired.origin, blockedPath: acquired.path };
           hold = acquired.hold;
           unbind = bindWatcherLockLifecycle(hold.release);
           log(`[replyslip] watching ${base}${workspaceId ? ` (workspace ${workspaceId})` : ''}`);
+        } else if (hold) {
+          // Re-read the lock every poll. If another watcher replaced it (say with --force), stop before nudging.
+          const check = hold.stillHeld();
+          if (!check.held) {
+            log(lockLostMessage(hold.path, check.current));
+            return { lockLost: true };
+          }
         }
         const acked = await nudgeWakes({ wakes: Array.isArray(payload.wakes) ? (payload.wakes as DueWake[]) : [], registry, checks, warned, log });
         if (acked.length > 0) {

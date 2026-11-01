@@ -634,26 +634,55 @@ function defaultRegistry(run) {
 
 // packages/cli/src/watcher-lock.ts
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 import { hostname, homedir as homedir2, uptime } from "node:os";
 import path2 from "node:path";
 var LOCK_NAME = /^watcher-[0-9a-f]{16}\.lock$/;
+var TEMP_NAME = /^\.lock-(\d+)-[0-9a-f]{16}\.tmp$/;
+var STALE_TEMP_MS = 6e4;
+var heldHere = /* @__PURE__ */ new Set();
+function holdKey(info) {
+  return `${info.pid}|${info.startedAt}|${info.token ?? ""}`;
+}
+function sameHolder(info, identity) {
+  return !!info && info.pid === identity.pid && info.startedAt === identity.startedAt && (info.token ?? "") === (identity.token ?? "") && info.hostname === identity.hostname && info.bootId === identity.bootId;
+}
 function normalizeOrigin(origin) {
   return origin.replace(/\/+$/, "");
 }
-function watcherScopeId(origin, workspaceId, watcherKey) {
-  const normalized = normalizeOrigin(origin);
-  const material = workspaceId ? `${normalized}
-${workspaceId}` : `${normalized}
-${createHash("sha256").update(watcherKey).digest("hex")}`;
+function keyHash(watcherKey) {
+  return createHash("sha256").update(watcherKey).digest("hex");
+}
+function scopeHash(material) {
   return createHash("sha256").update(material).digest("hex").slice(0, 16);
 }
+function watcherScopeId(workspaceId, watcherKey) {
+  return workspaceId ? scopeHash(`workspace
+${workspaceId}`) : scopeHash(`key
+${keyHash(watcherKey)}`);
+}
+function legacyWatcherScopeId(origin, workspaceId, watcherKey) {
+  const normalized = normalizeOrigin(origin);
+  return scopeHash(workspaceId ? `${normalized}
+${workspaceId}` : `${normalized}
+${keyHash(watcherKey)}`);
+}
+var HOSTED_ORIGINS = [
+  "https://valetto.tech",
+  "https://www.valetto.tech",
+  "https://replyslip.com",
+  "https://www.replyslip.com"
+];
 function watcherLockPath(home, scopeId) {
   if (!/^[0-9a-f]{16}$/.test(scopeId)) throw new Error("Invalid watcher lock scope.");
   return path2.join(replyslipHome(home), `watcher-${scopeId}.lock`);
 }
-function alreadyRunningMessage(pid) {
-  return `A ReplySlip watcher is already running for this workspace (pid ${pid}); it delivers every local agent in this workspace.`;
+function alreadyRunningMessage(pid, origin, lockPath) {
+  return `A ReplySlip watcher is already running for this workspace (pid ${pid}, origin ${origin}, lock ${lockPath}); it delivers every local agent in this workspace. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+}
+function lockLostMessage(lockPath, holder) {
+  const by = holder ? `pid ${holder.pid}, origin ${holder.origin}` : "the file was removed";
+  return `[replyslip] lock ${lockPath} is no longer held by this watcher (${by}); stopping so only one watcher delivers this workspace.`;
 }
 function runningStatusMessage(pid, origin, workspaceId) {
   const scope = workspaceId ? `workspace ${workspaceId}` : "this workspace";
@@ -689,7 +718,9 @@ function readWatcherLock(file) {
       hostname: typeof parsed.hostname === "string" ? parsed.hostname : "",
       bootId: typeof parsed.bootId === "string" ? parsed.bootId : "",
       origin: typeof parsed.origin === "string" ? parsed.origin : "",
-      ...typeof parsed.workspaceId === "string" && parsed.workspaceId ? { workspaceId: parsed.workspaceId } : {}
+      ...typeof parsed.workspaceId === "string" && parsed.workspaceId ? { workspaceId: parsed.workspaceId } : {},
+      ...parsed.alias === true ? { alias: true } : {},
+      ...typeof parsed.token === "string" && parsed.token ? { token: parsed.token } : {}
     };
   } catch {
     return null;
@@ -705,7 +736,9 @@ function pidIsAlive(pid) {
   }
 }
 function lockIsCurrent(info, self, isAlive) {
-  return info.hostname === self.hostname && info.bootId === self.bootId && isAlive(info.pid);
+  if (info.hostname !== self.hostname || info.bootId !== self.bootId) return false;
+  if (info.pid === self.pid) return heldHere.has(holdKey(info));
+  return isAlive(info.pid);
 }
 function listLiveWatcherLocks(home = homedir2(), self) {
   const dir = replyslipHome(home);
@@ -717,14 +750,15 @@ function listLiveWatcherLocks(home = homedir2(), self) {
   }
   const identity = {
     hostname: self?.hostname ?? hostname(),
-    bootId: self?.bootId ?? machineBootId()
+    bootId: self?.bootId ?? machineBootId(),
+    pid: self?.pid ?? process.pid
   };
   const isAlive = self?.isAlive ?? pidIsAlive;
   const live = [];
   for (const name of names) {
     if (!LOCK_NAME.test(name)) continue;
     const info = readWatcherLock(path2.join(dir, name));
-    if (info && lockIsCurrent(info, identity, isAlive)) live.push(info);
+    if (info && !info.alias && lockIsCurrent(info, identity, isAlive)) live.push(info);
   }
   live.sort((a, b) => a.origin.localeCompare(b.origin) || a.pid - b.pid);
   return live;
@@ -732,13 +766,14 @@ function listLiveWatcherLocks(home = homedir2(), self) {
 function acquireWatcherLock(options) {
   const home = options.home ?? homedir2();
   const origin = normalizeOrigin(options.origin);
-  const scopeId = watcherScopeId(origin, options.workspaceId, options.watcherKey);
+  const scopeId = watcherScopeId(options.workspaceId, options.watcherKey);
   const file = watcherLockPath(home, scopeId);
   const pid = options.pid ?? process.pid;
   const startedAt = (options.now ?? /* @__PURE__ */ new Date()).toISOString();
   const self = {
     hostname: options.hostname ?? hostname(),
-    bootId: options.bootId ?? machineBootId()
+    bootId: options.bootId ?? machineBootId(),
+    pid
   };
   const isAlive = options.isAlive ?? pidIsAlive;
   const identity = {
@@ -747,18 +782,108 @@ function acquireWatcherLock(options) {
     hostname: self.hostname,
     bootId: self.bootId,
     origin,
-    ...options.workspaceId ? { workspaceId: options.workspaceId } : {}
+    ...options.workspaceId ? { workspaceId: options.workspaceId } : {},
+    token: randomBytes(8).toString("hex")
   };
   mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  removeStaleTemps(path2.dirname(file), isAlive);
+  if (!options.force) {
+    const other = sameWorkspaceLock(home, file, options.workspaceId, options.watcherKey, self, isAlive);
+    if (other) return running(other.info, other.path);
+  }
+  const acquired = acquireMain(file, identity, self, isAlive, options);
+  if (!acquired.ok) return acquired;
+  const aliases = writeAliases(home, file, identity, options, self, isAlive);
+  const release = acquired.hold.release;
+  acquired.hold.release = () => {
+    for (const alias of aliases) releaseAliasIfOurs(alias, identity);
+    release();
+  };
+  return acquired;
+}
+function running(info, file) {
+  return { ok: false, reason: "running", pid: info.pid, origin: info.origin, path: file };
+}
+function removeStaleTemps(dir, isAlive, nowMs = Date.now()) {
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const match = TEMP_NAME.exec(name);
+    if (!match) continue;
+    const full = path2.join(dir, name);
+    try {
+      const info = lstatSync(full);
+      if (!info.isFile()) continue;
+      const writer = Number(match[1]);
+      const old = nowMs - info.mtimeMs > STALE_TEMP_MS;
+      if (writer === process.pid || old || !isAlive(writer)) removeLock(full);
+    } catch {
+    }
+  }
+}
+function acquireMain(file, identity, self, isAlive, options) {
   const first = attempt(file, identity, self, isAlive, Boolean(options.force), true, options);
   if (first !== "lost") return first;
   const seen = readWatcherLock(file);
-  if (seen && lockIsCurrent(seen, self, isAlive) && !options.force) return { ok: false, reason: "running", pid: seen.pid };
+  if (seen && lockIsCurrent(seen, self, isAlive) && !options.force) return running(seen, file);
   const second = attempt(file, identity, self, isAlive, Boolean(options.force), false, options);
   if (second !== "lost") return second;
   const last = readWatcherLock(file);
-  if (last && lockIsCurrent(last, self, isAlive)) return { ok: false, reason: "running", pid: last.pid };
+  if (last && lockIsCurrent(last, self, isAlive)) return running(last, file);
   throw new Error("Could not acquire the ReplySlip watcher lock.");
+}
+function sameWorkspaceLock(home, file, workspaceId, watcherKey, self, isAlive) {
+  const dir = replyslipHome(home);
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    const full = path2.join(dir, name);
+    if (!LOCK_NAME.test(name) || full === file) continue;
+    const info = readWatcherLock(full);
+    if (!info || !lockIsCurrent(info, self, isAlive)) continue;
+    const sameId = Boolean(workspaceId) && info.workspaceId === workspaceId;
+    const legacyName = `watcher-${legacyWatcherScopeId(info.origin, workspaceId, watcherKey)}.lock`;
+    if (sameId || name === legacyName) return { info, path: info.alias && sameId ? file : full };
+  }
+  return null;
+}
+function writeAliases(home, file, identity, options, self, isAlive) {
+  const origins = /* @__PURE__ */ new Set([identity.origin, ...HOSTED_ORIGINS]);
+  const written = [];
+  const alias = { ...identity, alias: true };
+  for (const origin of origins) {
+    const target = watcherLockPath(home, legacyWatcherScopeId(origin, options.workspaceId, options.watcherKey));
+    if (target === file) continue;
+    const held = readWatcherLock(target);
+    if (held && !sameHolder(held, identity) && lockIsCurrent(held, self, isAlive)) {
+      if (!held.alias || !options.force) continue;
+    }
+    const temp = writeTemp(path2.dirname(target), alias);
+    try {
+      renameSync(temp, target);
+      written.push(target);
+    } catch {
+    } finally {
+      removeLock(temp);
+    }
+  }
+  return written;
+}
+function releaseAliasIfOurs(file, identity) {
+  const current = readWatcherLock(file);
+  if (!current?.alias || !sameHolder(current, identity)) return;
+  try {
+    removeLock(file);
+  } catch {
+  }
 }
 function bindWatcherLockLifecycle(release) {
   const onSignal = () => {
@@ -777,20 +902,20 @@ function bindWatcherLockLifecycle(release) {
 }
 function attempt(file, identity, self, isAlive, force, hooks, options) {
   const existing = readWatcherLock(file);
-  if (existing && lockIsCurrent(existing, self, isAlive) && !force) return { ok: false, reason: "running", pid: existing.pid };
+  if (existing && lockIsCurrent(existing, self, isAlive) && !force) return running(existing, file);
   if (hooks) options.onBeforeTakeover?.();
   const after = readWatcherLock(file);
-  if (after && lockIsCurrent(after, self, isAlive) && !force) return { ok: false, reason: "running", pid: after.pid };
+  if (after && lockIsCurrent(after, self, isAlive) && !force) return running(after, file);
   const temp = writeTemp(path2.dirname(file), identity);
   try {
     const placed = publish(temp, file, self, isAlive, force);
     if (placed !== "placed") {
       if (placed === "lost") return "lost";
-      return { ok: false, reason: "running", pid: placed.pid };
+      return { ok: false, reason: "running", pid: placed.pid, origin: placed.origin, path: file };
     }
     if (hooks) options.onAfterCreate?.();
     const confirmed = readWatcherLock(file);
-    if (confirmed && confirmed.pid === identity.pid && confirmed.startedAt === identity.startedAt) {
+    if (sameHolder(confirmed, identity)) {
       return { ok: true, hold: createHold(file, identity) };
     }
     return "lost";
@@ -806,7 +931,7 @@ function publish(temp, file, self, isAlive, force) {
     if (!isRenameConflict(err)) throw err;
   }
   const held = readWatcherLock(file);
-  if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid };
+  if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid, origin: held.origin };
   removeLock(file);
   try {
     renameSync(temp, file);
@@ -844,15 +969,20 @@ function removeLock(file) {
 }
 function createHold(file, identity) {
   let released = false;
+  const key = holdKey(identity);
+  heldHere.add(key);
   const release = () => {
     if (released) return;
     released = true;
-    const current = readWatcherLock(file);
-    if (!current || current.pid !== identity.pid || current.startedAt !== identity.startedAt) return;
-    if (current.hostname !== identity.hostname || current.bootId !== identity.bootId) return;
+    heldHere.delete(key);
+    if (!sameHolder(readWatcherLock(file), identity)) return;
     removeLock(file);
   };
-  return { path: file, pid: identity.pid, startedAt: identity.startedAt, release };
+  const stillHeld = () => {
+    const current = readWatcherLock(file);
+    return { held: !released && sameHolder(current, identity), current };
+  };
+  return { path: file, pid: identity.pid, startedAt: identity.startedAt, release, stillHeld };
 }
 
 // packages/cli/src/watch.ts
@@ -1023,10 +1153,16 @@ async function watch(options) {
             workspaceId,
             watcherKey: options.key
           });
-          if (!acquired.ok) return { blockedPid: acquired.pid };
+          if (!acquired.ok) return { blockedPid: acquired.pid, blockedOrigin: acquired.origin, blockedPath: acquired.path };
           hold = acquired.hold;
           unbind = bindWatcherLockLifecycle(hold.release);
           log(`[replyslip] watching ${base}${workspaceId ? ` (workspace ${workspaceId})` : ""}`);
+        } else if (hold) {
+          const check = hold.stillHeld();
+          if (!check.held) {
+            log(lockLostMessage(hold.path, check.current));
+            return { lockLost: true };
+          }
         }
         const acked = await nudgeWakes({ wakes: Array.isArray(payload.wakes) ? payload.wakes : [], registry, checks, warned, log });
         if (acked.length > 0) {
@@ -1077,8 +1213,15 @@ function flag(argv, name) {
   return value;
 }
 var DEFAULT_RELAY_URL = "https://valetto.tech";
+var URL_MISSING_MESSAGE = "--url needs a value, for example --url https://valetto.tech. Leave --url off to use REPLYSLIP_URL or https://valetto.tech.";
+function urlFlagMissingValue(argv) {
+  const index = argv.indexOf("--url");
+  if (index === -1) return false;
+  const value = argv[index + 1];
+  return value === void 0 || value.startsWith("-");
+}
 function relayOrigin2(argv, env) {
-  return flag(argv, "--url") ?? env.REPLYSLIP_URL ?? DEFAULT_RELAY_URL;
+  return flag(argv, "--url")?.trim() || env.REPLYSLIP_URL?.trim() || DEFAULT_RELAY_URL;
 }
 function positionals(argv) {
   const values = [];
@@ -1117,6 +1260,10 @@ async function runReplyslip(argv, io = {}) {
     }
     stdout(agentKeyPath(name, io.home));
     return 0;
+  }
+  if ((command === "register" || command === "watch") && !argv.includes("--status") && urlFlagMissingValue(argv)) {
+    stderr(URL_MISSING_MESSAGE);
+    return 1;
   }
   if (command === "register") {
     const name = flag(argv, "--name");
@@ -1196,7 +1343,7 @@ async function runReplyslip(argv, io = {}) {
     stderr(err instanceof Error ? err.message : "Watcher stopped.");
     return 1;
   }
-  if (result.blockedPid !== void 0) stdout(alreadyRunningMessage(result.blockedPid));
+  if (result.blockedPid !== void 0) stdout(alreadyRunningMessage(result.blockedPid, result.blockedOrigin ?? url, result.blockedPath ?? ""));
   return 0;
 }
 async function readWatcherKeyFile(file, stderr) {
