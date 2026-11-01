@@ -2,18 +2,21 @@ import { and, asc, eq, gte, sql } from 'drizzle-orm';
 import { getDb, type Db } from '@/db';
 import { rateEvents } from '@/db/schema';
 import { RATE_LIMITS } from './constants';
+import { OAUTH_RATE_LIMITS } from './oauth/constants';
+
+const RULES = { ...RATE_LIMITS, ...OAUTH_RATE_LIMITS };
 
 type RateRule = { windowMs: number; email?: number; ip?: number; agent?: number };
 
 export async function consumeRateLimit(input: {
-  kind: keyof typeof RATE_LIMITS;
+  kind: keyof typeof RULES;
   email?: string;
   ip?: string;
   /** Per-agent limits store the agent id in rate_events.email. That column has no other meaning for those kinds. */
   agentId?: string;
 }): Promise<{ limited: boolean; retryAfterSeconds: number }> {
   const db = getDb();
-  const rule = RATE_LIMITS[input.kind] as RateRule;
+  const rule = RULES[input.kind] as RateRule;
   const since = new Date(Date.now() - rule.windowMs);
   await db.delete(rateEvents).where(sql`${rateEvents.createdAt} < now() - interval '1 day'`);
 

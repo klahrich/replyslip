@@ -902,6 +902,203 @@ export const siteIpUsageDaily = pgTable(
   ],
 );
 
+/**
+ * MCP OAuth (docs/design/mcp-oauth.md §3). Every secret is stored as sha256 hex. Nothing reads these tables unless
+ * MCP_OAUTH_ENABLED=1.
+ */
+export const oauthClients = pgTable(
+  'oauth_clients',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** rsdc_… for DCR; the full https URL for CIMD. */
+    clientId: text('client_id').notNull(),
+    kind: text('kind').notNull(),
+    /** Sanitized, at most 100 characters. */
+    clientName: text('client_name').notNull(),
+    /** Display host only. */
+    clientUri: text('client_uri'),
+    /** string[]; exact values. */
+    redirectUris: jsonb('redirect_uris').$type<string[]>().notNull(),
+    tokenEndpointAuthMethod: text('token_endpoint_auth_method').notNull(),
+    /** Null unless client_secret_*. */
+    clientSecretHash: text('client_secret_hash'),
+    grantTypes: jsonb('grant_types')
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'["authorization_code","refresh_token"]'::jsonb`),
+    /** 'web' | 'native' (DCR, informational). */
+    applicationType: text('application_type'),
+    /** CIMD cache expiry. */
+    metadataExpiresAt: ts('metadata_expires_at'),
+    /** When the CIMD document was last fetched successfully. */
+    metadataFetchedAt: ts('metadata_fetched_at'),
+    /** keyedHash('oauth-dcr-ip', ip); never the raw IP. */
+    registeredIpHash: text('registered_ip_hash'),
+    /** Operator kill switch. */
+    disabledAt: ts('disabled_at'),
+    lastUsedAt: ts('last_used_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('oauth_clients_client_id_unique').on(table.clientId),
+    index('oauth_clients_kind_created_idx').on(table.kind, table.createdAt),
+    check('oauth_clients_kind_check', sql`${table.kind} in ('dcr', 'cimd')`),
+    check(
+      'oauth_clients_auth_method_check',
+      sql`${table.tokenEndpointAuthMethod} in ('none', 'client_secret_post', 'client_secret_basic')`,
+    ),
+  ],
+);
+
+/** Pending consent, 20 minutes. */
+export const oauthAuthorizationRequests = pgTable(
+  'oauth_authorization_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** sha256 of the req token in the consent URL. */
+    requestHash: text('request_hash').notNull(),
+    /** sha256 of this request's __Host-valetto_oauth value. */
+    bindingHash: text('binding_hash').notNull(),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => oauthClients.id, { onDelete: 'cascade' }),
+    redirectUri: text('redirect_uri').notNull(),
+    /** At most 1024 bytes, echoed verbatim. */
+    state: text('state'),
+    codeChallenge: text('code_challenge').notNull(),
+    scope: text('scope').notNull(),
+    resource: text('resource').notNull(),
+    /** Bound on the first signed-in view. */
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: ts('expires_at').notNull(),
+    completedAt: ts('completed_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('oauth_authorization_requests_request_hash_unique').on(table.requestHash),
+    index('oauth_authorization_requests_expires_idx').on(table.expiresAt),
+  ],
+);
+
+/** One approved connection is one row. */
+export const oauthGrants = pgTable(
+  'oauth_grants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => oauthClients.id, { onDelete: 'cascade' }),
+    /** Who approved. */
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    /** True when this grant created the agent (offered as "Reconnect as" later). */
+    agentCreated: boolean('agent_created').notNull(),
+    scope: text('scope').notNull(),
+    /** Audience, e.g. https://valetto.tech/api/mcp. */
+    resource: text('resource').notNull(),
+    /** The redirect URI the code went to; the connected-apps list shows its host. */
+    redirectUri: text('redirect_uri').notNull(),
+    /** created_at + 365 days. */
+    absoluteExpiresAt: ts('absolute_expires_at').notNull(),
+    /** Throttled: written at most every 5 minutes. */
+    lastUsedAt: ts('last_used_at'),
+    revokedAt: ts('revoked_at'),
+    revokedReason: text('revoked_reason'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('oauth_grants_workspace_created_idx').on(table.workspaceId, table.createdAt.desc()),
+    index('oauth_grants_agent_idx').on(table.agentId),
+    index('oauth_grants_client_idx').on(table.clientId),
+    check(
+      'oauth_grants_revoked_reason_check',
+      sql`${table.revokedReason} is null or ${table.revokedReason} in ('user', 'agent_revoked', 'refresh_reuse', 'code_reuse', 'client_disabled', 'user_left_workspace', 'reconnected')`,
+    ),
+  ],
+);
+
+/** 5 minutes, single use. */
+export const oauthAuthorizationCodes = pgTable(
+  'oauth_authorization_codes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    codeHash: text('code_hash').notNull(),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => oauthClients.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    /** Existing agent chosen (reconnect); null means create one named new_agent_name. */
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
+    newAgentName: text('new_agent_name'),
+    redirectUri: text('redirect_uri').notNull(),
+    codeChallenge: text('code_challenge').notNull(),
+    scope: text('scope').notNull(),
+    resource: text('resource').notNull(),
+    expiresAt: ts('expires_at').notNull(),
+    consumedAt: ts('consumed_at'),
+    /** The grant this code created, for code-reuse revocation. */
+    grantId: uuid('grant_id').references(() => oauthGrants.id, { onDelete: 'set null' }),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('oauth_authorization_codes_code_hash_unique').on(table.codeHash),
+    check('oauth_authorization_codes_agent_xor', sql`(${table.agentId} is null) <> (${table.newAgentName} is null)`),
+  ],
+);
+
+/** 1 hour. */
+export const oauthAccessTokens = pgTable(
+  'oauth_access_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    grantId: uuid('grant_id')
+      .notNull()
+      .references(() => oauthGrants.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: ts('expires_at').notNull(),
+    revokedAt: ts('revoked_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('oauth_access_tokens_token_hash_unique').on(table.tokenHash),
+    index('oauth_access_tokens_grant_idx').on(table.grantId),
+  ],
+);
+
+/** 30 days idle, rotated on every use. */
+export const oauthRefreshTokens = pgTable(
+  'oauth_refresh_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    grantId: uuid('grant_id')
+      .notNull()
+      .references(() => oauthGrants.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    parentId: uuid('parent_id').references((): AnyPgColumn => oauthRefreshTokens.id, { onDelete: 'set null' }),
+    expiresAt: ts('expires_at').notNull(),
+    rotatedAt: ts('rotated_at'),
+    revokedAt: ts('revoked_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('oauth_refresh_tokens_token_hash_unique').on(table.tokenHash),
+    index('oauth_refresh_tokens_grant_idx').on(table.grantId),
+    index('oauth_refresh_tokens_parent_idx').on(table.parentId),
+  ],
+);
+
 export type AgentRow = typeof agents.$inferSelect;
 export type TaskRow = typeof tasks.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
@@ -918,3 +1115,6 @@ export type SiteDemoLinkRow = typeof siteDemoLinks.$inferSelect;
 export type SiteConversationRow = typeof siteConversations.$inferSelect;
 export type SiteMessageRow = typeof siteMessages.$inferSelect;
 export type SiteSuggestedAnswerRow = typeof siteSuggestedAnswers.$inferSelect;
+export type OAuthClientRow = typeof oauthClients.$inferSelect;
+export type OAuthGrantRow = typeof oauthGrants.$inferSelect;
+export type OAuthAuthorizationRequestRow = typeof oauthAuthorizationRequests.$inferSelect;
