@@ -43,8 +43,12 @@ export const SITE_KEYWORDS = {
 
 export type KeywordCategory = keyof typeof SITE_KEYWORDS;
 
-/** `$`, `€`, and amounts like `40 dollars`, `40$`, `40 cad`. */
-const CURRENCY_PATTERNS: RegExp[] = [/\$/, /€/, /\d+\s*(\$|dollars?\b|cad\b|usd\b)/];
+/**
+ * `$`, `€`, and currency words with or without a number ("40 dollars", "quarante dollars", "about 40 bucks",
+ * "une piasse"), matched as whole words on accent-stripped, case-folded text. A digit right before still counts
+ * ("40dollars", "40cad").
+ */
+const CURRENCY_PATTERNS: RegExp[] = [/\$/, /€/, /(?<![a-z])(?:dollars?|bucks?|cad|usd|piasses?|piastres?)(?![a-z0-9])/];
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -66,13 +70,115 @@ export type KeywordHit = { category: KeywordCategory | 'currency'; word: string 
 
 /** First owner-only keyword in the text, or null. */
 export function findOwnerKeyword(text: string): KeywordHit | null {
+  return findOwnerKeywords(text)[0] ?? null;
+}
+
+/** Every owner-only keyword in the text, list order, then currency amounts. */
+export function findOwnerKeywords(text: string): KeywordHit[] {
   const normalized = normalizeForKeywords(text);
+  const hits: KeywordHit[] = [];
   for (const entry of COMPILED) {
-    if (entry.re.test(normalized)) return { category: entry.category, word: entry.word };
+    if (entry.re.test(normalized)) hits.push({ category: entry.category, word: entry.word });
   }
   for (const re of CURRENCY_PATTERNS) {
     const m = re.exec(normalized);
-    if (m) return { category: 'currency', word: m[0] };
+    if (m) hits.push({ category: 'currency', word: m[0].trim() });
+  }
+  return hits;
+}
+
+/** Same word up to an ending: "cost"/"costs", "charge"/"charges", "book"/"booking", "soumission"/"soumissions". */
+function sameWordFamily(a: string, b: string): boolean {
+  return a === b || a.startsWith(b) || b.startsWith(a);
+}
+
+/**
+ * First owner-only keyword in a model reply that the kept sources don't back, or null (spec 4.2, reply keyword
+ * rule). The reply rule is there to stop the model from bringing up prices, availability, bookings or complaints
+ * on its own. A word the business's own quoted text uses ("no extra charge", "quotes are available in French",
+ * "when booking") is the business talking, not the model, so it doesn't count. Two things always count, grounded
+ * or not: a currency sign or word ("$", "dollars", "bucks", "piasse"), so a price goes to the owner even when the
+ * page has one; a booking or availability word in a sentence that names a day, date or time; and a price word in
+ * a sentence that has a digit or a spelled-out number.
+ */
+export function ungroundedOwnerKeyword(reply: string, keptSources: readonly string[]): KeywordHit | null {
+  const grounded = keptSources.flatMap((source) => findOwnerKeywords(source)).filter((hit) => hit.category !== 'currency');
+  for (const hit of findOwnerKeywords(reply)) {
+    if (hit.category === 'currency') return hit;
+    if (!grounded.some((g) => g.category === hit.category && sameWordFamily(g.word, hit.word))) return hit;
+  }
+  return timedBookingKeyword(reply) ?? pricedSentenceKeyword(reply);
+}
+
+/**
+ * Words that name a day, a date or a time. Any digit counts too, which covers clock times (3:00), am/pm times
+ * (3pm), 24h and French times (15h, 15h30) and dates. "May" only counts next to a number, since "you may book"
+ * is not a date.
+ */
+const WHEN_WORDS = [
+  'today', 'tonight', 'tomorrow', 'this morning', 'this afternoon', 'this evening', 'this week', 'next week',
+  'this weekend', 'next weekend', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+  'mondays', 'tuesdays', 'wednesdays', 'thursdays', 'fridays', 'saturdays', 'sundays', 'january', 'february',
+  'march', 'april', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'a.m', 'p.m', 'noon',
+  'midnight',
+  "aujourd'hui", 'demain', 'ce soir', 'ce matin', 'cet apres-midi', 'cette semaine', 'la semaine prochaine',
+  'ce week-end', 'cette fin de semaine', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche',
+  'janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre',
+  'decembre', 'midi', 'minuit',
+];
+const WHEN_PATTERNS: RegExp[] = [
+  /\d/,
+  ...WHEN_WORDS.map((word) => new RegExp(`(^|[^a-z0-9])${escapeRegex(word).replace(/[- ]/g, '[- ]')}(?=$|[^a-z0-9])`)),
+];
+
+/** Sentences of a reply: split after . ! ? ; or … followed by a space, and on line breaks. "3:00" and "3.5" stay whole. */
+export function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?;…])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Spelled-out numbers, English and French. Left out on purpose: English "one" and French "un"/"une", which are
+ * mostly articles or pronouns ("no extra cost for anyone", "one of our team", "un devis"), and French "neuf",
+ * which also means "new" ("le prix d'un camion neuf"). Compounds still count through their other part
+ * ("twenty-one", "dix-neuf", "vingt et un").
+ */
+const NUMBER_WORDS = [
+  'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen',
+  'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty', 'fifty',
+  'sixty', 'seventy', 'eighty', 'ninety', 'hundred', 'hundreds', 'thousand', 'thousands', 'million', 'millions',
+  'dozen', 'dozens',
+  'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'dix', 'onze', 'douze', 'treize', 'quatorze',
+  'quinze', 'seize', 'vingt', 'vingts', 'trente', 'quarante', 'cinquante', 'soixante', 'cent', 'cents', 'mille',
+];
+const NUMBER_PATTERNS: RegExp[] = [/\d/, ...NUMBER_WORDS.map((word) => new RegExp(`(^|[^a-z0-9])${word}(?=$|[^a-z0-9])`))];
+
+/**
+ * A price word in a reply sentence that also has a number (a digit or a spelled-out number), or null. Grounding
+ * the word doesn't cover this: "no extra cost for seniors" on the page doesn't make "it costs 40 per visit" the
+ * business talking.
+ */
+export function pricedSentenceKeyword(reply: string): KeywordHit | null {
+  for (const sentence of splitSentences(reply)) {
+    const normalized = normalizeForKeywords(sentence);
+    const price = COMPILED.find((entry) => entry.category === 'price' && entry.re.test(normalized));
+    if (price && NUMBER_PATTERNS.some((re) => re.test(normalized))) return { category: price.category, word: price.word };
+  }
+  return null;
+}
+
+/**
+ * A booking or availability word in a reply sentence that also names a day, date or time, or null. Grounding a
+ * word doesn't cover this: "quotes are available in French" on the page doesn't make "we are available Saturday
+ * at 3pm" the business talking. Times and dates the model offers always go to the owner.
+ */
+export function timedBookingKeyword(reply: string): KeywordHit | null {
+  for (const sentence of splitSentences(reply)) {
+    const normalized = normalizeForKeywords(sentence);
+    const booking = COMPILED.find((entry) => entry.category === 'availability_booking' && entry.re.test(normalized));
+    if (booking && WHEN_PATTERNS.some((re) => re.test(normalized))) return { category: booking.category, word: booking.word };
   }
   return null;
 }

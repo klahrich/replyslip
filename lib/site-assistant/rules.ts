@@ -1,4 +1,4 @@
-import { findOwnerKeyword } from './keywords';
+import { ungroundedOwnerKeyword } from './keywords';
 import { normalizeForMatch } from './normalize';
 import type { HandoffReason } from './replies';
 import { OWNER_ONLY_TOPICS, type SiteModelAnswer } from './schema';
@@ -130,7 +130,8 @@ export function applyRules(answer: SiteModelAnswer, normalizedContext: string, c
   if (answer.status === 'needs_owner') return owner('model_needs_owner');
   if (answer.status === 'off_topic') return { status: 'off_topic', decidedBy: 'model_off_topic', kept, dropped };
   if (kept.length === 0) return owner('no_sources');
-  if (findOwnerKeyword(answer.reply)) return owner('keyword_reply');
+  // Only words the kept quotes don't use: a grounded "no extra charge" is the business's text, not a price.
+  if (ungroundedOwnerKeyword(answer.reply, kept)) return owner('keyword_reply');
   if (unknownContactDetail(answer.reply, contacts)) return owner('contact_detail');
   return { status: 'answered', decidedBy: 'answered', kept, dropped };
 }
