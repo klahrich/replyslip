@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
@@ -207,13 +209,21 @@ describe('replyslip watch resilience', () => {
     const origin = normalizeOrigin('https://a.example');
     const file = watcherLockPath(home, watcherScopeId('ws-a', KEY));
     await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(
-      file,
-      `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), hostname: hostname(), bootId: machineBootId(), origin, workspaceId: 'ws-a' })}\n`,
-    );
-    const out: string[] = [];
-    expect(await runReplyslip(['watch', '--status'], { home, stdout: (line) => out.push(line), stderr: () => undefined })).toBe(0);
-    expect(out).toEqual([`A ReplySlip watcher is running for workspace ws-a (pid ${process.pid}, origin https://a.example).`]);
+    // Another live process: a lock with this process's own pid that it does not hold counts as stale.
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], { stdio: 'ignore' });
+    try {
+      const pid = child.pid ?? 0;
+      await writeFile(
+        file,
+        `${JSON.stringify({ pid, startedAt: new Date().toISOString(), hostname: hostname(), bootId: machineBootId(), origin, workspaceId: 'ws-a' })}\n`,
+      );
+      const out: string[] = [];
+      expect(await runReplyslip(['watch', '--status'], { home, stdout: (line) => out.push(line), stderr: () => undefined })).toBe(0);
+      expect(out).toEqual([`A ReplySlip watcher is running for workspace ws-a (pid ${pid}, origin https://a.example).`]);
+    } finally {
+      child.kill();
+      await once(child, 'exit');
+    }
   });
 
   it('exits 1 when the first poll gets a 404 or an HTML page', async () => {
