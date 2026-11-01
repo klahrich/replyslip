@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb, type Db } from '@/db';
 import {
   siteBusinesses,
@@ -7,14 +7,13 @@ import {
   siteDemoLinks,
   siteMessageRequests,
   siteMessages,
-  siteSuggestedAnswers,
   type SiteBusinessRow,
   type SiteDemoLinkRow,
   type SiteMessageRow,
 } from '@/db/schema';
 import { sha256 } from '@/lib/crypto';
 import { HttpError, isUniqueViolation } from '@/lib/errors';
-import { answerVisitorMessage, type SiteAnswerResult } from './answer';
+import { answerVisitorMessage } from './answer';
 import {
   capLimitsFor,
   ipKeysFor,
@@ -187,37 +186,6 @@ export function demoSuggestions(business: Pick<DemoBusiness, 'suggestedQuestions
   return listed.map(({ position, question }) => ({ position, language: sure(question) ?? fallback, question }));
 }
 
-/**
- * @deprecated Stored, checked answers (site_suggested_answers), for the page deployed before `suggestions`, which
- * shows a chip's stored answer itself. Kept until LandingBot's page sends chip taps as typed messages; then this,
- * the `suggested_question_id` tap and the table can go.
- */
-export type PublicSuggestedQuestion = {
-  id: string;
-  position: number;
-  question: string;
-  answer: string;
-  language: string;
-  checked_at: string;
-};
-
-/** @deprecated See PublicSuggestedQuestion. */
-async function checkedSuggestions(businessId: string): Promise<PublicSuggestedQuestion[]> {
-  const rows = await getDb()
-    .select()
-    .from(siteSuggestedAnswers)
-    .where(and(eq(siteSuggestedAnswers.businessId, businessId), isNotNull(siteSuggestedAnswers.checkedAt)))
-    .orderBy(asc(siteSuggestedAnswers.position), asc(siteSuggestedAnswers.language));
-  return rows.map((row) => ({
-    id: row.id,
-    position: row.position,
-    question: row.question,
-    answer: row.answer,
-    language: row.language,
-    checked_at: row.checkedAt!.toISOString(),
-  }));
-}
-
 /** Muted brand-like colours for the chat tile when RedBot gave none. Picked from the slug, so it never changes. */
 const TILE_COLORS = ['#2f5d50', '#3b5b8c', '#7a4b2a', '#5b4a8a', '#8a3b4b', '#2f6f7a', '#6b6b2f', '#444c56'];
 
@@ -230,8 +198,8 @@ export function tileColor(business: Pick<DemoBusiness, 'slug' | 'tileColor'>): s
 
 /**
  * LandingBot's DemoMessage (PR #111): id, role, body, status (assistant rows only), created_at. Extra fields the
- * page may ignore: language, client_message_id, suggested_question_id, handoff_reason and demo_note (the page
- * shows its own demo note today).
+ * page may ignore: language, client_message_id, handoff_reason and demo_note (the page shows its own demo note
+ * today).
  */
 export function publicMessage(row: SiteMessageRow, business: { displayName: string; language: string | null }) {
   const reason = row.role === 'assistant' && row.status === 'needs_owner' ? handoffReason(row.decidedBy) : null;
@@ -243,7 +211,6 @@ export function publicMessage(row: SiteMessageRow, business: { displayName: stri
     created_at: row.createdAt.toISOString(),
     language: row.language,
     client_message_id: row.clientMessageId,
-    suggested_question_id: row.suggestedAnswerId,
     handoff_reason: reason,
     demo_note: reason ? demoNote(reason, replyLanguage(row.language, business.language), business.displayName) : null,
   };
@@ -267,8 +234,7 @@ async function conversationMessages(conversationId: string, businessId: string) 
 /**
  * GET /api/v1/s/demo/:token. LandingBot's DemoConversation: business, banner, suggestions (the business's own
  * suggested questions, answered live when tapped) and this visitor's messages (from the visitor cookie; none without
- * one). Plus notice, expires_at and message_max_chars, which the page may ignore. `suggested_questions` (stored,
- * checked answers) is deprecated and stays only for the page deployed before `suggestions`.
+ * one). Plus notice, expires_at and message_max_chars, which the page may ignore.
  */
 export async function demoView(demo: ResolvedDemo, visitorValue: string | null) {
   const { business, link } = demo;
@@ -283,8 +249,6 @@ export async function demoView(demo: ResolvedDemo, visitorValue: string | null) 
     },
     banner: bannerText(business.displayName),
     suggestions: demoSuggestions(business),
-    /** @deprecated Use `suggestions`; a tap is then a typed message. */
-    suggested_questions: await checkedSuggestions(business.id),
     messages: rows.map((row) => publicMessage(row, business)),
     notice: noticeText(),
     expires_at: link.expiresAt.toISOString(),
@@ -295,10 +259,7 @@ export async function demoView(demo: ResolvedDemo, visitorValue: string | null) 
 // ---------------------------------------------------------------------------------------------------------------
 // Posting a message.
 
-export type PostMessageInput =
-  | { clientMessageId: string; text: string; suggestedQuestionId?: undefined }
-  /** @deprecated The stored-answer tap of the page deployed before `suggestions`. A chip tap now sends `text`. */
-  | { clientMessageId: string; suggestedQuestionId: string; text?: undefined };
+export type PostMessageInput = { clientMessageId: string; text: string };
 
 export type PostMessageDeps = {
   transport?: SiteLlmTransport;
@@ -469,8 +430,7 @@ async function claimRequest(demo: ResolvedDemo, visitorValue: string, clientMess
  *
  * A daily cap is 429 daily_limit and keeps no rows, so the same id can go through tomorrow. A throw mid-reply
  * gives back the counts and the cost reservation and marks the request failed, so a retry can take it over.
- * A suggestion chip tap is a typed message (`text`): live answer, same caps. Only the deprecated stored-answer tap
- * (`suggestedQuestionId`, from the page deployed before `suggestions`) skips the model and the caps.
+ * A suggestion chip tap is a typed message (`text`): live answer, same caps.
  */
 export async function postDemoMessage(
   demo: ResolvedDemo,
@@ -481,24 +441,8 @@ export async function postDemoMessage(
   const db = getDb();
   const business = demo.business;
 
-  let suggestion: typeof siteSuggestedAnswers.$inferSelect | null = null;
-  if (input.suggestedQuestionId !== undefined) {
-    const [row] = await db
-      .select()
-      .from(siteSuggestedAnswers)
-      .where(
-        and(
-          eq(siteSuggestedAnswers.id, input.suggestedQuestionId),
-          eq(siteSuggestedAnswers.businessId, business.id),
-          isNotNull(siteSuggestedAnswers.checkedAt),
-        ),
-      )
-      .limit(1);
-    if (!row) throw new HttpError(404, 'suggested_question_not_found', 'That suggested question is not available.');
-    suggestion = row;
-  }
-  const text = suggestion ? suggestion.question : input.text!;
-  const requestHash = sha256(suggestion ? `tap\u0000${suggestion.id}` : `text\u0000${text}`);
+  const text = input.text;
+  const requestHash = sha256(`text\u0000${text}`);
 
   // Keyed hashes first: a missing ENCRYPTION_KEY fails here, before any pending request row is written.
   const ipKeys = ipKeysFor(deps.ip ?? 'unknown', demo.link.id);
@@ -526,77 +470,55 @@ export async function postDemoMessage(
       body: row.body,
     }));
 
-    let result: SiteAnswerResult;
-    let suggestedDecidedBy: string | null = null;
-    if (suggestion) {
-      // Deprecated: a tap on a Karim-checked stored answer (old page). No model call, no cap.
-      result = {
-        status: suggestion.status as SiteAnswerResult['status'],
-        body: suggestion.answer,
-        topic: suggestion.topic,
-        language: suggestion.language as SiteAnswerResult['language'],
-        decidedBy: 'answered',
-        sourcesKept: suggestion.sourcesKept,
-        sourcesDropped: [],
-        ownerQuestion: null,
-        rawOutput: null,
-        llmCalled: false,
-        inputTokens: 0,
-        outputTokens: 0,
-        costMicroUsd: 0,
-      };
-      suggestedDecidedBy = suggestion.decidedBy;
-    } else {
-      const decision = await reserveSiteUsage(capDb, {
-        businessId: business.id,
-        conversationId: conversation.id,
-        ipKeys,
-        day,
-        messages: 1,
-        costMicroUsd: 0,
-        limits,
-      });
-      if (!decision.ok) {
-        capped = true;
-        throw dailyLimit(decision.decidedBy);
-      }
-      counted = true;
-      result = await answerVisitorMessage(
-        { businessName: business.displayName, contextMd: business.contextMd, history, visitorMessage: text, businessLanguage: business.language },
-        {
-          transport: deps.transport,
-          reserve: async (worstCase) => {
-            const costDecision = await reserveSiteUsage(capDb, {
-              businessId: business.id,
-              conversationId: conversation.id,
-              day,
-              messages: 0,
-              costMicroUsd: worstCase,
-              limits,
-            });
-            // Added up: a fallback call reserves again on top of the first call's reservation.
-            if (costDecision.ok) reserved += worstCase;
-            return costDecision;
-          },
+    const decision = await reserveSiteUsage(capDb, {
+      businessId: business.id,
+      conversationId: conversation.id,
+      ipKeys,
+      day,
+      messages: 1,
+      costMicroUsd: 0,
+      limits,
+    });
+    if (!decision.ok) {
+      capped = true;
+      throw dailyLimit(decision.decidedBy);
+    }
+    counted = true;
+    const result = await answerVisitorMessage(
+      { businessName: business.displayName, contextMd: business.contextMd, history, visitorMessage: text, businessLanguage: business.language },
+      {
+        transport: deps.transport,
+        reserve: async (worstCase) => {
+          const costDecision = await reserveSiteUsage(capDb, {
+            businessId: business.id,
+            conversationId: conversation.id,
+            day,
+            messages: 0,
+            costMicroUsd: worstCase,
+            limits,
+          });
+          // Added up: a fallback call reserves again on top of the first call's reservation.
+          if (costDecision.ok) reserved += worstCase;
+          return costDecision;
         },
-      );
-      if (reserved > 0 || result.llmCalled) {
-        await settleSiteUsage(capDb, {
-          businessId: business.id,
-          day,
-          reservedMicroUsd: reserved,
-          actualMicroUsd: result.costMicroUsd,
-          inputTokens: result.inputTokens,
-          outputTokens: result.outputTokens,
-          llmCalled: result.llmCalled,
-        });
-        reserved = 0;
-      }
-      if (result.status === 'capped') {
-        // The cost cap refused it after the message was counted: the finally block gives the counts back.
-        capped = true;
-        throw dailyLimit(result.decidedBy);
-      }
+      },
+    );
+    if (reserved > 0 || result.llmCalled) {
+      await settleSiteUsage(capDb, {
+        businessId: business.id,
+        day,
+        reservedMicroUsd: reserved,
+        actualMicroUsd: result.costMicroUsd,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        llmCalled: result.llmCalled,
+      });
+      reserved = 0;
+    }
+    if (result.status === 'capped') {
+      // The cost cap refused it after the message was counted: the finally block gives the counts back.
+      capped = true;
+      throw dailyLimit(result.decidedBy);
     }
 
     await deps.beforeStore?.();
@@ -610,7 +532,6 @@ export async function postDemoMessage(
           role: 'visitor',
           body: text,
           clientMessageId: input.clientMessageId,
-          suggestedAnswerId: suggestion?.id ?? null,
           createdAt: visitorAt,
         })
         .returning()) as [SiteMessageRow];
@@ -624,12 +545,11 @@ export async function postDemoMessage(
           status: result.status,
           topic: result.topic,
           language: result.language,
-          decidedBy: suggestedDecidedBy ?? result.decidedBy,
+          decidedBy: result.decidedBy,
           sourcesKept: result.sourcesKept,
           sourcesDropped: result.sourcesDropped,
           ownerQuestion: result.ownerQuestion,
           rawOutput: result.rawOutput ?? null,
-          suggestedAnswerId: suggestion?.id ?? null,
           clientMessageId: input.clientMessageId,
           inputTokens: result.llmCalled ? result.inputTokens : null,
           outputTokens: result.llmCalled ? result.outputTokens : null,

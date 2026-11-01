@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { keyedHash } from '@/lib/crypto';
 import { HttpError } from '@/lib/errors';
@@ -46,24 +45,15 @@ export function getDemoRoute(req: Request, context: TokenContext) {
 }
 
 // `text` is what LandingBot's page sends, for typed messages and suggestion chip taps alike; `body` is accepted as the
-// same field. client_message_id is required for text. `suggested_question_id` is deprecated: the stored-answer tap of
-// the page deployed before `suggestions` (client_message_id optional there; the server makes one up, no replay then).
+// same field.
 const messageSchema = z
   .object({
-    client_message_id: z.uuid().optional(),
+    client_message_id: z.uuid(),
     text: z.string().optional(),
     body: z.string().optional(),
-    suggested_question_id: z.uuid().optional(),
   })
   .strict()
-  .refine((m) => !(m.text !== undefined && m.body !== undefined), { message: 'Send text or body, not both.' })
-  .refine((m) => ((m.text ?? m.body) === undefined) !== (m.suggested_question_id === undefined), {
-    message: 'Send exactly one of text or suggested_question_id.',
-  })
-  .refine((m) => m.suggested_question_id !== undefined || m.client_message_id !== undefined, {
-    message: 'client_message_id is required.',
-    path: ['client_message_id'],
-  });
+  .refine((m) => !(m.text !== undefined && m.body !== undefined), { message: 'Send text or body, not both.' });
 
 /** POST /api/v1/s/demo/:token/messages */
 export function postDemoMessageRoute(req: Request, context: TokenContext, deps: PostMessageDeps = {}) {
@@ -73,16 +63,12 @@ export function postDemoMessageRoute(req: Request, context: TokenContext, deps: 
     const raw = await readJson(req);
     const demo = await resolveDemo(token);
     const body = parseBody(messageSchema, raw);
-    let text: string | undefined;
-    const typed = body.text ?? body.body;
-    if (typed !== undefined) {
-      text = typed.trim();
-      if (!text) throw new HttpError(400, 'validation_error', 'The question is empty.');
-      if (text.length > SITE_MESSAGE_MAX_CHARS) {
-        throw new HttpError(400, 'message_too_long', `Keep your question to ${SITE_MESSAGE_MAX_CHARS} characters.`, {
-          max_chars: SITE_MESSAGE_MAX_CHARS,
-        });
-      }
+    const text = (body.text ?? body.body ?? '').trim();
+    if (!text) throw new HttpError(400, 'validation_error', 'The question is empty.');
+    if (text.length > SITE_MESSAGE_MAX_CHARS) {
+      throw new HttpError(400, 'message_too_long', `Keep your question to ${SITE_MESSAGE_MAX_CHARS} characters.`, {
+        max_chars: SITE_MESSAGE_MAX_CHARS,
+      });
     }
     await limit(req, 'siteMessage');
     const existing = validVisitorValue(readCookie(req, VISITOR_COOKIE));
@@ -90,9 +76,7 @@ export function postDemoMessageRoute(req: Request, context: TokenContext, deps: 
     const result = await postDemoMessage(
       demo,
       visitor,
-      text !== undefined
-        ? { clientMessageId: body.client_message_id!, text }
-        : { clientMessageId: body.client_message_id ?? randomUUID(), suggestedQuestionId: body.suggested_question_id! },
+      { clientMessageId: body.client_message_id, text },
       { ...deps, ip: deps.ip ?? clientIp(req) },
     );
     // A new visitor gets the cookie only when the conversation is theirs (not on a replay of someone else's message).

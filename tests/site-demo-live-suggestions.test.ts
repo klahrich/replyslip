@@ -19,7 +19,7 @@ import { demoSuggestions } from '@/lib/site-assistant/demo';
 import { importRedbotBusinesses, loadRedbotBusinesses } from '@/lib/site-assistant/import';
 import { setSiteLlmTransportForTests } from '@/lib/site-assistant/llm';
 import { call } from './helpers';
-import { answer, createSiteDemo, FIXTURE_DIR, fakeModel, NO_MODEL, TEST_LLM_CONFIG, visitorMessageOf } from './site-fixtures';
+import { answer, createSiteDemo, FIXTURE_DIR, fakeModel, NO_MODEL, visitorMessageOf } from './site-fixtures';
 
 const URL_BASE = 'http://localhost';
 
@@ -48,7 +48,7 @@ const QUESTIONS = ['What areas do you serve?', 'Do you offer a warranty on inter
 describe('demo payload: suggestions', () => {
   it("lists the business's suggested questions in order with position and language, and ignores stored answers", async () => {
     const { business, token } = await createSiteDemo({ suggestedQuestions: QUESTIONS });
-    // A stored, checked answer with another question: only the deprecated field shows it.
+    // A stored, checked answer left over from the old stored-answer tap: never in the payload.
     await getDb().insert(siteSuggestedAnswers).values({
       businessId: business.id,
       position: 0,
@@ -65,8 +65,7 @@ describe('demo payload: suggestions', () => {
     expect(res.status).toBe(200);
     expect(res.data.suggestions).toEqual(QUESTIONS.map((question, position) => ({ position, language: 'en', question })));
     expect(JSON.stringify(res.data.suggestions)).not.toContain('stored');
-    // Deprecated, for the page deployed before `suggestions`.
-    expect(res.data.suggested_questions).toHaveLength(1);
+    expect(res.data).not.toHaveProperty('suggested_questions');
   });
 
   it('is an empty list when the business has no suggested questions', async () => {
@@ -108,7 +107,8 @@ describe('a chip tap is a live typed message', () => {
     const chip = (await info(token)).data.suggestions[0];
     const res = await send(token, { client_message_id: randomUUID(), text: chip.question });
     expect(res.status).toBe(200);
-    expect(res.data.message).toMatchObject({ role: 'assistant', status: 'answered', body: 'We serve Ottawa, Kanata and Orleans.', suggested_question_id: null });
+    expect(res.data.message).toMatchObject({ role: 'assistant', status: 'answered', body: 'We serve Ottawa, Kanata and Orleans.' });
+    expect(res.data.message).not.toHaveProperty('suggested_question_id');
     expect(model.calls).toHaveLength(1);
     expect(visitorMessageOf(model.calls[0]!)).toBe(chip.question);
     // Answered from the business's context.
@@ -150,12 +150,11 @@ describe('import: no suggested answers', () => {
     for (const slug of ['maple-ridge-landscaping', 'peinture-boreale']) await db.delete(siteBusinesses).where(eq(siteBusinesses.slug, slug));
     const businesses = loadRedbotBusinesses(join(FIXTURE_DIR, 'context'), join(FIXTURE_DIR, 'shots'));
     const model = fakeModel(() => answer({}));
+    setSiteLlmTransportForTests(model.transport);
     const logs: string[] = [];
     await importRedbotBusinesses(db, businesses, {
       linkFile: join(mkdtempSync(join(tmpdir(), 'site-import-')), 'links.txt'),
       baseUrl: 'https://valetto.test',
-      transport: model.transport,
-      config: TEST_LLM_CONFIG,
       log: (line) => logs.push(line),
     });
     expect(model.calls).toHaveLength(0);

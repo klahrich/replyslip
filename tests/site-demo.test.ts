@@ -30,10 +30,8 @@ import { answerVisitorMessage } from '@/lib/site-assistant/answer';
 import { createDemoLink, deleteOldDemoConversations, postDemoMessage, resolveDemo } from '@/lib/site-assistant/demo';
 import {
   importRedbotBusinesses,
-  listUncheckedSuggestedAnswers,
   loadRedbotBusinesses,
   revokeDemoLinks,
-  setSuggestedAnswerChecked,
 } from '@/lib/site-assistant/import';
 import { resetSitePriceWarningsForTests, siteFallbackLlmConfig, siteLlmConfig, type SiteLlmConfig } from '@/lib/site-assistant/config';
 import { setSiteLlmTransportForTests, type SiteLlmTransport } from '@/lib/site-assistant/llm';
@@ -42,7 +40,7 @@ import { detectVisitorLanguage } from '@/lib/site-assistant/keywords';
 import { RATE_LIMITS } from '@/lib/constants';
 import { cappedReply, needsOwnerReply } from '@/lib/site-assistant/replies';
 import { call } from './helpers';
-import { answer, createSiteBusiness, createSiteDemo, FIXTURE_DIR, fakeModel, MAPLE_CONTEXT, NO_MODEL, TEST_LLM_CONFIG, translationRequest } from './site-fixtures';
+import { answer, createSiteBusiness, createSiteDemo, FIXTURE_DIR, fakeModel, MAPLE_CONTEXT, NO_MODEL, TEST_LLM_CONFIG } from './site-fixtures';
 
 const URL_BASE = 'http://localhost';
 
@@ -111,7 +109,9 @@ function expectSiteHeaders(res: Response) {
 
 let nextSuggestionPosition = 0;
 
-/** A suggested answer row. Each call takes a new position unless one is given (one row per position and language). */
+/**
+ * A row in site_suggested_answers, which the app no longer reads or writes (the table stays until a schema cleanup).
+ * Each call takes a new position unless one is given (one row per position and language). */
 async function addSuggestion(
   businessId: string,
   checked: boolean,
@@ -137,15 +137,15 @@ async function addSuggestion(
 }
 
 describe('demo info and conversation', () => {
-  it('returns the banner, notice and only checked suggested questions', async () => {
+  it('returns the banner and notice, and never a stored answer', async () => {
     const { business, token } = await createSiteDemo();
-    const checked = await addSuggestion(business.id, true);
-    await addSuggestion(business.id, false, 'Do you do snow removal?');
+    const stored = await addSuggestion(business.id, true);
     const res = await info(token);
     expect(res.status).toBe(200);
     expectSiteHeaders(res.res);
     expect(res.data.business).toEqual({ name: 'Maple Ridge Landscaping', status: 'unclaimed', tile: { color: expect.stringMatching(/^#[0-9a-f]{6}$/), logo_url: null }, language: 'en' });
-    expect(Object.keys(res.data)).toEqual(expect.arrayContaining(['business', 'banner', 'suggested_questions', 'messages']));
+    expect(Object.keys(res.data)).toEqual(expect.arrayContaining(['business', 'banner', 'suggestions', 'messages']));
+    expect(res.data).not.toHaveProperty('suggested_questions');
     expect(res.data.messages).toEqual([]);
     expect(res.data.banner.en).toBe(
       "Demo built by Valetto from Maple Ridge Landscaping's public pages. Not operated by Maple Ridge Landscaping. Answers may be wrong.",
@@ -154,9 +154,7 @@ describe('demo info and conversation', () => {
       'Démo créée par Valetto à partir des pages publiques de Maple Ridge Landscaping. Non exploitée par Maple Ridge Landscaping. Les réponses peuvent être erronées.',
     );
     expect(res.data.notice.en).toMatch(/demo/i);
-    expect(res.data.suggested_questions).toEqual([
-      { id: checked.id, position: checked.position, question: checked.question, answer: checked.answer, language: 'en', checked_at: checked.checkedAt!.toISOString() },
-    ]);
+    expect(JSON.stringify(res.data)).not.toContain(stored.answer);
     expect(JSON.stringify(res.data)).not.toContain(business.id);
   });
 
@@ -292,25 +290,18 @@ describe('messages', () => {
     expect(model.calls).toHaveLength(1);
   });
 
-  it('answers a tapped checked suggestion from storage with zero model calls', async () => {
+  it('refuses the removed stored-answer tap (suggested_question_id) and stores nothing', async () => {
     const { business, token } = await createSiteDemo();
     const suggestion = await addSuggestion(business.id, true);
-    const unchecked = await addSuggestion(business.id, false, 'Unchecked?');
-    const res = await send(token, { client_message_id: randomUUID(), suggested_question_id: suggestion.id });
-    expect(res.status).toBe(200);
-    expect(res.data.message).toMatchObject({ body: suggestion.answer, status: 'answered', suggested_question_id: suggestion.id });
-    const saved = (await info(token, res.cookie!)).data.messages;
-    expect(saved.map((m: { role: string; body: string }) => [m.role, m.body])).toEqual([
-      ['visitor', suggestion.question],
-      ['assistant', suggestion.answer],
-    ]);
-    const again = await send(token, { client_message_id: res.data.message.client_message_id, suggested_question_id: suggestion.id }, res.cookie!);
-    expect(again.data.message.id).toBe(res.data.message.id);
-    // client_message_id is optional on a tap.
-    expect((await send(token, { suggested_question_id: suggestion.id }, res.cookie!)).status).toBe(200);
-    expect((await send(token, { client_message_id: randomUUID(), suggested_question_id: unchecked.id })).status).toBe(404);
-    const other = await createSiteDemo();
-    expect((await send(other.token, { client_message_id: randomUUID(), suggested_question_id: suggestion.id })).status).toBe(404);
+    const model = fakeModel(() => answer({}));
+    setSiteLlmTransportForTests(model.transport);
+    for (const body of [{ client_message_id: randomUUID(), suggested_question_id: suggestion.id }, { suggested_question_id: suggestion.id }]) {
+      const res = await send(token, body);
+      expect(res.status).toBe(400);
+      expect(res.data.error.code).toBe('validation_error');
+    }
+    expect(model.calls).toHaveLength(0);
+    expect(await getDb().select().from(siteMessages).where(eq(siteMessages.businessId, business.id))).toEqual([]);
   });
 
   it('sends keyword questions to the owner without a call, with a demo note', async () => {
@@ -883,7 +874,7 @@ describe('retention', () => {
 });
 
 describe('import', () => {
-  it('with the deprecated --generate-suggested-answers: loads RedBot files, stores shots, writes links to a private file, and pre-generates unchecked answers', async () => {
+  it('loads RedBot files, stores shots and writes links to a private file, with no model call', async () => {
     const db = getDb();
     for (const slug of ['maple-ridge-landscaping', 'peinture-boreale']) await db.delete(siteBusinesses).where(eq(siteBusinesses.slug, slug));
     const businesses = loadRedbotBusinesses(join(FIXTURE_DIR, 'context'), join(FIXTURE_DIR, 'shots'));
@@ -895,14 +886,10 @@ describe('import', () => {
 
     const dir = mkdtempSync(join(tmpdir(), 'site-import-'));
     const linkFile = join(dir, 'links.txt');
-    const model = fakeModel((req) => {
-      const translation = translationRequest(req);
-      if (translation) return { question: `[${translation.to}] ${translation.question}` };
-      const text = JSON.parse(req.body).input[0].content[0].text as string;
-      return text.includes('Peinture') ? answer({ reply: 'Oui.', language: 'fr', sources: ['Peinture extérieure : revêtement, galeries et clôtures'] }) : answer({});
-    });
+    const model = fakeModel(() => answer({}));
+    setSiteLlmTransportForTests(model.transport);
     const logs: string[] = [];
-    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', generateSuggestedAnswers: true, transport: model.transport, config: TEST_LLM_CONFIG, log: (l) => logs.push(l) });
+    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', log: (l) => logs.push(l) });
 
     expect(statSync(linkFile).mode & 0o777).toBe(0o600);
     const lines = readFileSync(linkFile, 'utf8').trim().split('\n');
@@ -919,23 +906,13 @@ describe('import', () => {
     const meta = await sharp(maple!.desktopShot!).metadata();
     expect(meta.width).toBe(1440);
     expect(meta.height).toBeLessThanOrEqual(2000);
-    // Per question: its answer, a translation, and the translation's answer.
-    expect(model.calls).toHaveLength(18);
-    const unchecked = await listUncheckedSuggestedAnswers(db, 'maple-ridge-landscaping');
-    expect(unchecked.map((row) => [row.position, row.language])).toEqual([[0, 'en'], [0, 'fr'], [1, 'en'], [1, 'fr'], [2, 'en'], [2, 'fr']]);
+    expect(model.calls).toHaveLength(0);
+    expect(await db.select().from(siteSuggestedAnswers).where(eq(siteSuggestedAnswers.businessId, maple!.id))).toEqual([]);
 
-    // The page shows nothing until Karim checks one.
-    const token = lines[0]!.split('\t')[1]!.split('/').pop()!;
-    expect((await info(token)).data.suggested_questions).toEqual([]);
-    expect(await setSuggestedAnswerChecked(db, unchecked[0]!.id, true)).toBe(true);
-    expect((await info(token)).data.suggested_questions).toHaveLength(1);
-
-    // Re-run: no new link, checked answers kept, unchecked ones regenerated (the checked row's unchecked
-    // translation too: translate and answer again).
-    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', generateSuggestedAnswers: true, transport: model.transport, config: TEST_LLM_CONFIG, log: () => {} });
+    // Re-run: the live link is kept, no new one.
+    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', log: () => {} });
     expect(readFileSync(linkFile, 'utf8').trim().split('\n')).toHaveLength(2);
-    expect(model.calls).toHaveLength(18 + 17);
-    expect((await info(token)).data.suggested_questions).toHaveLength(1);
+    expect(model.calls).toHaveLength(0);
   });
 
   it("reads RedBot's file layout: array index, screenshots object, Language line, desktop fallback to context/<slug>.png", () => {
@@ -972,22 +949,5 @@ describe('import', () => {
     expect(beta).toMatchObject({ language: 'fr', desktopShotPath: join(context, 'beta.png'), mobileShotPath: null });
     // shots/ wins over context/<slug>.png, and the index's language wins over the file.
     expect(gamma).toMatchObject({ language: 'fr', desktopShotPath: join(shots, 'gamma-desktop.png') });
-  });
-
-  it('with --generate-suggested-answers, skips the suggested answers without a key, and says so', async () => {
-    const db = getDb();
-    await db.delete(siteBusinesses).where(eq(siteBusinesses.slug, 'maple-ridge-landscaping'));
-    const businesses = loadRedbotBusinesses(join(FIXTURE_DIR, 'context'), join(FIXTURE_DIR, 'shots')).slice(0, 1);
-    const logs: string[] = [];
-    const dir = mkdtempSync(join(tmpdir(), 'site-import-'));
-    await importRedbotBusinesses(db, businesses, {
-      linkFile: join(dir, 'links.txt'),
-      baseUrl: 'https://valetto.test',
-      generateSuggestedAnswers: true,
-      transport: NO_MODEL,
-      config: { ...TEST_LLM_CONFIG, apiKey: null },
-      log: (l) => logs.push(l),
-    });
-    expect(logs[0]).toMatch(/suggested answers skipped \(SITE_LLM_API_KEY is not set\)/);
   });
 });

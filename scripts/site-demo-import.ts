@@ -1,92 +1,35 @@
 /**
- * Site assistant demo (story 0b): load RedBot's businesses, revoke links, and (deprecated) review stored answers.
+ * Site assistant demo (story 0b): load RedBot's businesses and revoke links.
  *
  *   npx tsx scripts/site-demo-import.ts --db-name <db> --context-dir <dir> [--shots-dir <dir>] [--new-link]
- *       [--raw-shots] [--link-file <path>] [--only <slug,slug>] [--generate-suggested-answers [--regenerate]]
- *   npx tsx scripts/site-demo-import.ts --db-name <db> --list-unchecked [--slug <slug>]
- *   npx tsx scripts/site-demo-import.ts --db-name <db> --check <id> [--check <id> ...] | --uncheck <id>
+ *       [--raw-shots] [--link-file <path>] [--only <slug,slug>]
  *   npx tsx scripts/site-demo-import.ts --db-name <db> --revoke-links <slug>
- *   npx tsx scripts/site-demo-import.ts --db-name <db> --backfill-translations [--slug <slug>] [--dry-run]
  *
  * DATABASE_URL comes from the environment (or .env); --db-name must match its database. Demo URLs are appended to
  * --link-file (default ~/.valetto-site-demo-links.txt, mode 600) and never printed. Base URL: SITE_DEMO_BASE_URL,
  * default https://valetto.tech.
  *
  * The import loads context, suggested questions, language and screenshots, and makes no model calls: the demo
- * answers a tapped suggested question live, like a typed one. Deprecated, for the page deployed before that:
- * --generate-suggested-answers also pre-generates stored answers (needs SITE_LLM_API_KEY; skipped without it), and
- * --list-unchecked, --check, --uncheck and --backfill-translations review them.
- *
- * --backfill-translations adds the missing English or French row for each suggested question that has only one
- * (businesses imported before both languages were generated). New rows are unchecked; existing rows, checked or
- * not, are never changed. Safe to re-run: a second run finds nothing to add. --dry-run lists what it would add,
- * with no model calls and no writes.
+ * answers a tapped suggested question live, like a typed one.
  */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import {
-  backfillSuggestedTranslations,
-  importRedbotBusinesses,
-  listUncheckedSuggestedAnswers,
-  loadRedbotBusinesses,
-  revokeDemoLinks,
-  setSuggestedAnswerChecked,
-} from '@/lib/site-assistant/import';
+import { importRedbotBusinesses, loadRedbotBusinesses, revokeDemoLinks } from '@/lib/site-assistant/import';
 import { loadEnvFile, openDb, parseArgs } from './site-demo-env';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function idsFor(argv: string[], flag: string): string[] {
-  const ids: string[] = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === `--${flag}` && argv[i + 1]) ids.push(...argv[i + 1]!.split(','));
-    else if (argv[i]!.startsWith(`--${flag}=`)) ids.push(...argv[i]!.slice(flag.length + 3).split(','));
-  }
-  return ids.map((id) => id.trim()).filter(Boolean);
-}
+/** Stored-answer flags, removed now that the demo answers suggested questions live. Refused, not ignored. */
+const REMOVED_FLAGS = ['generate-suggested-answers', 'regenerate', 'list-unchecked', 'check', 'uncheck', 'backfill-translations'];
 
 async function main(): Promise<void> {
   loadEnvFile();
-  const argv = process.argv.slice(2);
-  const { flags } = parseArgs(argv);
+  const { flags } = parseArgs(process.argv.slice(2));
+  const removed = REMOVED_FLAGS.filter((flag) => flags.has(flag));
+  if (removed.length > 0) {
+    throw new Error(`--${removed.join(', --')}: removed. Suggested questions are answered live; nothing is stored to review.`);
+  }
   const str = (key: string) => (typeof flags.get(key) === 'string' ? (flags.get(key) as string) : undefined);
   const { db, close } = openDb(str('db-name'));
   try {
-    if (flags.has('list-unchecked')) {
-      const rows = await listUncheckedSuggestedAnswers(db, str('slug'));
-      if (rows.length === 0) console.log('No unchecked suggested answers.');
-      for (const row of rows) {
-        console.log(`\n[${row.id}] ${row.slug} #${row.position + 1} ${row.language} (${row.status}, ${row.decidedBy})`);
-        console.log(`Q: ${row.question}`);
-        console.log(`A: ${row.answer}`);
-        for (const source of row.sourcesKept) console.log(`   source: "${source}"`);
-      }
-      return;
-    }
-    const check = idsFor(argv, 'check');
-    const uncheck = idsFor(argv, 'uncheck');
-    if (check.length > 0 || uncheck.length > 0) {
-      for (const [ids, checked] of [[check, true], [uncheck, false]] as const) {
-        for (const id of ids) {
-          if (!UUID.test(id)) throw new Error(`Not an id: ${id}`);
-          const ok = await setSuggestedAnswerChecked(db, id, checked);
-          console.log(`${id}: ${ok ? (checked ? 'checked' : 'unchecked') : 'not found'}`);
-        }
-      }
-      return;
-    }
-    if (flags.has('backfill-translations')) {
-      const dryRun = flags.has('dry-run');
-      const rows = await backfillSuggestedTranslations(db, { slug: str('slug'), dryRun, log: (line) => console.log(line) });
-      const count = (outcome: string) => rows.filter((row) => row.outcome === outcome).length;
-      if (rows.length === 0) console.log('Nothing to backfill: every position has both languages.');
-      else if (dryRun) console.log(`Dry run: ${rows.length} row(s) would be generated. Nothing was written.`);
-      else {
-        console.log(`Done: ${count('generated')} generated (unchecked), ${count('failed')} failed, ${count('exists')} already there.`);
-        console.log('Next: --list-unchecked, then --check <id> for each answer you approve.');
-      }
-      return;
-    }
     const revoke = str('revoke-links');
     if (revoke) {
       console.log(`${revoke}: ${await revokeDemoLinks(db, revoke)} link(s) revoked`);
@@ -103,14 +46,11 @@ async function main(): Promise<void> {
     await importRedbotBusinesses(db, businesses, {
       rawShots: flags.has('raw-shots'),
       newLink: flags.has('new-link'),
-      generateSuggestedAnswers: flags.has('generate-suggested-answers'),
-      regenerate: flags.has('regenerate'),
       linkFile,
       baseUrl: process.env.SITE_DEMO_BASE_URL?.trim() || 'https://valetto.tech',
       log: (line) => console.log(line),
     });
     console.log(`Done: ${businesses.length} business(es). Demo URLs (if any new) are in the link file, mode 600.`);
-    if (flags.has('generate-suggested-answers')) console.log('Next: --list-unchecked, then --check <id> for each answer you approve.');
   } finally {
     await close();
   }
