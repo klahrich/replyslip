@@ -118,9 +118,9 @@ describe('consent page logic', () => {
 describe('sign-in next path', () => {
   it('only lets the consent page through', () => {
     expect(safeNextPath(`/oauth/consent?req=${REQ}`)).toBe(`/oauth/consent?req=${REQ}`);
-    expect(safeNextPath([`/oauth/consent?req=${REQ}`])).toBe(`/oauth/consent?req=${REQ}`);
     for (const bad of [
       undefined,
+      [`/oauth/consent?req=${REQ}`],
       '',
       '/dashboard/settings',
       `https://evil.example/oauth/consent?req=${REQ}`,
