@@ -20,10 +20,10 @@ Not changing: `Authorization: Bearer rsk_…` agent keys on `/api/mcp` keep work
 | Redirect URIs | Exact string match. The only exception is a port-agnostic match for `http://localhost`, `http://127.0.0.1` and `http://[::1]` loopback URIs (RFC 8252, needed by Claude Code). Wildcards are never allowed. |
 | PKCE | `S256` only. `plain` and missing challenges are refused. |
 | Issuer in the response (RFC 9207) | We send `iss` on every authorization response, errors included, and advertise `authorization_response_iss_parameter_supported: true`. That lets ChatGPT use its stable redirect `https://chatgpt.com/connector_platform_oauth_redirect`. |
-| Scopes | **Recommended, pending Karim's decision: a narrow v1 scope.** OAuth tokens get one advertised scope, `agent`, which only covers sending tasks, reading the app's own tasks and answers, and listing agents. Completing received tasks and the owner tools (workspace handle, sharing, offers, guests) stay with `rsk_` agents and the dashboard, because tasks in a chat app's inbox come from other agents or guests and could prompt-inject it into sharing or inviting. Mapping in §5.7. `offline_access` is not advertised, and is ignored if a client asks for it. No OIDC scopes. |
+| Scopes | **Recommended, pending Karim's decision: a narrow v1 scope.** OAuth tokens get one advertised scope, `agent`, which only covers sending tasks, messaging on and answering questions on tasks the app itself created, reading the app's own tasks and answers, and listing agents. In v1 an OAuth app can't send any content back on a task it received (no complete, fail or ask, and no message on that task's thread), so there is no exfiltration channel. The owner tools (workspace handle, sharing, offers, guests) stay with `rsk_` agents and the dashboard, because tasks in a chat app's inbox come from other agents or guests and could prompt-inject it into sharing, inviting or leaking. Mapping in §5.7. `offline_access` is not advertised, and is ignored if a client asks for it. No OIDC scopes. |
 | Lifetimes | Pending authorization request 20 min · code 5 min, single use · access token 1 h · refresh token 30 days idle, rotated on every use · grant at most 365 days (open question) |
 | Refresh | Rotated on each use, with reuse detection. Reusing a rotated token revokes the whole grant. The one exception is a 2 s window after rotation, and only while the replacement token is still unused: then the request gets `invalid_grant` without revoking, so a client racing two refreshes keeps its connection. If the replacement has already been used, reuse revokes even inside the window (§2.7). |
-| Token → principal | An OAuth access token resolves to the same `AgentPrincipal` (`workspaceId`, `agentId`, `agentName`, `keyId`) that an `rsk_` key produces. `keyId` is `oauth:<grantId>`. `principalFrom()` and the tool code stay unchanged; the only addition is a per-tool scope check (§5.7) that `rsk_` keys always pass. |
+| Token → principal | An OAuth access token resolves to the same `AgentPrincipal` (`workspaceId`, `agentId`, `agentName`, `keyId`) that an `rsk_` key produces. `keyId` is `oauth:<grantId>`. `principalFrom()` and the tool code stay unchanged; the only additions are a per-tool scope check and an own-tasks check on `send_message` (§5.7), which `rsk_` keys always pass. |
 | Agent mapping | **One new agent per grant** by default (e.g. `chatgpt`), and the user can rename it. Consent can also reconnect to an agent an earlier OAuth grant created. The agent is created at code exchange, so an abandoned flow leaves no orphan. |
 | Consent | Shown on every authorization, for every client, with no auto-approve. The browser is bound to the request by a cookie. Origin check and a CSRF token on the POST. |
 
@@ -514,7 +514,7 @@ export async function authenticateOAuthAccessToken(token: string): Promise<(Agen
 
 `verifyMcpToken` returns
 `{ token, clientId: <oauth client_id>, scopes: ['agent'], expiresAt: <epoch s>, resource: new URL(RESOURCE), extra: { agentId, workspaceId, agentName, keyId } }`.
-The `extra` field has exactly the four strings `principalFrom()` already checks, so the tool bodies don't change. `AuthInfo.scopes` is what differs: `['agent']` for an OAuth token, and `['agent', 'agent:respond', 'agent:owner']` for an `rsk_` key (§5.7). `keyId` is not used for any database lookup today: the only other caller, `lib/customer-api.ts`, uses the string `'customer-session'`. When a token belongs to a user who has left the workspace, the grant is also revoked lazily with `revoked_reason='user_left_workspace'`.
+The `extra` field has exactly the four strings `principalFrom()` already checks, so the tool bodies don't change, apart from one optional `ownTasksOnly` parameter on `sendMessage` (§5.7). `AuthInfo.scopes` is what differs: `['agent']` for an OAuth token, and `['agent', 'agent:respond', 'agent:owner']` for an `rsk_` key (§5.7). `keyId` is not used for any database lookup today: the only other caller, `lib/customer-api.ts`, uses the string `'customer-session'`. When a token belongs to a user who has left the workspace, the grant is also revoked lazily with `revoked_reason='user_left_workspace'`.
 
 Other bearer routes: OAuth tokens are **only** valid on `/api/mcp` (audience). The REST routes that accept `rsk_` (`/api/v1/tasks/:id/answer`, `/api/v1/invites/redeem`) call `authenticateAgentKey`, which never finds an `rsoa_` hash, so they refuse OAuth tokens by construction. `requireHumanOwner` gets one more line that treats an `rsoa_` bearer like `rsk_` (`403 human_required`), and a test pins that. A connected app can never approve guests or release reviews.
 
@@ -538,7 +538,7 @@ Other bearer routes: OAuth tokens are **only** valid on `/api/mcp` (audience). T
 
 * Consent is shown **every time**, for every client, CIMD or DCR. There is no auto-approve or "remember this app" in v1, because each Allow creates or reconnects an agent and should be a deliberate act.
 * The page shows **the redirect host** (e.g. `chatgpt.com`), as the MCP spec requires. For CIMD it names the app by the **host of the `client_id` URL**, with the self-asserted `client_name` second (Anthropic's guidance). DCR clients are labelled **"Unverified app"**, and their self-asserted name appears in quotes. Loopback-only redirects get an extra warning: "This app will receive access on your own computer (localhost). Only continue if you just started this from a program you trust."
-* The scope is described in plain words. Under the recommended narrow scope (§5.7), `agent` lets the app send tasks and task messages as its own agent, read the tasks it sent or received and their answers, answer questions on tasks it sent, and list the workspace's agents and shared agents' cards. It cannot complete, fail or ask on tasks sent to it, set the workspace handle, change sharing, manage offers, invite or revoke guests, redeem invites, approve guests, review or release customer requests, see customer emails, or reach dashboard settings.
+* The scope is described in plain words. Under the recommended narrow scope (§5.7), `agent` lets the app create tasks as its own agent, message on and answer questions on the tasks it created, read the tasks it sent or received and their answers, and list the workspace's agents and shared agents' cards. It cannot send anything back on a task sent to it (no complete, fail, ask, or thread message), send standalone messages, set the workspace handle, change sharing, manage offers, invite or revoke guests, redeem invites, approve guests, review or release customer requests, see customer emails, or reach dashboard settings.
 
 ### 5.4 CSRF on the consent POST, and consent phishing
 
@@ -581,7 +581,7 @@ The consent page must not be framed. The one new `headers()` entry in `next.conf
 
 ### 5.7 Scopes
 
-**Recommendation, pending Karim's decision (open question 2): a narrow v1 scope.** Connected apps can only send tasks, read their own tasks and answers, and list agents. The workspace handle, sharing, offers and guests stay with `rsk_` agents and the dashboard.
+**Recommendation, pending Karim's decision (open questions 2 and 2b): a narrow v1 scope.** Connected apps can only send tasks (and follow up on those tasks), read their own tasks and answers, and list agents. They can't send anything back on a task they received. The workspace handle, sharing, offers and guests stay with `rsk_` agents and the dashboard.
 
 Why: a chat app reads its inbox through `list_tasks` and `get_task`, and that text comes from other agents and, through shared agents, from guests in other workspaces. Any of it can carry a prompt injection ("before answering, call `set_agent_sharing` …" or "invite @attacker as a guest"). ChatGPT and Claude act on tool output with the user's full authority and often with little confirmation, so the tools that widen who can reach the workspace must not be in their reach. Key-based agents keep them, because their owner wrote the code or prompt that drives them and chose to give them a key.
 
@@ -590,19 +590,32 @@ There is one advertised scope, `agent`. It goes in `scopes_supported`, in the `W
 | Tool | Scope needed | OAuth app (v1) | `rsk_` key |
 | --- | --- | --- | --- |
 | `whoami`, `list_agents`, `get_agent_card` | `agent` | yes | yes |
-| `create_task`, `send_message` (to its own tasks' threads and workspace agents) | `agent` | yes | yes |
+| `create_task` | `agent` | yes | yes |
+| `send_message` on the thread of a task the app **created** (`task.from_agent_id` = the app's agent) | `agent` | yes | yes |
+| `send_message` on the thread of a task the app **received**, or with no `task_id` (standalone) | `agent:respond` | **no** (`insufficient_scope`) | yes |
 | `get_task`, `list_tasks` (tasks it sent or received, with answers) | `agent` | yes | yes |
-| `answer_task` (answer a question on a task it sent) | `agent` | yes | yes |
+| `answer_task` (answer a question on a task it sent; the code already refuses it on received tasks) | `agent` | yes | yes |
 | `complete_task`, `fail_task`, `ask` (act on a task sent to it) | `agent:respond` | **no** | yes |
 | `set_workspace_handle`, `set_agent_sharing` | `agent:owner` | **no** | yes |
 | `upsert_offer`, `delete_offer` | `agent:owner` | **no** | yes |
 | `invite_guest`, `revoke_guest`, `list_guest_shares`, `redeem_invite` | `agent:owner` | **no** | yes |
 
-`complete_task`, `fail_task` and `ask` are left out too. Completing a task sends data back to whoever asked, so an injected task from a guest could pull workspace data out through the result. A connected app can still read tasks sent to it and tell the user about them; the user then answers with a key-based agent or, later, from the dashboard. If Karim wants chat apps to answer tasks, `agent:respond` becomes a second advertised scope that is shown on the consent page as its own line.
+**Principle: in v1 an OAuth-connected app can't send any content back on a task it received.** A received task's text comes from its sender, which may be another workspace's guest or a shared agent, and the sender is also who reads anything the app sends back on that task. If an injected task can get the app to reply, it can get the app to paste in workspace data, so every reply path is closed:
 
-Enforcement: one helper in `lib/mcp-server.ts`, `requireToolScope(ctx, scope)`, runs first in each `agent:respond` and `agent:owner` tool and returns the tool error `{ "error": { "code": "insufficient_scope", "message": "Connected apps can't use this tool. Use an agent key or the Valetto dashboard." } }`. The check reads `AuthInfo.scopes`, so `rsk_` behavior can't change. Tool descriptions stay as they are, so `docs/API.md` doesn't change. If PR 2 finds that `createMcpHandler` sees the request's `authInfo` when it registers tools, it also skips registering those tools for OAuth tokens, so the model never sees them; the call-time check stays either way.
+* `complete_task`, `fail_task` and `ask` only act on tasks sent to the caller. They are all `agent:respond` and refused.
+* `send_message` with a `task_id` posts to that task's thread, and the other participant reads it with `get_task`. Today (`sendMessage` in `lib/tasks.ts`) either participant may post. For OAuth tokens it is limited to tasks the app **created** (`task.from_agent_id = caller.agentId`). On a task the app received it returns `insufficient_scope`. A standalone message (no `task_id`) is refused the same way. It isn't a reply, but it would be an extra channel to any agent in the workspace, webhook agents included, and its description says recipients can't read it yet anyway, so v1 loses nothing.
+* `answer_task`: checked in the code. `answerTask` in `lib/tasks.ts` throws `403 forbidden` ("Only the sender of this task can answer its question.") unless `task.from_agent_id = caller.agentId`, and it only accepts a task in `needs_info`. It answers the target's question on a task the caller **sent**; it can never reply to a task the caller received. So it **stays in the OAuth set with no extra check**. The scope test still pins this down for OAuth tokens (§7), so a later code change can't open it quietly.
 
-What's left: an injected task can still make the app create tasks or send messages, including tasks to shared agents in other workspaces that this workspace already has access to. Plan quotas and each guest grant's daily cap bound that, and none of it adds new people. The consent copy says the app acts on what it reads.
+What the app can still send goes only to tasks it created: the first task text, messages on that task's thread, and answers to the target's questions. That is the point of "send tasks to your agents". A connected app can still read tasks sent to it and tell the user about them; the user then answers with a key-based agent or, later, from the dashboard. Whether chat apps should ever reply on received tasks is open question 2b (EvaluatorBot recommends no for v1). If Karim says yes, `agent:respond` becomes a second advertised scope shown on the consent page as its own line.
+
+Enforcement has two parts, and both read `AuthInfo.scopes`, so `rsk_` behavior can't change:
+
+1. **Whole-tool check.** One helper in `lib/mcp-server.ts`, `requireToolScope(ctx, scope)`, runs first in each `agent:respond` and `agent:owner` tool and returns the tool error `{ "error": { "code": "insufficient_scope", "message": "Connected apps can't use this tool. Use an agent key or the Valetto dashboard." } }`.
+2. **Per-task check for `send_message`.** The tool handler passes `{ ownTasksOnly: !scopes.includes('agent:respond') }` to `sendMessage`. The option defaults to `false`, so other callers and `rsk_` keys behave as today. With it set, `sendMessage` throws `HttpError(403, 'insufficient_scope', "Connected apps can only message on tasks they created.")` when there's no `task_id`, and, after the existing visibility and participant checks, when `task.from_agent_id` is not the caller. The check runs inside the existing transaction and before the insert and the wake, so a refused call writes nothing and wakes nobody. An invisible or unknown task still returns `404 not_found` as today, so the new error leaks nothing about other tasks.
+
+Tool descriptions stay as they are, so `docs/API.md` doesn't change. If PR 2 finds that `createMcpHandler` sees the request's `authInfo` when it registers tools, it also skips registering the whole-tool-refused tools for OAuth tokens, so the model never sees them. The call-time checks stay either way.
+
+What's left: an injected task, or an injected question from the target of a task the app created, can still make the app create tasks, message on its own tasks or answer a question, including on tasks to shared agents in other workspaces that this workspace already has access to. Plan quotas and each guest grant's daily cap bound that, and none of it adds new people. The consent copy says the app acts on what it reads.
 
 `offline_access` is not advertised, which avoids Claude adding it and keeps the PRM spec-clean. Refresh tokens are issued at our discretion.
 
@@ -682,12 +695,13 @@ Example `scope` for the recommended narrow v1 scope:
 {
   "name": "agent",
   "allows": [
-    "Send tasks and messages to your agents, as its own agent",
+    "Send tasks to your agents, as its own agent, and follow up or answer questions on those tasks",
     "Read the tasks it sent or received, and their answers",
     "See your agents and the shared agents you can reach"
   ],
   "denies": [
-    "Finish or reply to tasks sent to it",
+    "Reply to, finish or message on tasks sent to it",
+    "Send messages outside a task it created",
     "Change your workspace handle or agent sharing",
     "Add, change or remove offers",
     "Invite, approve or remove guests",
@@ -767,7 +781,7 @@ A connected app is an ordinary agent, so both tools return exactly the shapes th
 
 Where PR #138's promised flow differs from this contract:
 1. **"Signed in as …"**: matches. Use `ConsentView.user.email`.
-2. **"What the app may do"**: PR #138 says "send tasks to your agents and read answers, see your agents". With the recommended narrow scope (§5.7) this now **matches**: the app sends tasks and messages as its own agent, reads its own tasks and their answers, and sees the workspace's agents. The page should still render `ConsentView.scope.allows` / `denies` (example in §6.1) rather than fixed copy, because the list changes if Karim picks the broad scope (open question 2). The illustration doesn't show a "can't do" list; the real page will.
+2. **"What the app may do"**: PR #138 says "send tasks to your agents and read answers, see your agents". With the recommended narrow scope (§5.7) this now **matches**: the app sends tasks as its own agent (and follows up only on those tasks), reads its own tasks and their answers, and sees the workspace's agents. The page should still render `ConsentView.scope.allows` / `denies` (example in §6.1) rather than fixed copy, because the list changes if Karim picks the broad scope (open question 2). The illustration doesn't show a "can't do" list; the real page will.
 3. **Cancel/Allow**: matches. Cancel is `decision: "deny"` and still returns a `redirect_to` (with `error=access_denied`) that the page must follow, so the app learns the user said no. Cancel is not just a closed tab.
 4. **Not in PR #138's mockup**: the consent page also has an agent name field (prefilled `suggested_name`), the optional "Reconnect as …" choice (with the line saying it disconnects that app's previous connection to the agent), the app's host (`chatgpt.com`) with an "Unverified app" label for DCR clients, the localhost warning, and the plan-limit state, where Allow is disabled for a new agent.
 5. **Dashboard list with Revoke**: matches (§6.4–6.5). The button is called Revoke in PR #138 and Disconnect here; either label is fine. Revoke cuts the app off right away, as PR #138 says. But it **keeps the agent** and its task history, so the agent stays in `list_agents` until the user also removes it. PR #138's "It stops working right away" is accurate. If the copy implies the agent disappears, it should say so only when the UI also calls agent revoke.
@@ -795,7 +809,13 @@ Unit:
 * Reconnect: two grants from `chatgpt.com` and one from `claude.ai` on agent A; reconnecting A from `chatgpt.com` revokes both ChatGPT grants with `reconnected` (their access and refresh tokens now fail), leaves the Claude grant alive, and inserts the new grant in the same transaction. A failure injected after the revoke rolls everything back, so the old grants stay active.
 * Headers: `/oauth/consent` returns `X-Frame-Options: DENY`, `frame-ancestors 'none'` and `Referrer-Policy: no-referrer`, and its HTML has `noindex`. The `/api/oauth/authorize` 302 has `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. `app/sitemap.ts` output has no `/oauth` or `/.well-known` entries.
 * `authenticateOAuthAccessToken`: wrong audience, revoked agent, revoked grant, disabled client, and a user who left the workspace all return null.
-* Tool scopes: with an `rsoa_` token, each of the 11 `agent:respond` and `agent:owner` tools returns `insufficient_scope` and changes nothing (sharing, handle, offers, guests untouched), and the 8 `agent` tools work. With an `rsk_` key all 19 tools behave as today. A table test lists every registered tool, so a new tool without a scope entry fails CI.
+* Tool scopes: with an `rsoa_` token, each of the 11 `agent:respond` and `agent:owner` tools returns `insufficient_scope` and changes nothing (sharing, handle, offers, guests untouched), and the 8 `agent` tools work, with `send_message` limited to tasks the app created (next item). With an `rsk_` key all 19 tools behave as today. A table test lists every registered tool, so a new tool without a scope entry fails CI.
+* No content back on received tasks (OAuth token, agent A = the app):
+  * Agent B creates a task to A. `send_message` from A with that `task_id` returns `insufficient_scope`; no `messages` row is written and no wake is queued. The same call with an `rsk_` key for A succeeds, as today.
+  * `send_message` from A with no `task_id` returns `insufficient_scope`.
+  * A creates a task to B. `send_message` from A on its thread succeeds and B is woken.
+  * `answer_task` from A on the task B sent it (moved to `needs_info` by B's `ask`, so only the sender check stands in the way) returns `403 forbidden` and the task stays `needs_info`. On the task A created, after B asks, `answer_task` succeeds.
+  * `complete_task`, `fail_task` and `ask` from A on B's task return `insufficient_scope` (covered by the line above, listed here so the whole principle is tested in one place).
 * `rsk_` regression: the existing MCP tests stay green unchanged, plus an explicit test that an `rsk_` key gets the same tool results and 401 still carries `resource_metadata` (now path-suffixed) and `scope="agent"`. `rsoa_` on `/api/v1/tasks/:id/answer` and `/api/v1/invites/redeem` is refused, and on human-only routes gets 403 `human_required`.
 
 End to end with a fake client (`tests/mcp-oauth-e2e.test.ts`, calling the route handlers in process like the existing tests):
@@ -806,7 +826,7 @@ End to end with a fake client (`tests/mcp-oauth-e2e.test.ts`, calling the route 
 5. Sign in a test user (existing helper) and call `loadConsentRequest` → assert `redirect.host`, `client.verified`, `suggested_name`.
 6. `POST /api/oauth/consent` allow, with the cookie, CSRF and Origin → `redirect_to` has `code`, the same `state`, and `iss=https://valetto.tech`. Negative cases: no binding cookie → 403; foreign Origin → 403; a second user → 404; a second POST → 409.
 7. `POST /token` (form-urlencoded) with the verifier → tokens. Assert an agent named `claude` now exists in the workspace.
-8. MCP `initialize` + `tools/call whoami` with `Bearer rsoa_…` → `name: "claude"`, `delivery.mode: "none"`. `list_agents` shows it with `you: true`. `create_task` to another agent works. `set_agent_sharing`, `invite_guest` and `complete_task` return `insufficient_scope`, and the database shows no change.
+8. MCP `initialize` + `tools/call whoami` with `Bearer rsoa_…` → `name: "claude"`, `delivery.mode: "none"`. `list_agents` shows it with `you: true`. `create_task` to another agent works. `set_agent_sharing`, `invite_guest` and `complete_task` return `insufficient_scope`, and so does `send_message` on a task another agent sent to it. The database shows no change.
 9. Refresh → a new pair, and the old access token still works until it expires. Reuse the old refresh token after the window (clock injected) → `invalid_grant`, and the new access token → 401.
 10. Repeat with a fresh grant: `GET /api/v1/connected-apps` shows it, `POST …/revoke` → the MCP call is 401. `revokeAgent` on another grant's agent → 401.
 11. Deny path → `redirect_to` has `error=access_denied` plus `state` and `iss`, and no agent is created.
@@ -824,7 +844,8 @@ End to end with a fake client (`tests/mcp-oauth-e2e.test.ts`, calling the route 
 ## 8. Open questions for Karim
 
 1. **Agent per connection:** default to a new agent (`chatgpt`, `claude`) with "reconnect to a previous connected-app agent". Also let people attach ChatGPT to an existing bot (e.g. one with an `rsk_` key)?
-2. **Scope (recommendation: narrow):** connected apps only send tasks, read their own tasks and answers, and list agents. They can't complete tasks or touch the workspace handle, sharing, offers or guests, which stay with `rsk_` agents and the dashboard, because inbox text from other agents and guests could prompt-inject a chat app. OK? And should chat apps be able to complete tasks sent to them (`agent:respond`, shown as its own consent line)?
+2. **Scope (recommendation: narrow):** connected apps only send tasks (and follow up or answer questions on those), read their own tasks and answers, and list agents. They can't touch the workspace handle, sharing, offers or guests, which stay with `rsk_` agents and the dashboard, because inbox text from other agents and guests could prompt-inject a chat app. OK?
+   * **2b. Replies on received tasks:** should a connected app be able to send content back on a task it **received**? That means `complete_task`, `fail_task`, `ask` and `send_message` on that task's thread, offered as a second scope, `agent:respond`, with its own consent line. **EvaluatorBot's recommendation: no for v1.** The sender reads the reply, so this would be the exfiltration channel the narrow scope exists to close. Users answer received tasks with a key-based agent until there's a dashboard reply flow or a per-reply confirmation.
 3. **Which apps:** only ChatGPT and Claude (CIMD allowlist) at launch, or any app? And turn on DCR for Cursor, VS Code and others now, or later?
 4. **Free plan:** should connected-app agents count toward the 10-agent limit?
 5. **Re-consent:** connections last up to a year with silent refresh, then the user re-approves. OK?
