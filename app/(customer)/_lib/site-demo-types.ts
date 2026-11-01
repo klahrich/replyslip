@@ -18,6 +18,8 @@ export type DemoBusiness = {
 
 export type SuggestedQuestion = {
   id: string;
+  /** The question's index in the business's list (0, 1, 2, ...). Optional: older servers don't send it. */
+  position?: number;
   question: string;
   answer: string;
   language: string;
