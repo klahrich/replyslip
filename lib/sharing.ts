@@ -63,8 +63,7 @@ export function parseRecipient(to: string): RecipientAddress {
   return { kind: 'shared', handle: match[1], agentName: match[2] };
 }
 
-export function assertHandle(value: string): string {
-  const handle = value.trim();
+function checkHandle(handle: string): string {
   if (!HANDLE_PATTERN.test(handle)) {
     throw new HttpError(
       400,
@@ -73,6 +72,19 @@ export function assertHandle(value: string): string {
     );
   }
   return handle;
+}
+
+export function assertHandle(value: string): string {
+  return checkHandle(value.trim());
+}
+
+/**
+ * A handle that names another workspace (invite or revoke a guest). People and agents often write it as
+ * `@otherco`, so trim and drop one leading `@` before the same check that stored handles pass.
+ */
+export function assertTargetHandle(value: string): string {
+  const trimmed = value.trim();
+  return checkHandle(trimmed.startsWith('@') ? trimmed.slice(1) : trimmed);
 }
 
 function assertOfferName(value: string): string {
@@ -705,7 +717,7 @@ export async function inviteGuest(
   agentId: string,
   input: { guestHandle: string; offerNames: string[]; dailyCap?: number },
 ) {
-  const guestHandle = assertHandle(input.guestHandle);
+  const guestHandle = assertTargetHandle(input.guestHandle);
   const dailyCap = input.dailyCap === undefined ? DEFAULT_SHARE_DAILY_CAP : assertDailyCap(input.dailyCap);
   const offerNames = dedupeOfferNames(input.offerNames);
   const db = getDb();
@@ -904,7 +916,7 @@ export async function revokeShare(workspaceId: string, agentId: string, shareId:
 }
 
 async function shareIdForGuest(workspaceId: string, agentId: string, guestHandle: string): Promise<string> {
-  const handle = assertHandle(guestHandle);
+  const handle = assertTargetHandle(guestHandle);
   const agent = await agentInWorkspaceByName(workspaceId, (await lockOwnerAgent(getDb(), workspaceId, agentId)).name);
   const [row] = await getDb()
     .select({ id: agentShares.id })

@@ -11,6 +11,8 @@ import { PATCH as patchWorkspace } from '@/app/api/v1/workspaces/current/route';
 import { getDb } from '@/db';
 import { tasks, workspaces } from '@/db/schema';
 import { ACCESS_REVOKED_REASON, DEFAULT_SHARE_DAILY_CAP } from '@/lib/constants';
+import { HttpError } from '@/lib/errors';
+import { assertTargetHandle } from '@/lib/sharing';
 import { FREE_GUEST_WORKSPACES, setGuestWorkspaceLimitForTests, usePlanLimitsForTests, workspacePlanUsage } from '@/lib/plans';
 import { CROSS_WORKSPACE_TASK_NOTICE, GUEST_WAKE_NOTICE } from '@/lib/wake-notice';
 import { call, createAgent, createKey, mcpListTools, mcpTool, setWebhook, signIn, startReceiver } from './helpers';
@@ -621,5 +623,86 @@ describe('agent sharing', () => {
     });
     expect(sessionApprove.status).toBe(200);
     expect(sessionApprove.data.share.status).toBe('approved');
+  });
+
+  it('accepts a guest handle written with a leading @ and stores the same rule', () => {
+    const codeOf = (value: string) => {
+      try {
+        assertTargetHandle(value);
+        return null;
+      } catch (err) {
+        return err instanceof HttpError ? err.code : 'threw';
+      }
+    };
+    expect(assertTargetHandle('otherco')).toBe('otherco');
+    expect(assertTargetHandle('@otherco')).toBe('otherco');
+    expect(assertTargetHandle('  @other-co2 ')).toBe('other-co2');
+    expect(assertTargetHandle(`@a${'b'.repeat(31)}`)).toBe(`a${'b'.repeat(31)}`);
+    for (const bad of ['@', '@@otherco', '@ otherco', '@Otherco', '@1co', '@a', `@a${'b'.repeat(32)}`, '@otherco/Planner']) {
+      expect(codeOf(bad)).toBe('invalid_handle');
+    }
+  });
+
+  it('invites and revokes a guest named as @handle over the API and MCP', async () => {
+    const owner = await signIn();
+    const guest = await signIn();
+    const other = await signIn();
+    const ownerHandle = handleName('o');
+    const guestHandle = handleName('g');
+    const otherHandle = handleName('h');
+    await setHandle(owner.cookie, ownerHandle);
+    await setHandle(guest.cookie, guestHandle);
+    await setHandle(other.cookie, otherHandle);
+    const planner = await createAgent(owner.cookie, 'Planner');
+    await addOffer(owner.cookie, planner.id);
+    await call(putSharing, `http://localhost/api/v1/agents/${planner.id}/sharing`, {
+      method: 'PUT',
+      cookie: owner.cookie,
+      params: { id: planner.id },
+      body: { shared: true },
+    });
+
+    const byApi = await call(postShare, `http://localhost/api/v1/agents/${planner.id}/shares`, {
+      cookie: owner.cookie,
+      params: { id: planner.id },
+      body: { guest_handle: ` @${guestHandle} `, offers: ['draft'] },
+    });
+    expect(byApi.status).toBe(201);
+    expect(byApi.data.share.guest_handle).toBe(guestHandle);
+
+    const badApi = await call(postShare, `http://localhost/api/v1/agents/${planner.id}/shares`, {
+      cookie: owner.cookie,
+      params: { id: planner.id },
+      body: { guest_handle: `@@${guestHandle}`, offers: ['draft'] },
+    });
+    expect(badApi.status).toBe(400);
+    expect(badApi.data.error.code).toBe('invalid_handle');
+
+    const plannerKey = await createKey(owner.cookie, planner.id);
+    const byMcp = await mcpTool(plannerKey, 'invite_guest', {
+      agent: 'Planner',
+      guest_handle: `@${otherHandle}`,
+      offers: ['draft'],
+    });
+    expect(byMcp.isError).toBe(false);
+    expect(byMcp.payload.share.guest_handle).toBe(otherHandle);
+    expect(byMcp.payload.share.status).toBe('pending');
+
+    const revoked = await mcpTool(plannerKey, 'revoke_guest', { agent: 'Planner', guest_handle: `@${otherHandle}` });
+    expect(revoked.isError).toBe(false);
+    const listed = await mcpTool(plannerKey, 'list_guest_shares', { agent: 'Planner' });
+    const statuses = Object.fromEntries(
+      (listed.payload.shares as { guest_handle: string; status: string }[]).map((share) => [share.guest_handle, share.status]),
+    );
+    expect(statuses).toEqual({ [guestHandle]: 'pending', [otherHandle]: 'revoked' });
+
+    // Storing a handle is unchanged: the workspace's own handle may not be written with @.
+    const stored = await call(patchWorkspace, 'http://localhost/api/v1/workspaces/current', {
+      method: 'PATCH',
+      cookie: owner.cookie,
+      body: { handle: `@${handleName('n')}` },
+    });
+    expect(stored.status).toBe(400);
+    expect(stored.data.error.code).toBe('invalid_handle');
   });
 });

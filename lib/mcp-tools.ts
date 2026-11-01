@@ -371,13 +371,13 @@ export const toolInputs = {
   }),
   invite_guest: z.object({
     agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),
-    guest_handle: z.string().min(2).max(32).describe('Public handle of the guest workspace.'),
+    guest_handle: z.string().min(2).max(40).describe('Public handle of the guest workspace.'),
     offers: z.array(z.string().min(1).max(64)).min(1).max(50).describe('Offer names this guest may use.'),
     daily_cap: z.number().int().min(1).max(10_000).optional().describe('Tasks per rolling 24 hours. Default 50.'),
   }),
   revoke_guest: z.object({
     agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),
-    guest_handle: z.string().min(2).max(32).describe('Public handle of the guest workspace.'),
+    guest_handle: z.string().min(2).max(40).describe('Public handle of the guest workspace.'),
   }),
   list_guest_shares: z.object({
     agent: z.string().min(1).max(64).describe('Agent name in this workspace.'),
