@@ -21,7 +21,18 @@ async function copyText(text: string) {
 }
 
 /** A literal prompt or message with a Copy button. Same behavior as the setup prompt on / and /agents. */
-export function CopyBlock({ text, label = 'Prompt copied', pre = false }: { text: string; label?: string; pre?: boolean }) {
+export function CopyBlock({
+  text,
+  label = 'Prompt copied',
+  pre = false,
+  ariaLabel,
+}: {
+  text: string;
+  label?: string;
+  pre?: boolean;
+  /** Names the button for screen readers when "Copy" alone is ambiguous, e.g. "Copy MCP server URL". */
+  ariaLabel?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -38,7 +49,7 @@ export function CopyBlock({ text, label = 'Prompt copied', pre = false }: { text
       <p className={pre ? 'hw-cp-t hw-cp-pre' : 'hw-cp-t'} translate="no">
         {text}
       </p>
-      <button type="button" className="hw-cp-b" data-copied={copied || undefined} onClick={copy}>
+      <button type="button" className="hw-cp-b" data-copied={copied || undefined} onClick={copy} aria-label={ariaLabel}>
         <span aria-hidden={copied}>Copy</span>
         <span className="hw-cp-done" aria-hidden={!copied}>
           Copied
