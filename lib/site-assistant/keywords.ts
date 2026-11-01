@@ -66,13 +66,40 @@ export type KeywordHit = { category: KeywordCategory | 'currency'; word: string 
 
 /** First owner-only keyword in the text, or null. */
 export function findOwnerKeyword(text: string): KeywordHit | null {
+  return findOwnerKeywords(text)[0] ?? null;
+}
+
+/** Every owner-only keyword in the text, list order, then currency amounts. */
+export function findOwnerKeywords(text: string): KeywordHit[] {
   const normalized = normalizeForKeywords(text);
+  const hits: KeywordHit[] = [];
   for (const entry of COMPILED) {
-    if (entry.re.test(normalized)) return { category: entry.category, word: entry.word };
+    if (entry.re.test(normalized)) hits.push({ category: entry.category, word: entry.word });
   }
   for (const re of CURRENCY_PATTERNS) {
     const m = re.exec(normalized);
-    if (m) return { category: 'currency', word: m[0] };
+    if (m) hits.push({ category: 'currency', word: m[0] });
+  }
+  return hits;
+}
+
+/** Same word up to an ending: "cost"/"costs", "charge"/"charges", "book"/"booking", "soumission"/"soumissions". */
+function sameWordFamily(a: string, b: string): boolean {
+  return a === b || a.startsWith(b) || b.startsWith(a);
+}
+
+/**
+ * First owner-only keyword in a model reply that the kept sources don't back, or null (spec 4.2, reply keyword
+ * rule). The reply rule is there to stop the model from bringing up prices, availability, bookings or complaints
+ * on its own. A word the business's own quoted text uses ("no extra charge", "quotes are available in French",
+ * "when booking") is the business talking, not the model, so it doesn't count. Currency amounts always count:
+ * a price goes to the owner even when the page has one.
+ */
+export function ungroundedOwnerKeyword(reply: string, keptSources: readonly string[]): KeywordHit | null {
+  const grounded = keptSources.flatMap((source) => findOwnerKeywords(source)).filter((hit) => hit.category !== 'currency');
+  for (const hit of findOwnerKeywords(reply)) {
+    if (hit.category === 'currency') return hit;
+    if (!grounded.some((g) => g.category === hit.category && sameWordFamily(g.word, hit.word))) return hit;
   }
   return null;
 }
