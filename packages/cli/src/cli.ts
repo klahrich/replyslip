@@ -47,9 +47,9 @@ function flag(argv: string[], name: string): string | undefined {
 
 export const DEFAULT_RELAY_URL = 'https://valetto.tech';
 
-/** --url, then REPLYSLIP_URL, then valetto.tech. Shared by register and watch. */
-function relayOrigin(argv: string[], env: NodeJS.ProcessEnv): string {
-  return flag(argv, '--url') ?? env.REPLYSLIP_URL ?? DEFAULT_RELAY_URL;
+/** --url, then REPLYSLIP_URL, then valetto.tech. Empty or whitespace-only values fall through. Shared by register and watch. */
+export function relayOrigin(argv: string[], env: NodeJS.ProcessEnv): string {
+  return flag(argv, '--url')?.trim() || env.REPLYSLIP_URL?.trim() || DEFAULT_RELAY_URL;
 }
 
 function positionals(argv: string[]): string[] {
@@ -158,7 +158,7 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     stderr('--interval must be at least 500 milliseconds.');
     return 1;
   }
-  let result: { blockedPid?: number };
+  let result: { blockedPid?: number; blockedOrigin?: string };
   try {
     result = await watch({
       url,
@@ -173,7 +173,7 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     stderr(err instanceof Error ? err.message : 'Watcher stopped.');
     return 1;
   }
-  if (result.blockedPid !== undefined) stdout(alreadyRunningMessage(result.blockedPid));
+  if (result.blockedPid !== undefined) stdout(alreadyRunningMessage(result.blockedPid, result.blockedOrigin ?? url));
   return 0;
 }
 

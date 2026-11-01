@@ -209,7 +209,7 @@ export async function watch(options: {
   sleep?: (ms: number) => Promise<void>;
   /** Stops the loop after the current poll. */
   signal?: AbortSignal;
-}): Promise<{ blockedPid?: number }> {
+}): Promise<{ blockedPid?: number; blockedOrigin?: string }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const log = options.log ?? console.error;
   const sleep = options.sleep ?? defaultSleep;
@@ -250,7 +250,7 @@ export async function watch(options: {
             workspaceId,
             watcherKey: options.key,
           });
-          if (!acquired.ok) return { blockedPid: acquired.pid };
+          if (!acquired.ok) return { blockedPid: acquired.pid, blockedOrigin: acquired.origin };
           hold = acquired.hold;
           unbind = bindWatcherLockLifecycle(hold.release);
           log(`[replyslip] watching ${base}${workspaceId ? ` (workspace ${workspaceId})` : ''}`);

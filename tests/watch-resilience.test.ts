@@ -205,7 +205,7 @@ describe('replyslip watch resilience', () => {
   it('names the workspace in watch --status', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'replyslip-status-'));
     const origin = normalizeOrigin('https://a.example');
-    const file = watcherLockPath(home, watcherScopeId(origin, 'ws-a', KEY));
+    const file = watcherLockPath(home, watcherScopeId('ws-a', KEY));
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(
       file,
