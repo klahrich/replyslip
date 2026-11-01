@@ -66,24 +66,28 @@ const NEVER_REDIRECTED = [
 ];
 
 const OLD_SITE_PAGES = ['/how-it-works', '/compare/agent-relay', '/compare/harnessrouter', '/sharing'];
+// The old pages whose content moved to valetto.tech/agent-to-agent, and where each old page lands.
+const A2A = 'https://valetto.tech/agent-to-agent';
+const oldPageTarget = (path: string) => (path === '/how-it-works' || path === '/sharing' ? A2A : 'https://valetto.tech/');
 
 describe('replyslip.com redirects', () => {
   for (const host of ['replyslip.com', 'www.replyslip.com']) {
-    it(`${host}: site pages go to the valetto.tech homepage`, async () => {
-      for (const path of ['/', '/privacy', '/terms', ...OLD_SITE_PAGES]) {
-        expect(await redirectFor(host, path), path).toBe('https://valetto.tech/');
-      }
+    it(`${host}: site pages go to the valetto.tech homepage or /agent-to-agent`, async () => {
+      for (const path of ['/', '/privacy', '/terms']) expect(await redirectFor(host, path), path).toBe('https://valetto.tech/');
+      for (const path of OLD_SITE_PAGES) expect(await redirectFor(host, path), path).toBe(oldPageTarget(path));
     });
 
     it(`${host}: /valetto paths keep their PR #98 mapping`, async () => {
       expect(await redirectFor(host, '/valetto')).toBe('https://valetto.tech/');
       expect(await redirectFor(host, '/valetto/early-access')).toBe('https://valetto.tech/early-access');
+      expect(await redirectFor(host, '/valetto/agent-to-agent')).toBe(A2A);
     });
 
     it(`${host}: API, MCP, token, app and file paths pass through`, async () => {
       for (const path of NEVER_REDIRECTED) expect(await redirectFor(host, path), path).toBeNull();
       // ReplySlip has no /early-access page; only valetto.tech serves one.
       expect(await redirectFor(host, '/early-access')).toBeNull();
+      expect(await redirectFor(host, '/agent-to-agent')).toBeNull();
     });
   }
 });
@@ -91,18 +95,19 @@ describe('replyslip.com redirects', () => {
 describe('query strings', () => {
   it('are preserved on the replyslip.com and valetto.tech redirects', async () => {
     expect(await redirectFor('replyslip.com', '/?ref=x')).toBe('https://valetto.tech/?ref=x');
-    expect(await redirectFor('www.replyslip.com', '/how-it-works?ref=x')).toBe('https://valetto.tech/?ref=x');
-    expect(await redirectFor('valetto.tech', '/sharing?ref=x')).toBe('https://valetto.tech/?ref=x');
+    expect(await redirectFor('www.replyslip.com', '/how-it-works?ref=x')).toBe(`${A2A}?ref=x`);
+    expect(await redirectFor('valetto.tech', '/sharing?ref=x')).toBe(`${A2A}?ref=x`);
+    expect(await redirectFor('valetto.tech', '/compare/agent-relay?ref=x')).toBe('https://valetto.tech/?ref=x');
   });
 });
 
 describe('valetto.tech redirects', () => {
-  it('old ReplySlip site pages go to the homepage', async () => {
-    for (const path of OLD_SITE_PAGES) expect(await redirectFor('valetto.tech', path), path).toBe('https://valetto.tech/');
+  it('old ReplySlip site pages go to the homepage or /agent-to-agent', async () => {
+    for (const path of OLD_SITE_PAGES) expect(await redirectFor('valetto.tech', path), path).toBe(oldPageTarget(path));
   });
 
   it('Valetto pages and their rewrite sources are untouched', async () => {
-    for (const path of ['/', '/early-access', '/privacy', '/terms', '/valetto', '/valetto/early-access', '/valetto/privacy', '/valetto/terms']) {
+    for (const path of ['/', '/early-access', '/agent-to-agent', '/privacy', '/terms', '/valetto', '/valetto/early-access', '/valetto/agent-to-agent', '/valetto/privacy', '/valetto/terms']) {
       expect(await redirectFor('valetto.tech', path), path).toBeNull();
     }
   });
@@ -112,7 +117,9 @@ describe('valetto.tech redirects', () => {
   });
 
   it('www.valetto.tech sends old site pages home in one hop and keeps the path for Valetto pages', async () => {
-    expect(await redirectFor('www.valetto.tech', '/how-it-works')).toBe('https://valetto.tech/');
+    expect(await redirectFor('www.valetto.tech', '/how-it-works')).toBe(A2A);
+    expect(await redirectFor('www.valetto.tech', '/compare/harnessrouter')).toBe('https://valetto.tech/');
+    expect(await redirectFor('www.valetto.tech', '/agent-to-agent')).toBe(A2A);
     expect(await redirectFor('www.valetto.tech', '/')).toBe('https://valetto.tech/');
     expect(await redirectFor('www.valetto.tech', '/privacy')).toBe('https://valetto.tech/privacy');
     // Unknown paths only get the existing www -> apex hop, never the homepage redirect.
