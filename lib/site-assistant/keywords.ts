@@ -98,7 +98,8 @@ function sameWordFamily(a: string, b: string): boolean {
  * on its own. A word the business's own quoted text uses ("no extra charge", "quotes are available in French",
  * "when booking") is the business talking, not the model, so it doesn't count. Two things always count, grounded
  * or not: a currency sign or word ("$", "dollars", "bucks", "piasse"), so a price goes to the owner even when the
- * page has one, and a booking or availability word in a sentence that names a day, date or time.
+ * page has one; a booking or availability word in a sentence that names a day, date or time; and a price word in
+ * a sentence that has a digit or a spelled-out number.
  */
 export function ungroundedOwnerKeyword(reply: string, keptSources: readonly string[]): KeywordHit | null {
   const grounded = keptSources.flatMap((source) => findOwnerKeywords(source)).filter((hit) => hit.category !== 'currency');
@@ -106,7 +107,7 @@ export function ungroundedOwnerKeyword(reply: string, keptSources: readonly stri
     if (hit.category === 'currency') return hit;
     if (!grounded.some((g) => g.category === hit.category && sameWordFamily(g.word, hit.word))) return hit;
   }
-  return timedBookingKeyword(reply);
+  return timedBookingKeyword(reply) ?? pricedSentenceKeyword(reply);
 }
 
 /**
@@ -136,6 +137,36 @@ export function splitSentences(text: string): string[] {
     .split(/(?<=[.!?;…])\s+|\n+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/**
+ * Spelled-out numbers, English and French. Left out on purpose: English "one" and French "un"/"une", which are
+ * mostly articles or pronouns ("no extra cost for anyone", "one of our team", "un devis"), and French "neuf",
+ * which also means "new" ("le prix d'un camion neuf"). Compounds still count through their other part
+ * ("twenty-one", "dix-neuf", "vingt et un").
+ */
+const NUMBER_WORDS = [
+  'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen',
+  'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty', 'fifty',
+  'sixty', 'seventy', 'eighty', 'ninety', 'hundred', 'hundreds', 'thousand', 'thousands', 'million', 'millions',
+  'dozen', 'dozens',
+  'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'dix', 'onze', 'douze', 'treize', 'quatorze',
+  'quinze', 'seize', 'vingt', 'vingts', 'trente', 'quarante', 'cinquante', 'soixante', 'cent', 'cents', 'mille',
+];
+const NUMBER_PATTERNS: RegExp[] = [/\d/, ...NUMBER_WORDS.map((word) => new RegExp(`(^|[^a-z0-9])${word}(?=$|[^a-z0-9])`))];
+
+/**
+ * A price word in a reply sentence that also has a number (a digit or a spelled-out number), or null. Grounding
+ * the word doesn't cover this: "no extra cost for seniors" on the page doesn't make "it costs 40 per visit" the
+ * business talking.
+ */
+export function pricedSentenceKeyword(reply: string): KeywordHit | null {
+  for (const sentence of splitSentences(reply)) {
+    const normalized = normalizeForKeywords(sentence);
+    const price = COMPILED.find((entry) => entry.category === 'price' && entry.re.test(normalized));
+    if (price && NUMBER_PATTERNS.some((re) => re.test(normalized))) return { category: price.category, word: price.word };
+  }
+  return null;
 }
 
 /**

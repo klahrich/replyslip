@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { answerVisitorMessage } from '@/lib/site-assistant/answer';
-import { findOwnerKeyword, splitSentences, timedBookingKeyword, ungroundedOwnerKeyword } from '@/lib/site-assistant/keywords';
+import { findOwnerKeyword, pricedSentenceKeyword, splitSentences, timedBookingKeyword, ungroundedOwnerKeyword } from '@/lib/site-assistant/keywords';
 import { needsOwnerReply } from '@/lib/site-assistant/replies';
 import { answer, fakeModel, TEST_LLM_CONFIG } from './site-fixtures';
 
@@ -23,7 +23,8 @@ Harbour Lane Movers is a small moving company in a made-up town.
 - There are no additional delivery charges in town.
 - Padding is included in the rental cost.
 - Stairs come at no extra charge.
-- Les imprévus, on vous le dit franchement dès la soumission.`;
+- Les imprévus, on vous le dit franchement dès la soumission.
+- Parking fees are covered by us.`;
 
 const base = { businessName: 'Harbour Lane Movers', contextMd: HARBOUR_CONTEXT, history: [] };
 
@@ -207,5 +208,43 @@ describe('booking words next to a day, date or time', () => {
     expect(splitSentences('Booking is easy. Open at 3:00! Really? Yes; 2.5 hours\nNew line')).toEqual([
       'Booking is easy.', 'Open at 3:00!', 'Really?', 'Yes;', '2.5 hours', 'New line',
     ]);
+  });
+});
+
+describe('a grounded price word next to a number', () => {
+  const handoffs = [
+    { reply: 'It costs 40 per visit.', sources: ['There is no extra cost for seniors.'] },
+    { reply: 'The fee is 40.', sources: ['Parking fees are covered by us.'] },
+    { reply: 'Ça coûte 40 par visite.', sources: ["Il n'y a aucun coût supplémentaire pour les aînés."], language: 'fr' as const },
+    { reply: 'It costs forty per visit.', sources: ['There is no extra cost for seniors.'] },
+    { reply: 'Ça coûte quarante par visite.', sources: ["Il n'y a aucun coût supplémentaire pour les aînés."], language: 'fr' as const },
+  ];
+
+  it.each(handoffs)('hands off: $reply', async ({ reply, sources, language }) => {
+    const result = await ask('Tell me more', { reply, sources, topic: 'services', language: language ?? 'en' });
+    expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'keyword_reply', body: needsOwnerReply(language ?? 'en') });
+  });
+
+  it.each([
+    'It costs 40 per visit', 'The fee is 40', 'Ça coûte 40 par visite', 'It costs forty per visit',
+    'the rate is twenty-five an hour', 'a few hundred in fees', 'the price is a thousand', 'two visits at no cost',
+    'le tarif est de deux cents', 'des frais de trente', 'le prix est de mille', 'le coût est de cinquante',
+    'frais de soixante-quinze', 'the cost is twenty-one', 'le prix: dix-neuf',
+  ])('hands off "%s"', (text) => {
+    expect(pricedSentenceKeyword(text)?.category).toBe('price');
+  });
+
+  // "one", "un", "une" and "neuf" are left out: they are mostly articles, pronouns or "new".
+  it.each([
+    'There is no extra cost for anyone.',
+    'One of our team will prepare the quote.',
+    'Each one comes at no extra charge.',
+    'Le prix d’un camion neuf est inclus.',
+    'Vous recevez une soumission claire.',
+    'On vous fait un devis gratuit.',
+    'Padding is included in the rental cost.',
+    'We have 3 trucks. Delivery is at no extra cost.',
+  ])('keeps "%s": no number in the price sentence', (text) => {
+    expect(pricedSentenceKeyword(text)).toBeNull();
   });
 });
