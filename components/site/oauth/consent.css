@@ -1,0 +1,85 @@
+/* /oauth/consent: a light card on the Valetto background, as in the "Allow access?" illustration on
+   /agent-to-agent. Martian Mono for the wordmark and headline, Bricolage Grotesque for text (fonts from
+   app/(site)/oauth/layout.tsx, mapped by valetto.css on .vt). Everything is scoped under .oc-page. */
+.oc-page{--oc-ink:var(--paper-ink);--oc-muted:var(--paper-muted);--oc-line:color-mix(in srgb,var(--paper-ink) 13%,transparent);--oc-sage:var(--dash-accent);--oc-sage-hover:var(--dash-accent-hover);--oc-soft:color-mix(in srgb,var(--dash-accent) 13%,var(--paper));--oc-warn-bg:#f3ead6;--oc-warn-ink:#5c3d00;--oc-err:#a8321f;
+  min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;padding:clamp(20px,6vh,72px) 16px 24px;box-sizing:border-box;
+  background:radial-gradient(ellipse 70% 45% at 50% 100%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 70%),var(--bg)}
+.oc-card{color-scheme:light;width:100%;max-width:600px;background:var(--paper);color:var(--oc-ink);border-radius:18px;box-shadow:0 24px 60px -24px rgba(0,0,0,.55);overflow:hidden}
+.oc-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;padding:18px clamp(20px,5vw,36px);border-bottom:1px solid var(--oc-line)}
+.oc-mark{--mark-bg:var(--oc-sage);--mark-slip:var(--paper);--mark-ink:var(--oc-sage);color:var(--oc-ink);font-size:1.125rem;font-weight:500}
+.oc-who{margin:0;font-size:var(--s-small);color:var(--oc-muted);overflow-wrap:anywhere}
+.oc-who b{font-weight:500;color:var(--oc-ink)}
+.oc-body{padding:clamp(22px,5vw,36px) clamp(20px,5vw,48px) clamp(24px,5vw,40px)}
+.oc-page h1{margin:0;font-family:var(--vt-mono);font-variation-settings:"wdth" 87.5;font-size:clamp(1.75rem,1.3rem + 1.6vw,2.375rem);line-height:1.08;letter-spacing:-.05em;font-weight:500}
+.oc-lead{margin:10px 0 0;color:var(--oc-muted);font-size:1.0625rem;line-height:1.45}
+.oc-lead b{color:var(--oc-ink);font-weight:500}
+.oc-note{margin:14px 0 0;font-size:var(--s-small);line-height:1.45;color:var(--oc-muted)}
+.oc-warn{margin:14px 0 0;padding:10px 14px;border-radius:10px;background:var(--oc-warn-bg);color:var(--oc-warn-ink);font-size:var(--s-small);line-height:1.45}
+
+/* the app: a letter tile (never a remote logo), its name and host */
+.oc-app{display:flex;align-items:center;gap:14px;margin-top:22px}
+.oc-tile{flex:none;display:grid;place-items:center;width:44px;height:44px;border-radius:11px;background:var(--oc-soft);color:var(--oc-sage);font:500 1.25rem/1 var(--vt-mono)}
+.oc-app-text{min-width:0}
+.oc-app-name{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-weight:600;font-size:1.0625rem;overflow-wrap:anywhere}
+.oc-app-host{margin:2px 0 0;font-family:var(--vt-mono);font-size:.8125rem;letter-spacing:-.02em;color:var(--oc-muted);overflow-wrap:anywhere}
+.oc-flag{display:inline-flex;padding:2px 9px;border:1px solid currentColor;border-radius:999px;color:var(--oc-warn-ink);font:500 .6875rem/1.5 var(--vt-mono);letter-spacing:-.01em}
+
+/* what it can and can't do */
+.oc-lists{margin-top:22px;padding-top:4px}
+.oc-lists section+section{margin-top:16px}
+.oc-lists h2{margin:12px 0 0;font-family:var(--vt-mono);font-size:.75rem;font-weight:500;letter-spacing:-.01em;color:var(--oc-muted);text-transform:none}
+.oc-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:8px}
+.oc-list li{position:relative;padding-left:34px;line-height:1.4;font-size:.96875rem}
+.oc-list li::before{position:absolute;left:0;top:-1px;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;font-size:.8125rem;font-weight:700}
+.oc-list.is-yes li::before{content:"✓";background:var(--oc-soft);color:var(--oc-sage)}
+.oc-list.is-no li{color:var(--oc-muted)}
+.oc-list.is-no li::before{content:"✕";background:color-mix(in srgb,var(--paper-ink) 7%,transparent);color:var(--oc-muted);font-size:.6875rem}
+
+/* agent choice */
+.oc-agent{margin:24px 0 0;padding:0;border:0;min-width:0}
+.oc-agent legend{padding:0;font-family:var(--vt-mono);font-size:.75rem;font-weight:500;color:var(--oc-muted)}
+.oc-choice{margin-top:10px;padding:12px 14px;border:1px solid var(--oc-line);border-radius:12px}
+.oc-choice.is-on{border-color:var(--oc-sage);box-shadow:inset 0 0 0 1px var(--oc-sage)}
+.oc-choice.is-off .oc-radio{color:var(--oc-muted);cursor:default}
+.oc-radio{display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:500}
+.oc-radio b{font-family:var(--vt-mono);font-weight:500;font-size:.9375rem;letter-spacing:-.02em}
+.oc-radio input{flex:none;width:18px;height:18px;margin:0;accent-color:var(--oc-sage)}
+.oc-hint{margin:6px 0 0 28px;font-size:var(--s-small);line-height:1.45;color:var(--oc-muted)}
+.oc-hint:empty{display:none}
+.oc-hint a{color:var(--oc-ink)}
+.oc-bad{color:var(--oc-err)}
+.oc-name{margin:10px 0 0 28px}
+.oc-name label{display:block;font-size:var(--s-small);color:var(--oc-muted)}
+.oc-name input{display:block;box-sizing:border-box;width:100%;max-width:320px;margin-top:4px;padding:9px 12px;border:1px solid color-mix(in srgb,var(--paper-ink) 35%,transparent);border-radius:9px;background:#fff;color:var(--oc-ink);font:400 1rem/1.3 var(--vt-mono);letter-spacing:-.02em}
+.oc-name input:focus-visible,.oc-field select:focus-visible{outline:2px solid var(--oc-sage);outline-offset:1px}
+.oc-name input[aria-invalid]{border-color:var(--oc-err)}
+.oc-name .oc-hint{margin-left:0}
+.oc-field{margin-top:18px}
+.oc-field label{display:block;font-size:var(--s-small);color:var(--oc-muted)}
+.oc-field select{margin-top:4px;padding:8px 10px;border-radius:9px;border:1px solid color-mix(in srgb,var(--paper-ink) 35%,transparent);background:#fff;color:var(--oc-ink);font:inherit}
+
+/* buttons: Cancel and Allow side by side, as wide as the card */
+.oc-error{margin:14px 0 0;color:var(--oc-err);font-size:var(--s-small);line-height:1.45}
+.oc-error:empty{margin:0}
+.oc-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:22px 0 0}
+.oc-btn{display:inline-flex;align-items:center;justify-content:center;min-height:50px;padding:0 18px;border:0;border-radius:10px;background:color-mix(in srgb,var(--paper-ink) 8%,var(--paper));color:var(--oc-ink);font:600 1rem/1.2 var(--font);text-decoration:none;cursor:pointer;transition:background-color 150ms ease}
+.oc-btn-go{background:var(--oc-sage);color:#fff}
+@media (hover:hover) and (pointer:fine){.oc-btn:not(:disabled):hover{background:color-mix(in srgb,var(--paper-ink) 13%,var(--paper))}.oc-btn-go:not(:disabled):hover{background:var(--oc-sage-hover)}}
+.oc-btn:focus-visible{outline:2px solid var(--oc-sage);outline-offset:2px}
+.oc-btn:disabled{cursor:default;opacity:.55}
+.oc-problem .oc-actions{grid-template-columns:auto;justify-content:start}
+
+.oc-returning{display:flex;align-items:center;gap:14px;min-height:120px}
+.oc-returning p{margin:0;font-size:1.0625rem}
+.oc-spinner{width:22px;height:22px;border-radius:50%;border:2.5px solid var(--oc-soft);border-top-color:var(--oc-sage);animation:oc-spin .8s linear infinite}
+@keyframes oc-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.oc-spinner{animation-duration:2.4s}}
+
+.oc-foot{display:flex;gap:20px;margin-top:20px;font-size:var(--s-small)}
+.oc-foot a{color:var(--muted)}
+
+@media (max-width:480px){
+  .oc-page{padding:12px 10px 20px}
+  .oc-card{border-radius:14px}
+  .oc-hint,.oc-name{margin-left:0}
+}
