@@ -883,7 +883,7 @@ describe('retention', () => {
 });
 
 describe('import', () => {
-  it('loads RedBot files, stores shots, writes links to a private file, and pre-generates unchecked answers', async () => {
+  it('with the deprecated --generate-suggested-answers: loads RedBot files, stores shots, writes links to a private file, and pre-generates unchecked answers', async () => {
     const db = getDb();
     for (const slug of ['maple-ridge-landscaping', 'peinture-boreale']) await db.delete(siteBusinesses).where(eq(siteBusinesses.slug, slug));
     const businesses = loadRedbotBusinesses(join(FIXTURE_DIR, 'context'), join(FIXTURE_DIR, 'shots'));
@@ -902,7 +902,7 @@ describe('import', () => {
       return text.includes('Peinture') ? answer({ reply: 'Oui.', language: 'fr', sources: ['Peinture extérieure : revêtement, galeries et clôtures'] }) : answer({});
     });
     const logs: string[] = [];
-    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', transport: model.transport, config: TEST_LLM_CONFIG, log: (l) => logs.push(l) });
+    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', generateSuggestedAnswers: true, transport: model.transport, config: TEST_LLM_CONFIG, log: (l) => logs.push(l) });
 
     expect(statSync(linkFile).mode & 0o777).toBe(0o600);
     const lines = readFileSync(linkFile, 'utf8').trim().split('\n');
@@ -932,7 +932,7 @@ describe('import', () => {
 
     // Re-run: no new link, checked answers kept, unchecked ones regenerated (the checked row's unchecked
     // translation too: translate and answer again).
-    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', transport: model.transport, config: TEST_LLM_CONFIG, log: () => {} });
+    await importRedbotBusinesses(db, businesses, { linkFile, baseUrl: 'https://valetto.test', generateSuggestedAnswers: true, transport: model.transport, config: TEST_LLM_CONFIG, log: () => {} });
     expect(readFileSync(linkFile, 'utf8').trim().split('\n')).toHaveLength(2);
     expect(model.calls).toHaveLength(18 + 17);
     expect((await info(token)).data.suggested_questions).toHaveLength(1);
@@ -974,7 +974,7 @@ describe('import', () => {
     expect(gamma).toMatchObject({ language: 'fr', desktopShotPath: join(shots, 'gamma-desktop.png') });
   });
 
-  it('skips the suggested answers without a key, and says so', async () => {
+  it('with --generate-suggested-answers, skips the suggested answers without a key, and says so', async () => {
     const db = getDb();
     await db.delete(siteBusinesses).where(eq(siteBusinesses.slug, 'maple-ridge-landscaping'));
     const businesses = loadRedbotBusinesses(join(FIXTURE_DIR, 'context'), join(FIXTURE_DIR, 'shots')).slice(0, 1);
@@ -983,6 +983,7 @@ describe('import', () => {
     await importRedbotBusinesses(db, businesses, {
       linkFile: join(dir, 'links.txt'),
       baseUrl: 'https://valetto.test',
+      generateSuggestedAnswers: true,
       transport: NO_MODEL,
       config: { ...TEST_LLM_CONFIG, apiKey: null },
       log: (l) => logs.push(l),

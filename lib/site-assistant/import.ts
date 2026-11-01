@@ -155,6 +155,12 @@ export async function prepareShot(
 export type ImportOptions = {
   rawShots?: boolean;
   newLink?: boolean;
+  /**
+   * @deprecated Off by default: the demo answers suggested questions live when tapped. On, the import also
+   * pre-generates stored answers (site_suggested_answers) for the page deployed before `suggestions`.
+   */
+  generateSuggestedAnswers?: boolean;
+  /** With `generateSuggestedAnswers` only: regenerate checked rows too. */
   regenerate?: boolean;
   linkFile: string;
   baseUrl: string;
@@ -169,8 +175,13 @@ export function writeLinkFile(path: string, line: string): void {
   chmodSync(path, 0o600);
 }
 
+/**
+ * Loads each business: context, suggested questions, language, tile colour and screenshots, plus a demo link when it
+ * has no live one. No model calls: suggested questions are answered live when a visitor taps them. Stored answers
+ * are generated only with the deprecated `generateSuggestedAnswers`.
+ */
 export async function importRedbotBusinesses(db: Db, businesses: RedbotBusiness[], options: ImportOptions) {
-  const config = options.config ?? siteLlmConfig();
+  const config = options.generateSuggestedAnswers ? (options.config ?? siteLlmConfig()) : null;
   const summary: { slug: string; created: boolean; link: boolean; generated: number; skipped: string | null }[] = [];
   for (const entry of businesses) {
     const desktop = entry.desktopShotPath ? await prepareShot(entry.desktopShotPath, 'desktop', options.rawShots) : null;
@@ -213,19 +224,24 @@ export async function importRedbotBusinesses(db: Db, businesses: RedbotBusiness[
       linked = true;
     }
 
-    const generated = await generateSuggestedAnswers(db, businessId, entry, {
-      regenerate: options.regenerate ?? false,
-      transport: options.transport,
-      config,
-    });
-    summary.push({ slug: entry.slug, created: !before, link: linked, generated: generated.count, skipped: generated.skipped });
+    const generated = config
+      ? await generateSuggestedAnswers(db, businessId, entry, {
+          regenerate: options.regenerate ?? false,
+          transport: options.transport,
+          config,
+        })
+      : null;
+    summary.push({ slug: entry.slug, created: !before, link: linked, generated: generated?.count ?? 0, skipped: generated?.skipped ?? null });
     options.log(
-      `${entry.slug}: ${before ? 'updated' : 'created'}; shots ${desktop ? 'desktop' : '-'} ${mobile ? 'mobile' : '-'}; ` +
-        `${linked ? 'new link written to the link file' : 'kept the live link'}; ` +
-        (generated.skipped
-          ? `suggested answers skipped (${generated.skipped})`
-          : `${generated.count} suggested answers generated` +
-            (generated.untranslated ? `, ${generated.untranslated} translation(s) failed (run --backfill-translations)` : '')),
+      `${entry.slug}: ${before ? 'updated' : 'created'}; ${entry.language}; ${entry.suggestedQuestions.length} suggested question(s); ` +
+        `shots ${desktop ? 'desktop' : '-'} ${mobile ? 'mobile' : '-'}; ` +
+        `${linked ? 'new link written to the link file' : 'kept the live link'}` +
+        (!generated
+          ? ''
+          : generated.skipped
+            ? `; suggested answers skipped (${generated.skipped})`
+            : `; ${generated.count} suggested answers generated` +
+              (generated.untranslated ? `, ${generated.untranslated} translation(s) failed (run --backfill-translations)` : '')),
     );
   }
   return summary;
@@ -298,6 +314,9 @@ async function upsertSuggestedAnswer(db: Db, values: typeof siteSuggestedAnswers
 }
 
 /**
+ * @deprecated The demo answers suggested questions live now; this runs only with the import's
+ * `generateSuggestedAnswers` (--generate-suggested-answers), for the page deployed before `suggestions`.
+ *
  * Pre-generates each suggested question's answer in two rows with the same position: the question as listed, in
  * its own language, and the question translated to the other one (en <-> fr). Same answer function and rules as
  * live messages (no caps: this is Karim's run). New rows are unchecked; only checked rows reach the page. A

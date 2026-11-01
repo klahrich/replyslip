@@ -1,8 +1,8 @@
 /**
- * Site assistant demo (story 0b): load RedBot's businesses, review the suggested answers, revoke links.
+ * Site assistant demo (story 0b): load RedBot's businesses, revoke links, and (deprecated) review stored answers.
  *
  *   npx tsx scripts/site-demo-import.ts --db-name <db> --context-dir <dir> [--shots-dir <dir>] [--new-link]
- *       [--regenerate] [--raw-shots] [--link-file <path>] [--only <slug,slug>]
+ *       [--raw-shots] [--link-file <path>] [--only <slug,slug>] [--generate-suggested-answers [--regenerate]]
  *   npx tsx scripts/site-demo-import.ts --db-name <db> --list-unchecked [--slug <slug>]
  *   npx tsx scripts/site-demo-import.ts --db-name <db> --check <id> [--check <id> ...] | --uncheck <id>
  *   npx tsx scripts/site-demo-import.ts --db-name <db> --revoke-links <slug>
@@ -10,7 +10,12 @@
  *
  * DATABASE_URL comes from the environment (or .env); --db-name must match its database. Demo URLs are appended to
  * --link-file (default ~/.valetto-site-demo-links.txt, mode 600) and never printed. Base URL: SITE_DEMO_BASE_URL,
- * default https://valetto.tech. Without SITE_LLM_API_KEY the suggested answers are skipped, and the run says so.
+ * default https://valetto.tech.
+ *
+ * The import loads context, suggested questions, language and screenshots, and makes no model calls: the demo
+ * answers a tapped suggested question live, like a typed one. Deprecated, for the page deployed before that:
+ * --generate-suggested-answers also pre-generates stored answers (needs SITE_LLM_API_KEY; skipped without it), and
+ * --list-unchecked, --check, --uncheck and --backfill-translations review them.
  *
  * --backfill-translations adds the missing English or French row for each suggested question that has only one
  * (businesses imported before both languages were generated). New rows are unchecked; existing rows, checked or
@@ -98,13 +103,14 @@ async function main(): Promise<void> {
     await importRedbotBusinesses(db, businesses, {
       rawShots: flags.has('raw-shots'),
       newLink: flags.has('new-link'),
+      generateSuggestedAnswers: flags.has('generate-suggested-answers'),
       regenerate: flags.has('regenerate'),
       linkFile,
       baseUrl: process.env.SITE_DEMO_BASE_URL?.trim() || 'https://valetto.tech',
       log: (line) => console.log(line),
     });
     console.log(`Done: ${businesses.length} business(es). Demo URLs (if any new) are in the link file, mode 600.`);
-    console.log('Next: --list-unchecked, then --check <id> for each answer you approve.');
+    if (flags.has('generate-suggested-answers')) console.log('Next: --list-unchecked, then --check <id> for each answer you approve.');
   } finally {
     await close();
   }

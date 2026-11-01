@@ -35,7 +35,7 @@ async function limit(req: Request, kind: 'siteEntry' | 'siteShot' | 'siteMessage
   }
 }
 
-/** GET /api/v1/s/demo/:token: the demo page's one load (business, banner, checked suggestions, this visitor's messages). */
+/** GET /api/v1/s/demo/:token: the demo page's one load (business, banner, suggestions, this visitor's messages). */
 export function getDemoRoute(req: Request, context: TokenContext) {
   return handleSite(async () => {
     const { token } = await context.params;
@@ -45,8 +45,9 @@ export function getDemoRoute(req: Request, context: TokenContext) {
   });
 }
 
-// `text` is what LandingBot's page sends; `body` is accepted as the same field. client_message_id is required for
-// typed messages and optional for suggested-question taps (the server makes one up; no replay then).
+// `text` is what LandingBot's page sends, for typed messages and suggestion chip taps alike; `body` is accepted as the
+// same field. client_message_id is required for text. `suggested_question_id` is deprecated: the stored-answer tap of
+// the page deployed before `suggestions` (client_message_id optional there; the server makes one up, no replay then).
 const messageSchema = z
   .object({
     client_message_id: z.uuid().optional(),
