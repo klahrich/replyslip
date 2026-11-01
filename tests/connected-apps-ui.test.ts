@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   appHost,
   appName,
+  endedAt,
   pastLabel,
   replaceConnectedApp,
   revokePath,
@@ -20,6 +21,7 @@ function app(over: Partial<ConnectedApp> & { id: string }): ConnectedApp {
     created_at: '2026-10-01T15:00:00.000Z',
     last_used_at: null,
     expires_at: '2027-10-01T15:00:00.000Z',
+    revoked_at: null,
     status: 'active',
     ...over,
   };
@@ -70,5 +72,11 @@ describe('connected apps list', () => {
     expect(revokePath('6f1c0f3e-0000-4000-8000-000000000001')).toBe(
       '/api/v1/connected-apps/6f1c0f3e-0000-4000-8000-000000000001/revoke',
     );
+  });
+
+  it('dates a past connection by when it was revoked, or when it expired', () => {
+    expect(endedAt(app({ id: '7', status: 'revoked', revoked_at: '2026-10-20T14:00:00.000Z' }))).toBe('2026-10-20T14:00:00.000Z');
+    expect(endedAt(app({ id: '8', status: 'expired' }))).toBe('2027-10-01T15:00:00.000Z');
+    expect(endedAt(app({ id: '9' }))).toBeNull();
   });
 });

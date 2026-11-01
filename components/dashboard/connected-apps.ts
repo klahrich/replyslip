@@ -1,25 +1,13 @@
 /**
- * Connected apps (ChatGPT, Claude) as GET /api/v1/connected-apps returns them, per docs/design/mcp-oauth.md §6.4.
- * The route ships in PlumberBot's server PR; this file is the UI's side of that contract.
+ * Connected apps (ChatGPT, Claude) as GET /api/v1/connected-apps returns them (lib/oauth/connected-apps.ts,
+ * docs/design/mcp-oauth.md §6.4). The type is the server's; these are the dashboard's helpers around it.
  */
 
-export type ConnectedAppStatus = 'active' | 'revoked' | 'expired';
+import type { ConnectedApp } from '@/lib/oauth/connected-apps';
 
-export type ConnectedApp = {
-  /** Connection id. */
-  id: string;
-  client: { display_name: string; client_name: string; verified: boolean; kind: 'cimd' | 'dcr' };
-  redirect_host: string;
-  agent: { id: string; name: string; revoked: boolean };
-  scope: string;
-  approved_by_email: string;
-  created_at: string;
-  /** Null until the app first uses the connection; can be up to 5 minutes behind. */
-  last_used_at: string | null;
-  /** The connection ends on this date (at most a year after it was made). */
-  expires_at: string;
-  status: ConnectedAppStatus;
-};
+export type { ConnectedApp };
+
+export type ConnectedAppStatus = ConnectedApp['status'];
 
 export type ConnectedAppsResponse = { connected_apps: ConnectedApp[] };
 
@@ -55,6 +43,11 @@ export function revokeQuestion(app: ConnectedApp): string {
 
 export function pastLabel(status: ConnectedAppStatus): string {
   return status === 'expired' ? 'Expired' : status === 'revoked' ? 'Revoked' : 'Active';
+}
+
+/** When a past connection ended: when it was revoked, or its expiry date. */
+export function endedAt(app: Pick<ConnectedApp, 'status' | 'revoked_at' | 'expires_at'>): string | null {
+  return app.status === 'revoked' ? app.revoked_at : app.status === 'expired' ? app.expires_at : null;
 }
 
 /** Replace one row after a revoke, keeping the list order. */

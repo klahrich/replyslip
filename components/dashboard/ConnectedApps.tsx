@@ -9,6 +9,7 @@ import {
   appName,
   CONNECTED_APPS_PATH,
   MCP_URL,
+  endedAt,
   pastLabel,
   replaceConnectedApp,
   revokePath,
@@ -216,7 +217,7 @@ export function ConnectedApps() {
                   <th scope="col">App</th>
                   <th scope="col">Agent</th>
                   <th scope="col">Connected</th>
-                  <th scope="col">Status</th>
+                  <th scope="col">Ended</th>
                 </tr>
               </thead>
               <tbody>
@@ -231,7 +232,9 @@ export function ConnectedApps() {
                     <td data-label="Connected">
                       <LocalTime iso={app.created_at} />
                     </td>
-                    <td data-label="Status">{pastLabel(app.status)}</td>
+                    <td data-label="Ended">
+                      <LocalTime iso={endedAt(app)} /> <span className="dash-muted">· {pastLabel(app.status)}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
