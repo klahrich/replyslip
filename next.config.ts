@@ -8,14 +8,21 @@ const WWW_VALETTO_HOST = [{ type: 'host' as const, value: 'www\\.valetto\\.tech'
 const REPLYSLIP_HOST = [{ type: 'host' as const, value: '(www\\.)?replyslip\\.com' }];
 // Paths the www redirect leaves alone: API, MCP, Next assets, token pages, sign-in and any file with an extension.
 const PASS_THROUGH = '(?!api(?:/|$)|mcp(?:/|$)|_next/|i(?:/|$)|c(?:/|$)|sign-in(?:/|$)|\\.well-known/|assets/|[^/]*\\.[^/]+$)';
-// replyslip.com is retired. Only these named ReplySlip marketing pages (app/(site)) redirect to the valetto.tech
-// homepage; everything else, including any future route, passes through. Not listed on purpose: /claim, /i, /sign-in
-// (token and auth pages), /agents (owner setup page linked from the dashboard), /valetto (rules below), /dashboard,
-// /docs/*, /api, /mcp and files.
+// replyslip.com is retired. Only these named ReplySlip marketing pages (app/(site)) redirect to valetto.tech (the
+// homepage, or /agent-to-agent for two of them); everything else, including any future route, passes through. Not
+// listed on purpose: /claim, /i, /sign-in (token and auth pages), /agents (owner setup page linked from the
+// dashboard), /valetto (rules below), /dashboard, /docs/*, /api, /mcp and files.
 const REPLYSLIP_MARKETING_PAGES = ['/how-it-works', '/compare/agent-relay', '/compare/harnessrouter', '/sharing'];
+// Of those, the two whose content now lives on valetto.tech/agent-to-agent go there instead of the homepage.
+const AGENT_TO_AGENT_PAGES = new Set(['/how-it-works', '/sharing']);
 // replyslip.com also sends its home and legal pages; valetto.tech serves its own /, /privacy and /terms.
 const REPLYSLIP_ONLY_PAGES = ['/', '/privacy', '/terms'];
-const toValettoHome = (source: string, has: typeof VALETTO_HOST) => ({ source, has, destination: 'https://valetto.tech/', statusCode: 301 as const });
+const toValetto = (source: string, has: typeof VALETTO_HOST) => ({
+  source,
+  has,
+  destination: AGENT_TO_AGENT_PAGES.has(source) ? 'https://valetto.tech/agent-to-agent' : 'https://valetto.tech/',
+  statusCode: 301 as const,
+});
 
 const noReferrer = { key: 'Referrer-Policy', value: 'no-referrer' };
 /** Page routes: /i and /i/:token (invite and link landing), /claim, /c… (customer), /sign-in, /s… (site assistant demo). */
@@ -27,13 +34,13 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['postgres', 'ajv'],
   async redirects() {
     return [
-      // Old ReplySlip marketing pages still reachable on valetto.tech go home. Listed before the www rule so
+      // Old ReplySlip marketing pages still reachable on valetto.tech go home or to /agent-to-agent. Listed before the www rule so
       // www.valetto.tech/how-it-works is a single hop.
-      ...REPLYSLIP_MARKETING_PAGES.map((source) => toValettoHome(source, VALETTO_HOST)),
+      ...REPLYSLIP_MARKETING_PAGES.map((source) => toValetto(source, VALETTO_HOST)),
       { source: `/:path(${PASS_THROUGH}.*)`, has: WWW_VALETTO_HOST, destination: 'https://valetto.tech/:path', statusCode: 301 },
       { source: '/valetto', has: REPLYSLIP_HOST, destination: 'https://valetto.tech/', statusCode: 301 },
       { source: '/valetto/:path*', has: REPLYSLIP_HOST, destination: 'https://valetto.tech/:path*', statusCode: 301 },
-      ...[...REPLYSLIP_ONLY_PAGES, ...REPLYSLIP_MARKETING_PAGES].map((source) => toValettoHome(source, REPLYSLIP_HOST)),
+      ...[...REPLYSLIP_ONLY_PAGES, ...REPLYSLIP_MARKETING_PAGES].map((source) => toValetto(source, REPLYSLIP_HOST)),
     ];
   },
   async rewrites() {
@@ -42,6 +49,7 @@ const nextConfig: NextConfig = {
       beforeFiles: [
         { source: '/', has: VALETTO_HOST, destination: '/valetto' },
         { source: '/early-access', has: VALETTO_HOST, destination: '/valetto/early-access' },
+        { source: '/agent-to-agent', has: VALETTO_HOST, destination: '/valetto/agent-to-agent' },
         { source: '/privacy', has: VALETTO_HOST, destination: '/valetto/privacy' },
         { source: '/terms', has: VALETTO_HOST, destination: '/valetto/terms' },
         { source: '/robots.txt', has: VALETTO_HOST, destination: '/valetto-seo/robots' },

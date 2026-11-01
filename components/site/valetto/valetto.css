@@ -236,8 +236,8 @@
 .vt-soon{margin-top:36px;font-size:var(--s-small);color:var(--muted)}
 .vt-soon span{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:999px;border:1px solid var(--surface-2);color:var(--ink);font-weight:600;font-size:.75rem}
 
-/* footer */
-.vt-foot .foot-legal{display:flex;gap:20px;margin:0;justify-self:center}
+/* footer: the agent-to-agent guide link, then Privacy and Terms */
+.vt-foot .foot-legal{display:flex;flex-wrap:wrap;gap:8px 20px;margin:0;justify-self:center}
 @media (max-width:719px){.vt-foot{grid-template-columns:1fr}.vt-foot .yr,.vt-foot .foot-legal{justify-self:start}}
 
 /* personality below the fold: soft sage light behind the jobs and the close, a dotted spine through the steps */

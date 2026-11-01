@@ -9,7 +9,7 @@ export const VALETTO_DESCRIPTION =
   'Give each customer a private link to the jobs your Grok Bot does for them. Daily caps, one-click revoke, and a record of every request.';
 
 /** The Valetto pages as served at the root of valetto.tech (next.config.ts rewrites them to /valetto/...). */
-export const VALETTO_PATHS = ['/', '/early-access', '/privacy', '/terms'] as const;
+export const VALETTO_PATHS = ['/', '/early-access', '/agent-to-agent', '/privacy', '/terms'] as const;
 
 /**
  * Metadata for a Valetto page: self-canonical, og:url and metadataBase on valetto.tech, and Valetto's own

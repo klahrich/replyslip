@@ -1,24 +1,26 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import './setup-prompt.css';
 
-const TABS = [
+export type SetupTab = { key: string; label: string; prompt: string; note: string | null };
+
+const REPLYSLIP_TABS: readonly SetupTab[] = [
   {
     key: 'local',
     label: 'Local',
     prompt:
-      'Read https://replyslip.com/skill.md and set yourself up on ReplySlip as a local agent. Ask me for the join code when you need it.',
+      'Read https://valetto.tech/skill.md and set yourself up on Valetto as a local agent. Ask me for the join code when you need it.',
     note: 'For agents running in herdr or Orca. It stops and asks you to set Local delivery and create a watcher key.',
   },
   {
     key: 'webhook',
     label: 'Webhook',
     prompt:
-      'Read https://replyslip.com/skill.md and set yourself up on ReplySlip with a webhook. Ask me for the join code when you need it.',
+      'Read https://valetto.tech/skill.md and set yourself up on Valetto with a webhook. Ask me for the join code when you need it.',
     note: null,
   },
-] as const;
+];
 
 async function copyText(text: string) {
   try {
@@ -38,27 +40,31 @@ async function copyText(text: string) {
   }
 }
 
-/** Setup prompt with Local / Webhook tabs (WAI-ARIA tabs: arrow keys, Home, End). Used on / and /agents. */
-export function SetupPrompt() {
+/**
+ * Setup prompt with Local / Webhook tabs (WAI-ARIA tabs: arrow keys, Home, End). Used on /, /agents and
+ * valetto.tech/agent-to-agent. `tabs` replaces the default prompts; `localExtra` replaces the CLI commands under
+ * the Local tab (pass null to show none).
+ */
+export function SetupPrompt({ tabs = REPLYSLIP_TABS, localExtra }: { tabs?: readonly SetupTab[]; localExtra?: ReactNode } = {}) {
   const id = useId();
   const [sel, setSel] = useState(0);
   const [copied, setCopied] = useState<number | null>(null);
-  const tabs = useRef<Array<HTMLButtonElement | null>>([]);
+  const tabEls = useRef<Array<HTMLButtonElement | null>>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    const n = TABS.length;
+    const n = tabs.length;
     const next =
       e.key === 'ArrowRight' ? (sel + 1) % n : e.key === 'ArrowLeft' ? (sel - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
     if (next < 0) return;
     e.preventDefault();
     setSel(next);
-    tabs.current[next]?.focus();
+    tabEls.current[next]?.focus();
   };
 
   const copy = async (i: number) => {
-    if (!(await copyText(TABS[i].prompt))) return;
+    if (!(await copyText(tabs[i].prompt))) return;
     setCopied(i);
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setCopied(null), 2000);
@@ -67,11 +73,11 @@ export function SetupPrompt() {
   return (
     <div className="sp">
       <div className="sp-tabs" role="tablist" aria-label="Agent type" onKeyDown={onKey}>
-        {TABS.map((t, i) => (
+        {tabs.map((t, i) => (
           <button
             key={t.key}
             ref={(el) => {
-              tabs.current[i] = el;
+              tabEls.current[i] = el;
             }}
             type="button"
             role="tab"
@@ -85,7 +91,7 @@ export function SetupPrompt() {
           </button>
         ))}
       </div>
-      {TABS.map((t, i) => (
+      {tabs.map((t, i) => (
         <div
           key={t.key}
           className="sp-panel"
@@ -116,13 +122,14 @@ export function SetupPrompt() {
             </a>{' '}
             and paste it in. Each code works once and expires after 24 hours.
           </p>
-          {t.key === 'local' && (
+          {t.key === 'local' && localExtra !== undefined && localExtra}
+          {t.key === 'local' && localExtra === undefined && (
             <>
               <p className="sp-note">
                 Or run it yourself with a join code. Register once, and the CLI saves the agent’s key on this machine:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip register --join-code &lt;code&gt; --name &lt;name&gt;</code>
+                <code>npx replyslip register --url https://valetto.tech --join-code &lt;code&gt; --name &lt;name&gt;</code>
               </pre>
               <p className="sp-note">
                 Next, point the agent’s MCP config at that file (
@@ -136,7 +143,7 @@ export function SetupPrompt() {
                 . Then save the watcher key from your dashboard to a file and start the watcher:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip watch --url https://replyslip.com --key-file &lt;watcher-key-file&gt;</code>
+                <code>npx replyslip watch --url https://valetto.tech --key-file &lt;watcher-key-file&gt;</code>
               </pre>
             </>
           )}
