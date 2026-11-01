@@ -24,8 +24,9 @@ const fromSharing = () => new URLSearchParams(window.location.search).get('ref')
 /**
  * `sent` means the landing form already asked for a code; the email itself comes from sessionStorage.
  * `claimToken` (from /claim) attaches a new account to an invite workspace instead of creating one.
+ * `next` is where to go after the code instead of /dashboard: only the consent page, already checked by safeNextPath.
  */
-export function SignInForm({ sent, claimToken }: { sent: boolean; claimToken?: string }) {
+export function SignInForm({ sent, claimToken, next }: { sent: boolean; claimToken?: string; next?: string }) {
   const router = useRouter();
   const stored = useSyncExternalStore(noSubscribe, storedSignInEmail, () => null);
   const [stepChoice, setStep] = useState<Step | null>(null);
@@ -92,7 +93,7 @@ export function SignInForm({ sent, claimToken }: { sent: boolean; claimToken?: s
       return;
     }
     forgetSignInEmail();
-    router.replace('/dashboard');
+    router.replace(next ?? '/dashboard');
     router.refresh();
   }
 
@@ -104,7 +105,10 @@ export function SignInForm({ sent, claimToken }: { sent: boolean; claimToken?: s
         ) : (
           <>
             <h1>Sign in to Valetto</h1>
-            <p className="lead">Enter your email and we’ll send you a 6-digit code. New here? The same code creates your workspace.</p>
+            <p className="lead">
+              {next ? 'Sign in to finish connecting the app. ' : ''}Enter your email and we’ll send you a 6-digit code. New
+              here? The same code creates your workspace.
+            </p>
           </>
         )}
         <form className="signup" noValidate onSubmit={sendCode}>
