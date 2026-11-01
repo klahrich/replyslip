@@ -47,6 +47,7 @@ CREATE TABLE "oauth_grants" (
 	"agent_created" boolean NOT NULL,
 	"scope" text NOT NULL,
 	"resource" text NOT NULL,
+	"redirect_uri" text NOT NULL,
 	"absolute_expires_at" timestamp with time zone NOT NULL,
 	"last_used_at" timestamp with time zone,
 	"revoked_at" timestamp with time zone,

@@ -1003,6 +1003,8 @@ export const oauthGrants = pgTable(
     scope: text('scope').notNull(),
     /** Audience, e.g. https://valetto.tech/api/mcp. */
     resource: text('resource').notNull(),
+    /** The redirect URI the code went to; the connected-apps list shows its host. */
+    redirectUri: text('redirect_uri').notNull(),
     /** created_at + 365 days. */
     absoluteExpiresAt: ts('absolute_expires_at').notNull(),
     /** Throttled: written at most every 5 minutes. */

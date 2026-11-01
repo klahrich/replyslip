@@ -364,6 +364,7 @@ export async function exchangeAuthorizationCode(input: CodeExchangeInput): Promi
           agentCreated,
           scope: code.scope,
           resource: code.resource,
+          redirectUri: code.redirectUri,
           absoluteExpiresAt: new Date(now.getTime() + OAUTH_GRANT_MAX_TTL_MS),
           lastUsedAt: now,
           createdAt: now,
