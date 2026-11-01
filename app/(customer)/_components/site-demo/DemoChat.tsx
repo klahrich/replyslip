@@ -13,6 +13,7 @@ import { ArrowUp, MessageCircle, Minus, RotateCw } from 'lucide-react';
 import { LogoTile } from '../Frame';
 import { brandStyle } from '../../_lib/brand';
 import { demoApi } from '../../_lib/site-demo-api';
+import { pickSuggestions } from '../../_lib/site-demo-suggestions';
 import { DemoApiError, type DemoConversation, type DemoMessage, type Lang, type ReplyStatus, type SuggestedQuestion } from '../../_lib/site-demo-types';
 import { SITE_STRINGS } from '../../_lib/site-strings';
 import { cn } from '../../_lib/utils';
@@ -64,11 +65,6 @@ function retryReason(err: DemoApiError): Inline {
 
 function toItem(m: DemoMessage, fresh?: boolean): Item {
   return { key: m.id, role: m.role, body: m.body, status: m.status, note: m.demo_note ?? null, fresh };
-}
-
-function pickSuggestions(all: SuggestedQuestion[], lang: Lang): SuggestedQuestion[] {
-  const own = all.filter((s) => s.language === lang);
-  return (own.length ? own : all).slice(0, 3);
 }
 
 export function DemoChat({
