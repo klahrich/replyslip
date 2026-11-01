@@ -15,6 +15,8 @@ import { applyDeliveryUpdate, deliveryColumns, publicDelivery, type DeliveryInpu
 import { agentCountForUpdate, loadFirstAgentNotice, queueFirstAgentAlert } from './first-agent-alert';
 import { HttpError, isUniqueViolation } from './errors';
 import { deleteLogoQuietly } from './logo-store';
+import { oauthEnabled } from './oauth/config';
+import { revokeAgentGrants } from './oauth/grants';
 import { deliverWakeIds, failGuestTasks } from './sharing';
 import { clientIp } from './origin';
 import { assertWithinLimit } from './plans';
@@ -154,6 +156,34 @@ export async function getAgent(workspaceId: string, agentId: string): Promise<Ag
   return agent;
 }
 
+/** PATCH /api/v1/agents/:id (docs/design/mcp-oauth.md §6.6): rename any agent in the workspace. */
+export async function renameAgent(workspaceId: string, agentId: string, name: string): Promise<AgentRow> {
+  if (!AGENT_NAME_PATTERN.test(name)) {
+    throw new HttpError(
+      400,
+      'invalid_name',
+      'Agent name must start with a letter and contain only letters, numbers, underscores, or hyphens (max 64).',
+    );
+  }
+  const agent = await getAgent(workspaceId, agentId);
+  if (agent.revokedAt) throw new HttpError(409, 'agent_revoked', 'This agent has been revoked.');
+  if (agent.name === name) return agent;
+  try {
+    const [updated] = await getDb()
+      .update(agents)
+      .set({ name })
+      .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspaceId)))
+      .returning();
+    if (!updated) throw new HttpError(404, 'not_found', 'No agent was found.');
+    return updated;
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new HttpError(409, 'name_taken', `An agent named ${name} already exists in this workspace.`);
+    }
+    throw err;
+  }
+}
+
 export async function revokeAgent(workspaceId: string, agentId: string): Promise<AgentRow> {
   const db = getDb();
   const agent = await getAgent(workspaceId, agentId);
@@ -169,6 +199,9 @@ export async function revokeAgent(workspaceId: string, agentId: string): Promise
       .update(agentKeys)
       .set({ revokedAt: now })
       .where(and(eq(agentKeys.agentId, agent.id), isNull(agentKeys.revokedAt)));
+    // MCP OAuth §5.8: every connected-app grant on the agent goes with it. Behind the flag, so this never touches
+    // the oauth_* tables before their migration is applied.
+    if (oauthEnabled()) await revokeAgentGrants(tx, agent.id);
     // Spec 13.5: a revoked agent keeps no branding, and its logo blob goes too (after commit).
     const [branding] = await tx
       .delete(agentBranding)

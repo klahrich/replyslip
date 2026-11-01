@@ -28,7 +28,15 @@ const noReferrer = { key: 'Referrer-Policy', value: 'no-referrer' };
 /** Page routes: /i and /i/:token (invite and link landing), /claim, /c… (customer), /sign-in, /s… (site assistant demo). */
 const CUSTOMER_PAGES = ['/i', '/i/:path*', '/claim', '/c', '/c/:path*', '/sign-in', '/sign-in/:path*', '/s', '/s/:path*'];
 /** R1–R8 (/api/v1/c/*), the auth routes the customer page calls (request-code, verify-code, me, logout), and the site assistant demo API (/api/v1/s/*). */
-const CUSTOMER_API = ['/api/v1/c/:path*', '/api/v1/auth/:path*', '/api/v1/s/:path*'];
+const CUSTOMER_API = [
+  '/api/v1/c/:path*',
+  '/api/v1/auth/:path*',
+  '/api/v1/s/:path*',
+  // MCP OAuth (docs/design/mcp-oauth.md §5.4): codes and request tokens ride in URLs.
+  '/api/oauth/:path*',
+  '/api/v1/connected-apps',
+  '/api/v1/connected-apps/:path*',
+];
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['postgres', 'ajv'],
@@ -71,6 +79,16 @@ const nextConfig: NextConfig = {
       ...CUSTOMER_PAGES.map((source) => ({ source, headers: [...noindex, noReferrer] })),
       // The customer API (R1–R7) and email-code auth: /api/:path* above already sends X-Robots-Tag.
       ...CUSTOMER_API.map((source) => ({ source, headers: [noReferrer] })),
+      // The MCP OAuth consent page carries a request token in its URL and must never be framed (mcp-oauth.md §5.4).
+      {
+        source: '/oauth/:path*',
+        headers: [
+          ...noindex,
+          noReferrer,
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+        ],
+      },
       // MCP Registry HTTP domain verification (public key only); serve as plain text.
       { source: '/.well-known/mcp-registry-auth', headers: [{ key: 'Content-Type', value: 'text/plain; charset=utf-8' }] },
       { source: '/assets/:path*', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
