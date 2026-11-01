@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { answerVisitorMessage } from '@/lib/site-assistant/answer';
-import { ungroundedOwnerKeyword } from '@/lib/site-assistant/keywords';
+import { findOwnerKeyword, splitSentences, timedBookingKeyword, ungroundedOwnerKeyword } from '@/lib/site-assistant/keywords';
 import { needsOwnerReply } from '@/lib/site-assistant/replies';
 import { answer, fakeModel, TEST_LLM_CONFIG } from './site-fixtures';
 
@@ -15,7 +15,15 @@ Harbour Lane Movers is a small moving company in a made-up town.
 - Key drop-off is sorted out when booking.
 - Site visits and quotes come in either language.
 - Le stationnement se règle au moment de la soumission.
-- The small van is $77 per hour.`;
+- The small van is $77 per hour.
+- There is no extra cost for seniors.
+- Il n'y a aucun coût supplémentaire pour les aînés.
+- Quotes are available in French.
+- When booking, bring your ID.
+- There are no additional delivery charges in town.
+- Padding is included in the rental cost.
+- Stairs come at no extra charge.
+- Les imprévus, on vous le dit franchement dès la soumission.`;
 
 const base = { businessName: 'Harbour Lane Movers', contextMd: HARBOUR_CONTEXT, history: [] };
 
@@ -111,5 +119,93 @@ describe('reply keyword rule only overrides words the kept sources do not back',
     expect(ungroundedOwnerKeyword('when you book', ['go over details when booking'])).toBeNull();
     expect(ungroundedOwnerKeyword('the price is fair', ['go over details when booking'])).toMatchObject({ category: 'price' });
     expect(ungroundedOwnerKeyword('no refund', ['no extra charge'])).toMatchObject({ category: 'complaint' });
+  });
+});
+
+describe('grounding one word does not let an invented price or time through', () => {
+  const handoffs = [
+    { reply: 'It costs forty dollars per visit.', sources: ['There is no extra cost for seniors.'] },
+    { reply: 'Ça coûte quarante dollars par visite.', sources: ["Il n'y a aucun coût supplémentaire pour les aînés."], language: 'fr' as const },
+    { reply: 'About 40 bucks per visit.', sources: ['There is no extra cost for seniors.'] },
+    { reply: 'We are available this Saturday at 3pm.', sources: ['Quotes are available in French.'] },
+    { reply: 'You can book us for tomorrow morning.', sources: ['When booking, bring your ID.'] },
+    { reply: 'Quotes are available in French. We are available Monday.', sources: ['Quotes are available in French.'] },
+    { reply: 'When booking, bring your ID. Booking opens at 15h30.', sources: ['When booking, bring your ID.'] },
+  ];
+
+  it.each(handoffs)('hands off: $reply', async ({ reply, sources, language }) => {
+    const result = await ask('Tell me more', { reply, sources, topic: 'services', language: language ?? 'en' });
+    expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'keyword_reply', body: needsOwnerReply(language ?? 'en') });
+  });
+
+  // The six phrasings from real answers, reused in synthetic replies.
+  const passes = [
+    { reply: 'Yes, there are no additional delivery charges in town.', sources: ['There are no additional delivery charges in town.'] },
+    { reply: 'Padding is included in the rental cost.', sources: ['Padding is included in the rental cost.'] },
+    { reply: 'Yes, stairs come at no extra charge.', sources: ['Stairs come at no extra charge.'] },
+    { reply: 'Yes, quotes are available in French.', sources: ['Quotes are available in French.'] },
+    { reply: 'When booking, bring your ID.', sources: ['When booking, bring your ID.'] },
+    {
+      reply: 'Les imprévus, on vous le dit franchement dès la soumission.',
+      sources: ['Les imprévus, on vous le dit franchement dès la soumission.'],
+      language: 'fr' as const,
+    },
+  ];
+
+  it.each(passes)('still answers: $reply', async ({ reply, sources, language }) => {
+    const result = await ask('Tell me more', { reply, sources, topic: 'services', language: language ?? 'en' });
+    expect(result).toMatchObject({ status: 'answered', decidedBy: 'answered', body: reply });
+  });
+});
+
+describe('currency words', () => {
+  it.each([
+    'forty dollars', 'one dollar', 'about 40 bucks', 'a buck', '40 CAD', 'USD only', 'une piasse', 'deux piasses',
+    'une piastre', 'trois piastres', 'quarante DOLLARS', '40dollars', '40cad',
+  ])('counts "%s" as a price, with no digit needed', (text) => {
+    expect(findOwnerKeyword(text)?.category).toBe('currency');
+    expect(ungroundedOwnerKeyword(text, [text])?.category).toBe('currency');
+  });
+
+  it.each(['the cadence is weekly', 'a belt buckle', 'USDA approved', 'Buckingham Street', 'les piasseurs'])(
+    'only matches whole words: "%s"',
+    (text) => {
+      expect(findOwnerKeyword(text)).toBeNull();
+    },
+  );
+});
+
+describe('booking words next to a day, date or time', () => {
+  const timed = [
+    'available today', 'available tomorrow', 'book tonight', 'book this weekend', "disponible aujourd'hui",
+    'disponible aujourd’hui', 'réserver demain', 'disponible ce soir', 'available Monday', 'available on SUNDAY',
+    'disponible mardi', 'disponible samedi', 'available in January', 'book for December', 'réserver en février',
+    'disponible en août', 'available at 3pm', 'available 3 p.m.', 'book for 10 am', 'disponible à 15h',
+    'disponible à 3h', 'disponible à 15h30', 'available at 3:00', 'book at 14:30', 'available on the 12th',
+    'available in 2 days',
+  ];
+  it.each(timed)('hands off "%s" even when the booking word is grounded', (text) => {
+    expect(timedBookingKeyword(text)?.category).toBe('availability_booking');
+    expect(ungroundedOwnerKeyword(text, ['quotes are available, when booking, disponible, reserver'])).not.toBeNull();
+  });
+
+  it.each([
+    'Quotes are available in French.',
+    'When booking, bring your ID.',
+    'You may book online.',
+    'Booking is easy. We have 3 trucks.',
+    'We work Monday. Booking is by phone.',
+  ])('keeps "%s": no day or time in the booking sentence', (text) => {
+    expect(timedBookingKeyword(text)).toBeNull();
+  });
+
+  it('a day with no booking word is fine', () => {
+    expect(timedBookingKeyword('We move furniture on Saturday at 3pm.')).toBeNull();
+  });
+
+  it('splits sentences on end punctuation and line breaks, not inside times or decimals', () => {
+    expect(splitSentences('Booking is easy. Open at 3:00! Really? Yes; 2.5 hours\nNew line')).toEqual([
+      'Booking is easy.', 'Open at 3:00!', 'Really?', 'Yes;', '2.5 hours', 'New line',
+    ]);
   });
 });
