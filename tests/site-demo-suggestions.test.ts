@@ -81,12 +81,7 @@ describe('site demo suggestion rows from the payload', () => {
     expect(suggestionsOf({ suggestions: [row('a', 'en', 0), row('b', 'fr', 0)] })).toEqual([row('a', 'en', 0), row('b', 'fr', 0)]);
   });
 
-  it('reads `suggested_questions` from older servers', () => {
-    expect(ids(suggestionsOf({ suggested_questions: [oldRow('a', 'en', 0)] }))).toEqual(['a']);
-  });
-
-  it('prefers `suggestions` when both are present, and is empty when neither is', () => {
-    expect(ids(suggestionsOf({ suggestions: [row('new', 'en')], suggested_questions: [oldRow('old', 'en')] }))).toEqual(['new']);
+  it('is empty when the payload has no suggestions', () => {
     expect(suggestionsOf({})).toEqual([]);
   });
 

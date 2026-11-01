@@ -44,9 +44,8 @@ export type DemoConversation = {
   business: DemoBusiness;
   /** Shown exactly as sent. */
   banner: Record<Lang, string>;
-  /** Suggestion chips. Newer servers send `suggestions`, older ones `suggested_questions`; see `suggestionsOf`. */
+  /** Suggestion chips; see `suggestionsOf`. */
   suggestions?: SuggestedQuestion[];
-  suggested_questions?: SuggestedQuestion[];
   /** This visitor's conversation, oldest first (visitor cookie). */
   messages: DemoMessage[];
   /** Plain text under the input until the first message. */

@@ -24,7 +24,7 @@ function rank(s: SuggestedQuestion): number {
   return typeof s.position === 'number' && Number.isFinite(s.position) ? s.position : Number.POSITIVE_INFINITY;
 }
 
-/** The payload's suggestion rows: `suggestions` (newer servers) or `suggested_questions` (older ones), else none. */
-export function suggestionsOf(conversation: Pick<DemoConversation, 'suggestions' | 'suggested_questions'>): SuggestedQuestion[] {
-  return (conversation.suggestions ?? conversation.suggested_questions ?? []).filter((s) => typeof s?.question === 'string' && s.question.trim() !== '');
+/** The payload's suggestion rows with question text, else none. */
+export function suggestionsOf(conversation: Pick<DemoConversation, 'suggestions'>): SuggestedQuestion[] {
+  return (conversation.suggestions ?? []).filter((s) => typeof s?.question === 'string' && s.question.trim() !== '');
 }
