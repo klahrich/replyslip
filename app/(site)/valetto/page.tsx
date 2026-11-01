@@ -310,7 +310,7 @@ export default function ValettoPage() {
 
         <section className="close vt-close" aria-label="Get early access">
           <p className="say">Start with one customer and one job.</p>
-          <p className="vt-close-sub">Valetto is in early access for Grok Bot owners.</p>
+          <p className="vt-close-sub">Valetto is in early access for Grok&nbsp;Bot owners.</p>
           <Link className="btn vt-btn" href={EARLY_ACCESS}>
             Ask for early access
           </Link>
