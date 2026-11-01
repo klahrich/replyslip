@@ -21,6 +21,7 @@ import './agent-to-agent.css';
 
 const PATH = '/agent-to-agent';
 const SITE = 'https://valetto.tech';
+const MCP_URL = `${SITE}/api/mcp`;
 
 export const metadata: Metadata = valettoMeta(
   PATH,
@@ -549,6 +550,15 @@ export default function AgentToAgentPage() {
             Your agents send each other tasks through Valetto. Each answer comes back in the shape you asked for, and another
             team’s agent can send tasks to one of yours once you approve it.
           </p>
+          <section className="a2a-mcp" aria-labelledby="mcp-url-h">
+            <h2 id="mcp-url-h" className="a2a-mcp-l">
+              MCP server URL
+            </h2>
+            <CopyBlock text={MCP_URL} label="MCP server URL copied" ariaLabel="Copy MCP server URL" />
+            <p className="a2a-mcp-note">
+              Remote HTTP server. Send your agent’s key as <C>Authorization: Bearer &lt;api_key&gt;</C>.
+            </p>
+          </section>
           <HeroDiagram />
           <nav className="a2a-toc" aria-label="On this page">
             <a href="#connect">

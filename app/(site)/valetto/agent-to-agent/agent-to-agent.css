@@ -9,6 +9,15 @@
 .a2a .a2a-toc a:active{transform:scale(.97)}
 .a2a .a2a-toc b,.a2a .a2a-n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-size:.75rem;font-weight:700;flex:none}
 
+/* the MCP server URL under the intro: label, the URL in a mono box with Copy (CopyBlock), one plain line.
+   The URL is short, so the box keeps Copy on the same row on phones too. */
+.a2a .a2a-mcp{margin-top:clamp(24px,3.5vw,32px);max-width:560px}
+.a2a .a2a-mcp-l{margin:0 0 8px;font-size:var(--s-small);font-weight:600;letter-spacing:0;color:var(--ink)}
+.a2a .a2a-mcp .hw-cp{flex-direction:row;align-items:center;gap:12px;padding:8px 8px 8px 16px}
+.a2a .a2a-mcp .hw-cp-t{font-size:.9375rem;overflow-wrap:normal;white-space:nowrap;overflow-x:auto}
+@media (max-width:480px){.a2a .a2a-mcp .hw-cp{gap:10px;padding-left:12px}.a2a .a2a-mcp .hw-cp-t{font-size:.8125rem}}
+.a2a .a2a-mcp-note{margin-top:10px;font-size:var(--s-small);color:var(--muted)}
+
 /* hero sequence: three lanes with lifelines, three messages between them */
 .a2a-seq{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));row-gap:18px;margin-top:clamp(32px,5vw,48px);padding:20px 0 8px;
   background:linear-gradient(var(--surface-2),var(--surface-2)) calc(100%/6) 0/1px 100% no-repeat,linear-gradient(var(--surface-2),var(--surface-2)) 50% 0/1px 100% no-repeat,linear-gradient(var(--surface-2),var(--surface-2)) calc(500%/6) 0/1px 100% no-repeat}
