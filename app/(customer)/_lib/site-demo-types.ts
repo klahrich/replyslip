@@ -16,14 +16,15 @@ export type DemoBusiness = {
   language: string;
 };
 
+/**
+ * A suggestion chip. A tap sends `question` as a typed message and the assistant answers it live. Older servers
+ * also send `id`, a stored `answer` and `checked_at`; the page ignores them.
+ */
 export type SuggestedQuestion = {
-  id: string;
   /** The question's index in the business's list (0, 1, 2, ...). Optional: older servers don't send it. */
   position?: number;
   question: string;
-  answer: string;
   language: string;
-  checked_at: string;
 };
 
 export type DemoMessage = {
@@ -35,7 +36,6 @@ export type DemoMessage = {
   created_at: string;
   language?: string | null;
   client_message_id?: string | null;
-  suggested_question_id?: string | null;
   /** needs_owner only: the server's note on why the question went to the owner, in the reply's language. */
   demo_note?: string | null;
 };
@@ -44,7 +44,9 @@ export type DemoConversation = {
   business: DemoBusiness;
   /** Shown exactly as sent. */
   banner: Record<Lang, string>;
-  suggested_questions: SuggestedQuestion[];
+  /** Suggestion chips. Newer servers send `suggestions`, older ones `suggested_questions`; see `suggestionsOf`. */
+  suggestions?: SuggestedQuestion[];
+  suggested_questions?: SuggestedQuestion[];
   /** This visitor's conversation, oldest first (visitor cookie). */
   messages: DemoMessage[];
   /** Plain text under the input until the first message. */
@@ -53,7 +55,7 @@ export type DemoConversation = {
   message_max_chars?: number;
 };
 
-export type SendBody = { client_message_id: string } & ({ text: string } | { suggested_question_id: string });
+export type SendBody = { client_message_id: string; text: string };
 
 export type SendResponse = { message: DemoMessage };
 
