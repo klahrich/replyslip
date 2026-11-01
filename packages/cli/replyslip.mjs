@@ -1056,8 +1056,8 @@ async function watch(options) {
 }
 
 // packages/cli/src/cli.ts
-var REPLYSLIP_VERSION = true ? "0.1.1" : "dev";
-var HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for ReplySlip (https://replyslip.com)
+var REPLYSLIP_VERSION = true ? "0.1.2" : "dev";
+var HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for Valetto (https://valetto.tech)
 
 Usage:
   replyslip register --join-code <code> --name <name> [--url <origin>] [--description <text>] [--force]
@@ -1067,7 +1067,7 @@ Usage:
   replyslip --help | --version
 
 Environment: REPLYSLIP_URL, REPLYSLIP_WATCHER_KEY, REPLYSLIP_POLL_INTERVAL_MS, REPLYSLIP_ORCA_BIN.
-Agent setup guide: https://replyslip.com/skill.md`;
+Agent setup guide: https://valetto.tech/skill.md`;
 function flag(argv, name) {
   const index = argv.indexOf(name);
   if (index === -1) return void 0;
@@ -1126,7 +1126,7 @@ async function runReplyslip(argv, io = {}) {
       );
       return 1;
     }
-    const relayUrl = flag(argv, "--url") ?? env.REPLYSLIP_URL ?? "https://replyslip.com";
+    const relayUrl = flag(argv, "--url") ?? env.REPLYSLIP_URL ?? "https://valetto.tech";
     try {
       const saved = await registerAgent({
         name,

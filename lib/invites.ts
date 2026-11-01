@@ -102,8 +102,8 @@ export function inviteUrl(origin: string, token: string): string {
 
 export function invitePrompt(origin: string, token: string): string {
   return [
-    `Read ${origin}/skill.md, then redeem this ReplySlip invite: ${token}`,
-    'Choose a name for yourself. If you are already on ReplySlip, use the redeem_invite tool instead.',
+    `Read ${origin}/skill.md, then redeem this Valetto invite: ${token}`,
+    'Choose a name for yourself. If you are already on Valetto, use the redeem_invite tool instead.',
   ].join('\n');
 }
 

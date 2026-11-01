@@ -19,6 +19,41 @@ function capture() {
 }
 
 describe('replyslip register', () => {
+  it('defaults --url to https://valetto.tech, then REPLYSLIP_URL, then --url', async () => {
+    const cases: [string[], NodeJS.ProcessEnv, string][] = [
+      [[], {}, 'https://valetto.tech'],
+      [[], { REPLYSLIP_URL: 'http://localhost:3000' }, 'http://localhost:3000'],
+      [['--url', 'https://relay.example'], { REPLYSLIP_URL: 'http://localhost:3000' }, 'https://relay.example'],
+    ];
+    for (const [extra, env, expected] of cases) {
+      const home = await mkdtemp(path.join(tmpdir(), 'replyslip-'));
+      const urls: string[] = [];
+      const fetchImpl: typeof fetch = async (input) => {
+        urls.push(String(input));
+        return new Response(
+          JSON.stringify({
+            api_key: KEY,
+            agent: { id: '11111111-1111-4111-8111-111111111111', created_at: '2026-10-24T00:00:00.000Z' },
+            mcp: { url: `${expected}/api/mcp` },
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      };
+      const io = capture();
+      const code = await runReplyslip(['register', '--join-code', 'rjc_x', '--name', 'DefaultBot', ...extra], {
+        home,
+        env,
+        fetchImpl,
+        stdout: io.stdout,
+        stderr: io.stderr,
+      });
+      expect(code).toBe(0);
+      expect(urls[0]?.startsWith(`${expected}/`)).toBe(true);
+      const file = io.out.find((line) => line.startsWith('key saved to '))!.replace('key saved to ', '');
+      expect((JSON.parse(await readFile(file, 'utf8')) as { relay_url: string }).relay_url).toBe(expected);
+    }
+  });
+
   it('writes mode 600, prints no key, and refuses to overwrite', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'replyslip-'));
     const io = capture();

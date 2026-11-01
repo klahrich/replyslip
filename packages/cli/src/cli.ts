@@ -16,7 +16,7 @@ declare const __REPLYSLIP_VERSION__: string | undefined;
 
 export const REPLYSLIP_VERSION = typeof __REPLYSLIP_VERSION__ === 'string' ? __REPLYSLIP_VERSION__ : 'dev';
 
-const HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for ReplySlip (https://replyslip.com)
+const HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for Valetto (https://valetto.tech)
 
 Usage:
   replyslip register --join-code <code> --name <name> [--url <origin>] [--description <text>] [--force]
@@ -26,7 +26,7 @@ Usage:
   replyslip --help | --version
 
 Environment: REPLYSLIP_URL, REPLYSLIP_WATCHER_KEY, REPLYSLIP_POLL_INTERVAL_MS, REPLYSLIP_ORCA_BIN.
-Agent setup guide: https://replyslip.com/skill.md`;
+Agent setup guide: https://valetto.tech/skill.md`;
 
 export type CliIo = {
   env?: NodeJS.ProcessEnv;
@@ -97,7 +97,7 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
       );
       return 1;
     }
-    const relayUrl = flag(argv, '--url') ?? env.REPLYSLIP_URL ?? 'https://replyslip.com';
+    const relayUrl = flag(argv, '--url') ?? env.REPLYSLIP_URL ?? 'https://valetto.tech';
     try {
       const saved = await registerAgent({
         name,
