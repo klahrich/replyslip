@@ -1,4 +1,4 @@
-import type { AgentChoice, ConsentDecisionBody, ConsentProblem, ConsentView } from './consent-types';
+import type { ConsentDecisionBody, ConsentProblem, ConsentView } from './consent-types';
 
 /** The fallback when the server's pattern can't be compiled: AGENT_NAME_PATTERN in lib/constants.ts. */
 const AGENT_NAME_FALLBACK = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -43,11 +43,13 @@ export function decisionBody(
   name: string,
   workspaceId: string,
 ): ConsentDecisionBody {
-  const base = { request_id: view.request_id, csrf_token: view.csrf_token, decision, workspace_id: workspaceId };
-  if (decision === 'deny') return base;
-  const agent: AgentChoice =
-    selection.mode === 'reconnect' ? { mode: 'reconnect', agent_id: selection.agentId } : { mode: 'new', name: name.trim() };
-  return { ...base, agent };
+  const base = { request_id: view.request_id, csrf_token: view.csrf_token, workspace_id: workspaceId };
+  if (decision === 'deny') return { ...base, decision: 'deny' };
+  const agent =
+    selection.mode === 'reconnect'
+      ? { mode: 'reconnect' as const, agent_id: selection.agentId }
+      : { mode: 'new' as const, name: name.trim() };
+  return { ...base, decision: 'allow', agent };
 }
 
 export type AppLabel = {
@@ -109,21 +111,33 @@ export function outcomeFromResponse(status: number, data: unknown): PostOutcome 
       };
     }
     case 'invalid_name':
-    case 'validation_error':
       return { kind: 'error', code, message: 'Use letters, numbers, - or _, starting with a letter. Up to 64 characters.' };
+    case 'validation_error': {
+      const path = (err?.details as { issues?: Array<{ path?: unknown }> } | undefined)?.issues?.[0]?.path;
+      if (path === 'agent.name') {
+        return { kind: 'error', code, message: 'Use letters, numbers, - or _, starting with a letter. Up to 64 characters.' };
+      }
+      if (path === 'agent.agent_id') {
+        return { kind: 'error', code, message: 'That agent can’t be reconnected any more. Reload this page and pick again.' };
+      }
+      return { kind: 'error', code, message: 'This page is out of date. Reload it and try again.' };
+    }
+    case 'agent_revoked':
+      return { kind: 'error', code, message: 'That agent was removed. Reload this page and pick another, or make a new one.' };
     case 'plan_limit':
       return {
         kind: 'error',
         code,
         message: 'Your workspace is at its agent limit. Reconnect an existing agent, or remove one in your dashboard.',
       };
-    case 'bad_origin':
     case 'csrf_failed':
+      return { kind: 'error', code, message: 'This page is out of date. Reload it and try again.' };
+    case 'bad_origin':
     case 'binding_failed':
       return {
         kind: 'error',
         code,
-        message: 'This request started in another browser or tab. Go back to the app and connect again from here.',
+        message: 'Finish connecting in the browser where you started. Go back to the app and connect again from there.',
       };
     case 'unauthorized':
       return { kind: 'error', code, message: 'You were signed out. Reload this page to sign in again.' };

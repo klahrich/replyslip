@@ -107,7 +107,18 @@ describe('consent page logic', () => {
       kind: 'error',
       suggestedName: 'chatgpt-2',
     });
-    expect(outcomeFromResponse(403, { error: { code: 'binding_failed' } })).toMatchObject({ message: expect.stringMatching(/another browser/) });
+    expect(outcomeFromResponse(403, { error: { code: 'binding_failed' } })).toMatchObject({ message: expect.stringMatching(/browser where you started/) });
+    expect(outcomeFromResponse(403, { error: { code: 'csrf_failed' } })).toMatchObject({ message: expect.stringMatching(/Reload/) });
+    expect(outcomeFromResponse(403, { error: { code: 'plan_limit', details: { limit: 'agents', max: 3 } } })).toMatchObject({
+      message: expect.stringMatching(/agent limit/),
+    });
+    expect(outcomeFromResponse(409, { error: { code: 'agent_revoked' } })).toMatchObject({ message: expect.stringMatching(/was removed/) });
+    expect(
+      outcomeFromResponse(400, { error: { code: 'validation_error', details: { issues: [{ path: 'agent.agent_id', message: 'x' }] } } }),
+    ).toMatchObject({ message: expect.stringMatching(/can’t be reconnected/) });
+    expect(outcomeFromResponse(409, { error: { code: 'name_taken', details: { suggested_name: null } } })).toMatchObject({
+      message: 'That name is taken. Pick another.',
+    });
     expect(outcomeFromResponse(429, null)).toMatchObject({ code: 'rate_limited' });
     expect(outcomeFromResponse(500, null)).toMatchObject({ kind: 'error', message: 'Something went wrong. Try again.' });
     expect(problemFromCode('workspace_required')).toBe('workspace_required');
