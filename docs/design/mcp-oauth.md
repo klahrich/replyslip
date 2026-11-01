@@ -841,11 +841,13 @@ End to end with a fake client (`tests/mcp-oauth-e2e.test.ts`, calling the route 
 5. **`rsk_` regression**: an existing local agent with `--header "Authorization: Bearer rsk_…"` keeps working, and OpenCode with `oauth: false` keeps working.
 6. Watch the logs for `oauth.refresh_race`, `oauth.refresh_reuse` and 429s for a week before announcing.
 
-## 8. Open questions for Karim
+## 8. Decisions (formerly open questions)
 
-1. **Agent per connection:** default to a new agent (`chatgpt`, `claude`) with "reconnect to a previous connected-app agent". Also let people attach ChatGPT to an existing bot (e.g. one with an `rsk_` key)?
-2. **Scope (recommendation: narrow):** connected apps only send tasks (and follow up or answer questions on those), read their own tasks and answers, and list agents. They can't touch the workspace handle, sharing, offers or guests, which stay with `rsk_` agents and the dashboard, because inbox text from other agents and guests could prompt-inject a chat app. OK?
-   * **2b. Replies on received tasks:** should a connected app be able to send content back on a task it **received**? That means `complete_task`, `fail_task`, `ask` and `send_message` on that task's thread, offered as a second scope, `agent:respond`, with its own consent line. **EvaluatorBot's recommendation: no for v1.** The sender reads the reply, so this would be the exfiltration channel the narrow scope exists to close. Users answer received tasks with a key-based agent until there's a dashboard reply flow or a per-reply confirmation.
-3. **Which apps:** only ChatGPT and Claude (CIMD allowlist) at launch, or any app? And turn on DCR for Cursor, VS Code and others now, or later?
-4. **Free plan:** should connected-app agents count toward the 10-agent limit?
-5. **Re-consent:** connections last up to a year with silent refresh, then the user re-approves. OK?
+Karim delegated these to EvaluatorBot, who decided them on 2026-11-01. Implementation follows these, not the "pending" and "open question" notes earlier in this doc.
+
+1. **Agent per connection: decided.** One new agent per connection (`chatgpt`, `claude`, deduped), with **"Reconnect as"** a previous connected-app agent (an active agent an earlier OAuth grant created). **No attaching to existing bots in v1**, such as one driven by an `rsk_` key.
+2. **Scope: decided, the narrow scope as written at `a58c3e8`.** One advertised scope, `agent`, mapped as in §5.7. The workspace handle, sharing, offers and guests stay with `rsk_` agents and the dashboard.
+   * **2b. Replies on received tasks: decided, no.** In v1 a connected app can't reply to, complete, fail, ask on or message on a task it received. `agent:respond` stays internal (never advertised or grantable).
+3. **Which apps: decided, ChatGPT and Claude only at launch, via CIMD** (`MCP_OAUTH_CIMD_HOSTS` = `chatgpt.com,claude.ai`). DCR code may ship behind its own flag, `MCP_OAUTH_DCR`, defaulting **off**, or be deferred to PR 3.
+4. **Free plan: decided, connected-app agents count toward the plan agent limit** (`assertWithinLimit(…, 'agents')`, the 10-agent free cap).
+5. **Re-consent: decided, a connection lasts at most 365 days** (`oauth_grants.absolute_expires_at` = created + 365 d), with silent refresh until then, after which the user re-approves.
