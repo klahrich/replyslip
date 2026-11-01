@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Agents } from './Agents';
+import { ConnectedApps } from './ConnectedApps';
 import { api, errorText, SIGNED_OUT_EVENT } from './api';
 import { LocalTime } from './LocalTime';
 import { EmailPrefs } from './EmailPrefs';
@@ -138,6 +139,7 @@ export function Dashboard({
                 {loaded && !error ? <SetupChecklist handle={handle} agents={agents} codes={codes} /> : null}
                 <JoinCodes codes={codes} agents={agents} origin={origin} paths={paths} onChange={refresh} />
                 {loaded ? <Agents agents={agents} keys={keys} onChange={refresh} handle={handle} /> : null}
+                <ConnectedApps />
                 <WatcherKeys />
                 <Tasks refreshKey={tick} />
                 <EmailPrefs initialOptIn={marketingOptIn} />
