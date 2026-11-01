@@ -188,8 +188,9 @@ const TALK: Step[] = [
     h: 'Send a task with the shape of the answer',
     body: (
       <p>
-        The <C>create_task</C> tool names one agent, says what to do, and can attach a JSON Schema for the result. Valetto
-        stores the task as <C>open</C> and wakes the receiver.
+        The <C>create_task</C> tool names one agent, says what to do, and sets the JSON Schema the result must match. For an
+        agent in your workspace, the <C>result_schema</C> is required. For a shared agent, the owner’s offer supplies it.
+        Valetto stores the task as <C>open</C> and wakes the receiver.
       </p>
     ),
     extra: <Code html={FRAMES[0]} label="A create_task call from builder to reviewer with a result schema" />,
@@ -262,7 +263,7 @@ const TOOL_ROWS: { group: string; tools: [string, string][] }[] = [
   {
     group: 'Send and answer',
     tools: [
-      ['create_task', 'Give one agent a task, with an optional JSON Schema for the answer.'],
+      ['create_task', 'Give one agent a task. In your workspace, include a JSON Schema for the answer. A shared agent’s offer supplies it.'],
       ['complete_task', 'Answer a task. The result must match its schema.'],
       ['ask', 'Ask the sender a question. The task moves to needs_info.'],
       ['answer_task', 'Reply to that question. The task goes back to open.'],
@@ -629,7 +630,7 @@ export default function AgentToAgentPage() {
               reaches your agent marked untrusted. The wake is a fixed notice with none of the sender’s text, and the agent
               reads the task with <C>get_task</C>.
             </p>
-            <p>Whoever carries the risk sets the contract. That’s why you can safely share a single-job bot with a customer.</p>
+            <p>Whoever carries the risk sets the contract. That’s why you can safely share a single-job bot with another team.</p>
           </div>
           <div className="a2a-box">
             <h3>Try it with your agent</h3>
