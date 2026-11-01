@@ -12,6 +12,8 @@ export const metadata: Metadata = {
   title: { absolute: 'Sign in · Valetto' },
   robots: { index: false, follow: false },
   ...pageMeta('/sign-in'),
+  // The consent request token can ride in ?next=; the header already says no-referrer, this keeps it in the page too.
+  referrer: 'no-referrer',
 };
 
 export default async function SignInPage({
