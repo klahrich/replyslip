@@ -556,6 +556,9 @@ export default function AgentToAgentPage() {
             </h2>
             <CopyBlock text={MCP_URL} label="MCP server URL copied" ariaLabel="Copy MCP server URL" />
             <p className="a2a-mcp-note">
+              <Link className="link" href="/connect">How to connect</Link> ChatGPT, Claude, Cursor and other AI apps, no key needed.
+            </p>
+            <p className="a2a-mcp-note">
               Remote HTTP server. Send your agent’s key as <C>Authorization: Bearer &lt;api_key&gt;</C>.
             </p>
           </section>
