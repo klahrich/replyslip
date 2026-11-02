@@ -1,5 +1,10 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { AppCell } from '@/components/dashboard/ConnectedApps';
 import {
+  accessSummary,
+  isElevated,
   appHost,
   appName,
   endedAt,
@@ -17,6 +22,8 @@ function app(over: Partial<ConnectedApp> & { id: string }): ConnectedApp {
     redirect_host: 'chatgpt.com',
     agent: { id: `agent-${over.id}`, name: 'chatgpt', revoked: false },
     scope: 'agent',
+    scopes: ['agent'],
+    elevated: false,
     approved_by_email: 'owner@example.com',
     created_at: '2026-10-01T15:00:00.000Z',
     last_used_at: null,
@@ -78,5 +85,45 @@ describe('connected apps list', () => {
     expect(endedAt(app({ id: '7', status: 'revoked', revoked_at: '2026-10-20T14:00:00.000Z' }))).toBe('2026-10-20T14:00:00.000Z');
     expect(endedAt(app({ id: '8', status: 'expired' }))).toBe('2027-10-01T15:00:00.000Z');
     expect(endedAt(app({ id: '9' }))).toBeNull();
+  });
+});
+
+describe('connected app access level (§5.10)', () => {
+  const elevated = { scope: 'agent agent:respond agent:owner', scopes: ['agent', 'agent:respond', 'agent:owner'], elevated: true };
+  const cell = (a: ConnectedApp) => renderToStaticMarkup(createElement(AppCell, { app: a }));
+
+  it('says what the app can do in plain words, from scopes', () => {
+    expect(accessSummary(app({ id: '1' }))).toBe('Can send tasks and read its own tasks.');
+    expect(accessSummary(app({ id: '2', ...elevated }))).toBe(
+      'Can send tasks and read its own tasks, work on tasks sent to it and manage your workspace settings and guests.',
+    );
+    expect(accessSummary({ scopes: ['agent', 'agent:respond'] })).toBe('Can send tasks and read its own tasks and work on tasks sent to it.');
+    expect(accessSummary({ scopes: ['agent', 'something:new'] })).toBe('Can send tasks and read its own tasks.');
+    expect(accessSummary({ scopes: [] })).toBeNull();
+  });
+
+  it('badges an elevated connection only', () => {
+    expect(isElevated(app({ id: '1' }))).toBe(false);
+    expect(isElevated(app({ id: '2', ...elevated }))).toBe(true);
+    const normal = cell(app({ id: '1' }));
+    expect(normal).toContain('Can send tasks and read its own tasks.');
+    expect(normal).not.toContain('Extra access');
+    const high = cell(app({ id: '2', ...elevated }));
+    expect(high).toContain('<span class="dash-app-elevated">Extra access</span>');
+    expect(high).toContain('manage your workspace settings and guests');
+  });
+
+  it('looks as before when the API sends neither field', () => {
+    const old: Partial<ConnectedApp> = app({ id: '3' });
+    delete old.scopes;
+    delete old.elevated;
+    expect(accessSummary(old)).toBeNull();
+    expect(isElevated(old)).toBe(false);
+    const html = cell(old as ConnectedApp);
+    expect(html).not.toContain('dash-app-access');
+    expect(html).not.toContain('Extra access');
+    expect(html).toBe(
+      '<div class="dash-app"><span class="dash-app-name">ChatGPT</span><span class="dash-muted" translate="no">chatgpt.com</span></div>',
+    );
   });
 });

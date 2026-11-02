@@ -5,7 +5,10 @@ import { api, ApiError, errorText } from './api';
 import { CopyButton } from './CopyButton';
 import { LocalTime } from './LocalTime';
 import {
+  accessSummary,
   appHost,
+  ELEVATED_BADGE,
+  isElevated,
   appName,
   CONNECTED_APPS_PATH,
   MCP_URL,
@@ -32,16 +35,19 @@ async function fetchConnectedApps(): Promise<Load> {
   }
 }
 
-function AppCell({ app }: { app: ConnectedApp }) {
+export function AppCell({ app }: { app: ConnectedApp }) {
+  const access = accessSummary(app);
   return (
     <div className="dash-app">
       <span className="dash-app-name">
         {appName(app)}
         {app.client.verified ? null : <span className="dash-app-flag">Unverified</span>}
+        {isElevated(app) ? <span className="dash-app-elevated">{ELEVATED_BADGE}</span> : null}
       </span>
       <span className="dash-muted" translate="no">
         {appHost(app)}
       </span>
+      {access ? <span className="dash-app-access">{access}</span> : null}
     </div>
   );
 }
