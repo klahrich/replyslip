@@ -16,10 +16,19 @@ export function replyLanguage(language: string | null | undefined, businessLangu
   return language === 'fr' ? 'fr' : 'en';
 }
 
+/**
+ * `text` closed with a period, without doubling one it already ends with: "613 Fencing Inc." stays as is, "Maple"
+ * becomes "Maple.". Use it wherever a sentence ends on a business name.
+ */
+export function endSentence(text: string): string {
+  const trimmed = text.trimEnd();
+  return trimmed.endsWith('.') ? trimmed : `${trimmed}.`;
+}
+
 export function bannerText(name: string): { en: string; fr: string } {
   return {
-    en: `Demo built by Valetto from ${name}'s public pages. Not operated by ${name}. Answers may be wrong.`,
-    fr: `Démo créée par Valetto à partir des pages publiques de ${name}. Non exploitée par ${name}. Les réponses peuvent être erronées.`,
+    en: `Demo built by Valetto from ${name}'s public pages. Not operated by ${endSentence(name)} Answers may be wrong.`,
+    fr: `Démo créée par Valetto à partir des pages publiques de ${endSentence(name)} Non exploitée par ${endSentence(name)} Les réponses peuvent être erronées.`,
   };
 }
 
@@ -36,8 +45,8 @@ export function needsOwnerReply(language: ReplyLanguage): string {
 
 export function offTopicReply(language: ReplyLanguage, name: string): string {
   return language === 'fr'
-    ? `Je peux seulement répondre aux questions sur ${name}.`
-    : `I can only help with questions about ${name}.`;
+    ? `Je peux seulement répondre aux questions sur ${endSentence(name)}`
+    : `I can only help with questions about ${endSentence(name)}`;
 }
 
 export function cappedReply(language: ReplyLanguage): string {
@@ -56,11 +65,11 @@ export function demoNote(reason: HandoffReason, language: ReplyLanguage, name: s
     const live = 'Sur le vrai site, vous pourriez laisser votre courriel ou votre numéro, et l’entreprise vous répondrait.';
     switch (reason) {
       case 'owner_topic':
-        return `Les questions de prix, de disponibilités, de réservations et de plaintes vont directement à ${name}. ${live}`;
+        return `Les questions de prix, de disponibilités, de réservations et de plaintes vont directement à ${endSentence(name)} ${live}`;
       case 'not_in_context':
         return `Je n’ai pas trouvé ça sur le site de ${name}, alors je préfère transmettre la question plutôt que de deviner. ${live}`;
       case 'other_language':
-        return `Je peux discuter en français et en anglais. Pour les autres langues, je transmettrais votre question à ${name}. ${live}`;
+        return `Je peux discuter en français et en anglais. Pour les autres langues, je transmettrais votre question à ${endSentence(name)} ${live}`;
       case 'check_failed':
         return `Je n’ai pas de réponse sûre à celle-ci, alors je préfère la transmettre à ${name} plutôt que de deviner. ${live}`;
     }
@@ -68,11 +77,11 @@ export function demoNote(reason: HandoffReason, language: ReplyLanguage, name: s
   const live = "On the live site, you could leave your email or phone and they'd get back to you.";
   switch (reason) {
     case 'owner_topic':
-      return `Prices, availability, bookings and complaints always go straight to ${name}. ${live}`;
+      return `Prices, availability, bookings and complaints always go straight to ${endSentence(name)} ${live}`;
     case 'not_in_context':
       return `I couldn't find this on ${name}'s website, so I'd pass it to them rather than guess. ${live}`;
     case 'other_language':
-      return `I can chat in English and French. For other languages, I'd pass your question to ${name}. ${live}`;
+      return `I can chat in English and French. For other languages, I'd pass your question to ${endSentence(name)} ${live}`;
     case 'check_failed':
       return `I'm not sure about this one, so I'd pass it to ${name} rather than guess. ${live}`;
   }
