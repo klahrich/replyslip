@@ -105,7 +105,8 @@ const TABS: AppTab[] = [
         />
         <p className="cx-fine">
           Sending tasks needs a Business, Enterprise or Edu plan, on the web. On Business, only an admin or owner can
-          add it. On Pro, it can look things up but can’t send tasks.
+          add it. OpenAI says Pro can connect custom servers with read and fetch access only, so sending tasks won’t
+          work there.
         </p>
       </>
     ),
@@ -117,8 +118,8 @@ const TABS: AppTab[] = [
       <>
         <ul className="cx-apps">
           <li>
-            <b>Cursor:</b> add Valetto to <code translate="no">~/.cursor/mcp.json</code>, then turn it on under{' '}
-            <b>Customize</b> and sign in when Cursor asks.
+            <b>Cursor:</b> add Valetto to <code translate="no">~/.cursor/mcp.json</code>. It shows up under{' '}
+            <b>Customize</b> in the sidebar, where you can switch it on or off. Sign in when Cursor asks.
             <CopyBlock text={CURSOR_JSON} label="Cursor settings copied" pre />
           </li>
           <li>
