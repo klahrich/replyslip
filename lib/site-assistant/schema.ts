@@ -9,6 +9,8 @@ export const SITE_LANGUAGES = ['en', 'fr', 'other'] as const;
 export const OWNER_ONLY_TOPICS = new Set<string>(['price', 'availability', 'booking', 'complaint']);
 
 export const SITE_REPLY_MAX = 1_200;
+/** The part of a needs_owner question the context answers (shown before the fixed handoff line). */
+export const SITE_ANSWERED_PART_MAX = 800;
 export const SITE_SOURCE_MAX = 300;
 export const SITE_SOURCES_MAX = 5;
 
@@ -16,7 +18,7 @@ export const SITE_SOURCES_MAX = 5;
 export const SITE_ANSWER_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['status', 'reply', 'topic', 'sources', 'owner_question', 'language'],
+  required: ['status', 'reply', 'topic', 'sources', 'owner_question', 'answered_part', 'language'],
   properties: {
     status: { type: 'string', enum: [...SITE_STATUSES] },
     reply: { type: 'string', description: `Shown to the visitor. At most ${SITE_REPLY_MAX} characters.` },
@@ -31,6 +33,11 @@ export const SITE_ANSWER_JSON_SCHEMA = {
       type: ['string', 'null'],
       description: 'One sentence for the business owner when status is needs_owner, else null.',
     },
+    answered_part: {
+      type: ['string', 'null'],
+      description:
+        `When status is needs_owner: the answer to the parts of the question <business_context> clearly answers, at most ${SITE_ANSWERED_PART_MAX} characters. Null when no part is answerable, and when status is not needs_owner.`,
+    },
     language: { type: 'string', enum: [...SITE_LANGUAGES] },
   },
 } as const;
@@ -43,6 +50,8 @@ export const siteAnswerSchema = z
     topic: z.enum(SITE_TOPICS),
     sources: z.array(z.string().max(SITE_SOURCE_MAX)).max(SITE_SOURCES_MAX),
     owner_question: z.string().max(500).nullable(),
+    // Optional on our side so an output without it still parses (as null): the provider's strict mode sends it.
+    answered_part: z.string().max(SITE_ANSWERED_PART_MAX).nullable().default(null),
     language: z.enum(SITE_LANGUAGES),
   })
   .strict();

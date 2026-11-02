@@ -135,3 +135,27 @@ export function applyRules(answer: SiteModelAnswer, normalizedContext: string, c
   if (unknownContactDetail(answer.reply, contacts)) return owner('contact_detail');
   return { status: 'answered', decidedBy: 'answered', kept, dropped };
 }
+
+/** Owner rules after which the parts of the question the context answers can still be shown (a mixed question). */
+const PARTIAL_OK: ReadonlySet<DecidedBy> = new Set<DecidedBy>(['keyword_visitor', 'owner_topic', 'model_needs_owner']);
+
+/**
+ * The model's answer to the answerable parts of a needs_owner question, when it is safe to show before the handoff
+ * line; else null (the whole question is handed off, as before). The same checks as an answered reply: at least one
+ * kept quote, no owner word the kept quotes don't use (so no invented price, availability or commitment), and no URL,
+ * email or phone not in the pages. Never after a language, quote, keyword_reply or contact rule.
+ */
+export function checkedAnsweredPart(
+  answer: SiteModelAnswer,
+  outcome: RuleOutcome,
+  contacts: ContactIndex,
+): string | null {
+  if (outcome.status !== 'needs_owner' || !PARTIAL_OK.has(outcome.decidedBy)) return null;
+  if (answer.language === 'other') return null;
+  const part = answer.answered_part?.trim();
+  if (!part) return null;
+  if (outcome.kept.length === 0) return null;
+  if (ungroundedOwnerKeyword(part, outcome.kept)) return null;
+  if (unknownContactDetail(part, contacts)) return null;
+  return part;
+}

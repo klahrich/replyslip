@@ -1,5 +1,6 @@
 /**
- * Fixed server text (spec 4.2). The visitor never sees model text for needs_owner, off_topic or capped.
+ * Fixed server text (spec 4.2). The visitor never sees model text for off_topic or capped. A needs_owner reply is
+ * fixed text, except for a checked partial answer placed before the fixed handoff line (partialHandoffReply).
  * Demo replies never ask for an email or phone: the demo takes no visitor contact.
  */
 export type ReplyLanguage = 'en' | 'fr';
@@ -41,6 +42,15 @@ export function noticeText(): { en: string; fr: string } {
 
 export function needsOwnerReply(language: ReplyLanguage): string {
   return language === 'fr' ? 'Je vérifie avec l’équipe et je vous reviens.' : "I'll check with the team and get back to you.";
+}
+
+/**
+ * A needs_owner reply that first answers the parts of the question the business's pages cover (`answered`, model
+ * text the server already checked), then hands off only the rest with fixed server text.
+ */
+export function partialHandoffReply(answered: string, language: ReplyLanguage): string {
+  const rest = language === 'fr' ? 'Pour le reste, je vérifie avec l’équipe et je vous reviens.' : "For the rest, I'll check with the team and get back to you.";
+  return `${answered.trim()}\n\n${rest}`;
 }
 
 export function offTopicReply(language: ReplyLanguage, name: string): string {
