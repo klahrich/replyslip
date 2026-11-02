@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { MarkIcon } from '../Mark';
+import { endSentence } from '@/app/(customer)/_lib/sentence';
 
 /** The owner's branding: a main colour and an optional accent (falls back to the main colour). */
 type Brand = { name: string; main: string; accent?: string; logo: ReactNode };
@@ -235,7 +236,7 @@ function SceneScreen({ s, n, state }: { s: Scene; n: number; state: 'on' | 'out'
         </li>
       </ul>
       <div className="vt-chat">
-        <p className="vt-b vt-bot vt-hello">Hi {s.customer}. Pick a job to start.</p>
+        <p className="vt-b vt-bot vt-hello">Hi {endSentence(s.customer)} Pick a job to start.</p>
         <div className="vt-after">
           <p className="vt-b vt-me vt-ask">
             <small>{s.jobs[0]}</small>
@@ -257,7 +258,7 @@ function SceneScreen({ s, n, state }: { s: Scene; n: number; state: 'on' | 'out'
       <div className="vt-form" role="group" aria-label={`${s.jobs[0]} form`}>
         <div className="vt-form-top">
           <b>{s.jobs[0]}</b>
-          <small>Your request goes to {s.brand.name}.</small>
+          <small>Your request goes to {endSentence(s.brand.name)}</small>
         </div>
         {s.fields.map((f) =>
           Array.isArray(f) ? (

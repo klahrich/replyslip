@@ -6,6 +6,7 @@ import { LocalTime } from './LocalTime';
 import { CopyButton } from './CopyButton';
 import { CustomerLinks } from './CustomerLinks';
 import type { Invite, InvitesResponse, NewInvite, Offer } from './types';
+import { endSentence } from '@/app/(customer)/_lib/sentence';
 
 /** Mirrors the INVITE_* and MAX_SHARE_DAILY_CAP limits in lib/constants. The API checks them too. */
 const MAX_USES = 1_000;
@@ -31,7 +32,7 @@ function customerMessage(made: NewInvite, agentName: string): string {
   return [
     hello,
     '',
-    `You can now connect your AI agent to our ${agentName}. No Valetto account needed.`,
+    `You can now connect your AI agent to our ${endSentence(agentName)} No Valetto account needed.`,
     'Paste this into your agent:',
     '',
     ...made.agent_prompt.split('\n').map((line) => `  ${line}`),

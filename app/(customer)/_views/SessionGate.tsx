@@ -6,6 +6,7 @@ import { CenteredFrame } from '../_components/Frame';
 import { EmailSignIn, SignInCard } from '../_components/EmailSignIn';
 import { UNAUTHORIZED_EVENT } from '../_lib/api';
 import { agentIdFromPath, useRememberedBranding } from '../_lib/brandMemory';
+import { endSentence } from '@/app/(customer)/_lib/sentence';
 
 /**
  * When any /api/v1/c call answers 401 (no session, or it expired), the whole page becomes an email-code
@@ -28,7 +29,7 @@ export function SessionGate({ children }: { children: React.ReactNode }) {
       <SignInCard>
         <EmailSignIn
           title="Sign in to continue"
-          intro={`Enter the email you used with ${branding?.display_name ?? 'this business'}. We'll send you a 6-digit code.`}
+          intro={`Enter the email you used with ${endSentence(branding?.display_name ?? 'this business')} We'll send you a 6-digit code.`}
           onSignedIn={() => {
             setGeneration((g) => g + 1);
             setSignedOut(false);
