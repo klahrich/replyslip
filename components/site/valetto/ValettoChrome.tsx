@@ -4,6 +4,7 @@ import { MarkIcon } from '@/components/site/Mark';
 
 export const EARLY_ACCESS = '/early-access';
 export const AGENT_TO_AGENT = '/agent-to-agent';
+export const CONNECT = '/connect';
 
 /** The Valetto subpages' top bar: the mark back to /valetto and one link on the right. */
 export function ValettoTop({ children }: { children?: ReactNode }) {
@@ -18,7 +19,7 @@ export function ValettoTop({ children }: { children?: ReactNode }) {
   );
 }
 
-/** Footer shared by the Valetto pages: the agent-to-agent guide, then the legal links (Valetto drafts). */
+/** Footer shared by the Valetto pages: the agent-to-agent and connect guides, then the legal links (Valetto drafts). */
 export function ValettoFoot() {
   return (
     <footer className="foot vt-foot">
@@ -32,6 +33,9 @@ export function ValettoFoot() {
       <p className="foot-legal">
         <Link className="link" href={AGENT_TO_AGENT}>
           Agent-to-agent messages
+        </Link>
+        <Link className="link" href={CONNECT}>
+          Connect an AI app
         </Link>
         <Link className="link" href="/privacy">
           Privacy

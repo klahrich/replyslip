@@ -1,0 +1,416 @@
+/* valetto.tech/connect: the "connect your AI app" guide. Scoped under .cx; Martian Mono headings, Bricolage Grotesque text
+   (fonts from ../valetto/layout.tsx via ./layout.tsx). Reuses the copy box (hw-cp) from how-it-works/sharing.css. */
+.lp.cx main {
+  margin: 0;
+  padding: 0 var(--m);
+  max-width: none;
+}
+.cx h1,
+.cx h2 {
+  font-family: var(--vt-mono);
+  font-variation-settings: "wdth" 87.5;
+  letter-spacing: -0.045em;
+  font-weight: 500;
+}
+.cx .cx-hero {
+  margin-top: clamp(36px, 7vh, 88px);
+  max-width: 760px;
+}
+.cx .cx-kicker {
+  font-family: var(--vt-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--accent);
+  margin-bottom: 14px;
+}
+.cx .cx-hero h1 {
+  font-size: clamp(2rem, 1.2rem + 3vw, 3.25rem);
+  line-height: 1.06;
+}
+.cx .cx-lead {
+  margin-top: 16px;
+  font-size: var(--s-lead);
+  line-height: 1.45;
+  max-width: 34em;
+  color: color-mix(in srgb, var(--ink) 80%, var(--muted));
+}
+.cx .cx-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: clamp(24px, 4vw, 36px);
+}
+.cx .cx-toc a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: var(--s-small);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--surface-2);
+  transition: background-color 0.18s ease;
+}
+.cx .cx-toc a:hover {
+  background: var(--surface-2);
+}
+.cx .cx-toc b,
+.cx .cx-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 600 0.75rem/1 var(--vt-mono);
+  flex: none;
+}
+
+/* steps: text on the left, the picture on the right; stacked on phones */
+.cx .cx-steps {
+  list-style: none;
+  margin: clamp(48px, 7vw, 88px) 0 0;
+  padding: 0;
+  display: grid;
+  gap: clamp(56px, 8vw, 96px);
+}
+.cx .cx-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: clamp(24px, 4vw, 56px);
+  align-items: start;
+  scroll-margin-top: 24px;
+}
+.cx .cx-n {
+  font-family: var(--vt-mono);
+  font-size: clamp(2.25rem, 1.6rem + 2.4vw, 3.25rem);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--accent);
+  margin: 0 0 8px;
+}
+.cx .cx-step h2 {
+  font-size: clamp(1.375rem, 1.1rem + 1vw, 1.875rem);
+  line-height: 1.15;
+}
+.cx .cx-body {
+  margin-top: 12px;
+  line-height: 1.55;
+}
+.cx .cx-body > p + p,
+.cx .cx-body > * + p {
+  margin-top: 12px;
+}
+.cx .cx-fine {
+  font-size: var(--s-small);
+  color: var(--muted);
+  line-height: 1.5;
+}
+.cx code {
+  font-family: var(--vt-mono);
+  font-size: 0.85em;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+/* step 1: the link, big */
+.cx .cx-copy {
+  padding: clamp(18px, 3vw, 28px);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--surface-2);
+}
+.cx .cx-copy-l {
+  margin: 0 0 10px;
+  font-family: var(--vt-mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.cx .cx-copy .hw-cp {
+  align-items: center;
+  padding: 10px 10px 10px 16px;
+}
+.cx .cx-copy .hw-cp-t {
+  font-size: clamp(0.8125rem, 0.75rem + 0.35vw, 1.0625rem);
+  overflow-wrap: normal;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+/* pictures */
+.cx .cx-shot {
+  margin: 0;
+}
+.cx .cx-frame {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    0 20px 50px -24px rgb(0 0 0 / 0.6),
+    0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.cx .cx-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.cx .cx-step-pic {
+  min-width: 0;
+}
+.cx .cx-step-pic .cx-shot {
+  max-width: 520px;
+  margin-inline: auto;
+}
+.cx #allow .cx-step-pic .cx-shot {
+  max-width: 440px;
+}
+.cx .cx-dot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  font-size: 0.8125rem;
+  box-shadow:
+    0 0 0 3px var(--paper, #fff),
+    0 4px 10px rgb(0 0 0 / 0.35);
+}
+.cx .cx-dot-inline {
+  position: static;
+  transform: none;
+  width: 22px;
+  height: 22px;
+  font-size: 0.6875rem;
+  box-shadow: none;
+  vertical-align: -5px;
+}
+.cx .cx-shot figcaption {
+  margin-top: 12px;
+  font-size: var(--s-small);
+  color: var(--muted);
+}
+
+/* step 4 legend */
+.cx .cx-legend {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.cx .cx-legend li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  line-height: 1.45;
+}
+.cx .cx-legend .cx-dot-inline {
+  margin-top: 1px;
+}
+
+/* step 6: the Connected apps list spans the row under its text */
+.cx #manage {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cx #manage .cx-step-text {
+  max-width: 620px;
+}
+.cx #manage .cx-shot {
+  max-width: none;
+}
+.cx .cx-dot-revoke {
+  left: 90.5%;
+  top: 47%;
+}
+
+/* step 2 tabs */
+.cx .cx-tabs {
+  margin-top: 18px;
+}
+.cx .cx-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--surface-2);
+  width: fit-content;
+  max-width: 100%;
+}
+.cx .cx-tablist button {
+  appearance: none;
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--muted);
+  font: 500 var(--s-small)/1.2 var(--font);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.cx .cx-tablist button[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.cx .cx-tablist button:hover:not([aria-selected="true"]) {
+  color: var(--ink);
+}
+.cx .cx-tablist button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cx .cx-panel {
+  margin-top: 16px;
+}
+.cx .cx-panel .cx-fine {
+  margin-top: 14px;
+}
+.cx .cx-mini {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: m;
+  display: grid;
+  gap: 10px;
+}
+.cx .cx-mini li {
+  counter-increment: m;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  line-height: 1.45;
+}
+.cx .cx-mini li::before {
+  content: counter(m);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: 600 0.6875rem/1 var(--vt-mono);
+}
+.cx .cx-apps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 14px;
+  line-height: 1.5;
+}
+.cx .cx-apps .hw-cp {
+  margin-top: 10px;
+}
+.cx .cx-apps .hw-cp-t {
+  font-size: 0.8125rem;
+}
+
+/* step 5 prompts */
+.cx .cx-prompts {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.cx .cx-prompts .hw-cp {
+  align-items: center;
+  padding: 8px 8px 8px 14px;
+}
+.cx .cx-prompts .hw-cp-t {
+  font-family: var(--font);
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+.cx .cx-prompts .hw-cp-b {
+  height: 32px;
+  padding: 0 12px;
+}
+.cx .cx-body .cx-prompts + .cx-fine {
+  margin-top: 14px;
+}
+
+/* trouble + footnote */
+.cx .cx-trouble {
+  margin-top: clamp(72px, 10vw, 120px);
+  max-width: 760px;
+  scroll-margin-top: 24px;
+}
+.cx .cx-trouble h2 {
+  font-size: clamp(1.5rem, 1.2rem + 1vw, 2rem);
+}
+.cx .cx-trouble dl {
+  margin: 20px 0 0;
+  display: grid;
+  gap: 12px;
+}
+.cx .cx-t {
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--surface-2);
+}
+.cx .cx-t dt {
+  font-weight: 600;
+}
+.cx .cx-t dd {
+  margin: 6px 0 0;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--ink) 85%, var(--muted));
+}
+.cx .cx-t .cx-shot {
+  margin-top: 14px;
+  max-width: 420px;
+}
+.cx .cx-how {
+  margin-top: clamp(48px, 7vw, 72px);
+  max-width: 640px;
+  padding-top: 20px;
+  border-top: 1px solid var(--surface-2);
+}
+.cx .cx-how h2 {
+  font-size: 0.8125rem;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+}
+.cx .cx-how p {
+  margin-top: 8px;
+  font-size: var(--s-small);
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+@media (max-width: 860px) {
+  .cx .cx-step {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cx .cx-step-pic .cx-shot {
+    margin-inline: 0;
+  }
+}
+@media (max-width: 560px) {
+  .cx .cx-dot-revoke {
+    left: 23%;
+    top: 58.8%;
+  }
+  .cx .cx-toc a {
+    font-size: 0.8125rem;
+  }
+  .cx .cx-dot {
+    width: 24px;
+    height: 24px;
+    font-size: 0.75rem;
+  }
+  .cx .cx-t {
+    padding: 16px;
+  }
+}
