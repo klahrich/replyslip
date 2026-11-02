@@ -584,6 +584,11 @@ async function consumeUse(tx: Db, inviteId: string): Promise<void> {
 /**
  * Delete unclaimed invite workspaces that never did anything: older than the idle window,
  * no agent key ever used, and no task, message, or wake. A workspace with history is kept.
+ *
+ * The candidate query applies the same keep rules as the per-row check below, so kept workspaces never take up the
+ * batch. Before, the batch was the first `limit` old unclaimed rows in no particular order: once `limit` kept rows
+ * (used, or carrying a revoked-share block) had piled up, they filled every batch and nothing was deleted again.
+ * The per-row check inside the transaction stays as the authority, since rows can change between the two.
  */
 export async function cleanupUnclaimedInviteWorkspaces(limit = 200, now = new Date()): Promise<{ deleted: number }> {
   const db = getDb();
@@ -591,7 +596,22 @@ export async function cleanupUnclaimedInviteWorkspaces(limit = 200, now = new Da
   const candidates = await db
     .select({ id: workspaces.id })
     .from(workspaces)
-    .where(and(eq(workspaces.origin, 'invite'), isNull(workspaces.claimedAt), lt(workspaces.createdAt, cutoff)))
+    .where(
+      and(
+        eq(workspaces.origin, 'invite'),
+        isNull(workspaces.claimedAt),
+        lt(workspaces.createdAt, cutoff),
+        sql`not exists (select 1 from ${agentKeys} join ${agents} on ${agents.id} = ${agentKeys.agentId}
+          where ${agents.workspaceId} = ${workspaces.id} and ${agentKeys.lastUsedAt} is not null)`,
+        sql`not exists (select 1 from ${tasks}
+          where ${tasks.workspaceId} = ${workspaces.id} or ${tasks.fromWorkspaceId} = ${workspaces.id})`,
+        sql`not exists (select 1 from ${messages} where ${messages.workspaceId} = ${workspaces.id})`,
+        sql`not exists (select 1 from ${wakes} where ${wakes.workspaceId} = ${workspaces.id})`,
+        sql`not exists (select 1 from ${agentShares}
+          where ${agentShares.guestWorkspaceId} = ${workspaces.id} and ${agentShares.status} = 'revoked')`,
+      ),
+    )
+    .orderBy(workspaces.createdAt)
     .limit(limit);
   let deleted = 0;
   for (const candidate of candidates) {

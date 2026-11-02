@@ -562,4 +562,19 @@ describe('cleanup of unclaimed invite workspaces', () => {
     const shares = await getDb().select().from(agentShares).where(eq(agentShares.agentId, o.agentId));
     expect(shares).toHaveLength(2);
   });
+
+  it('still deletes idle ones when more than a batch of old, kept workspaces exist', async () => {
+    // Regression: the batch used to be the first `limit` old unclaimed rows, kept or not. Once that many kept rows
+    // existed (used, or blocked by a revoked share), idle ones were never reached. Older kept rows come first here.
+    const o = await owner();
+    const { token } = await createInvite(o, { max_uses: 10 });
+    for (let i = 0; i < 3; i += 1) {
+      const used = await aged(token, INVITE_WORKSPACE_IDLE_DAYS + 10);
+      await getDb().update(agentKeys).set({ lastUsedAt: new Date() }).where(eq(agentKeys.agentId, used.data.agent.id));
+    }
+    const idle = await aged(token);
+
+    expect(await cleanupUnclaimedInviteWorkspaces(2)).toEqual({ deleted: 1 });
+    expect(await getDb().select().from(workspaces).where(eq(workspaces.id, idle.data.workspace.id))).toHaveLength(0);
+  });
 });
