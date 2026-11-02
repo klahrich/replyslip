@@ -68,19 +68,27 @@ type ListToolsHandler = (request: unknown, ctx: ToolCtx) => unknown;
 /**
  * tools/list shows a token only the tools its scope allows at tools/call (toolAllowed, the same predicate). The
  * McpServer installs its tools/list handler through server.setRequestHandler when the first tool is registered; this
- * wraps that handler for this per-request instance and filters its result. Call before any registerTool. An rsk_
- * key holds every scope, so its list is unchanged.
+ * wraps that handler for this per-request instance and filters its result. Call before any registerTool, and don't
+ * declare the tools capability in the server options (McpServer would then install tools/list in its constructor,
+ * unfiltered). An rsk_ key holds every scope, so its list is unchanged.
+ *
+ * setRequestHandler has two forms, (method, handler) and (method, schemas, handler); mcp-handler uses the second for
+ * events/*. Every call is passed through with its arguments unchanged, except that for tools/list the handler (the
+ * last argument, in either form) is wrapped.
  */
-function filterListedTools(server: McpServerInstance): void {
+export function filterListedTools(server: McpServerInstance): void {
   const lowLevel = server.server;
-  const original = lowLevel.setRequestHandler.bind(lowLevel) as (method: string, handler: ListToolsHandler) => void;
-  const patched = (method: string, handler: ListToolsHandler) => {
-    if (method !== 'tools/list') return original(method, handler);
-    return original(method, async (request, ctx) => {
-      const result = (await handler(request, ctx)) as { tools: { name: string }[] };
+  const original = lowLevel.setRequestHandler.bind(lowLevel) as (...args: unknown[]) => void;
+  const patched = (...args: unknown[]) => {
+    const handler = args[args.length - 1];
+    if (args[0] !== 'tools/list' || typeof handler !== 'function') return original(...args);
+    const listTools = handler as ListToolsHandler;
+    const filtered: ListToolsHandler = async (request, ctx) => {
+      const result = (await listTools(request, ctx)) as { tools: { name: string }[] };
       const scopes = ctx.http?.authInfo?.scopes;
       return { ...result, tools: result.tools.filter((tool) => toolAllowed(tool.name, scopes)) };
-    });
+    };
+    return original(...args.slice(0, -1), filtered);
   };
   (lowLevel as unknown as { setRequestHandler: typeof patched }).setRequestHandler = patched;
 }
