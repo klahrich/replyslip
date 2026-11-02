@@ -8,7 +8,7 @@ import { setCimdFetcherForTests } from '@/lib/oauth/cimd';
 import { disableClient } from '@/lib/oauth/clients';
 import { mcpAuthHandler } from '@/lib/mcp-server';
 import { RSK_SCOPES } from '@/lib/oauth/config';
-import { ELEVATED_SCOPE_COPY, UNVERIFIED_ELEVATED_WARNING, grantedScope } from '@/lib/oauth/consent';
+import { COMBINED_ELEVATED_WARNING, ELEVATED_SCOPE_COPY, UNVERIFIED_ELEVATED_WARNING, grantedScope } from '@/lib/oauth/consent';
 import { protectedResourceMetadata } from '@/lib/oauth/metadata';
 import { TOOL_SCOPES, toolAllowed } from '@/lib/oauth/scopes';
 import { setOAuthClockForTests } from '@/lib/oauth/tokens';
@@ -54,8 +54,11 @@ async function grantRow(accessToken: string) {
   return grant!;
 }
 
-function connectWith(owner: Owner, scope: string, optIn?: boolean, name = 'chatgpt') {
-  return connect(owner, { mode: 'new', name }, { scope }, optIn === undefined ? {} : { grant_owner: optIn });
+const BOTH = ['agent:respond', 'agent:owner'];
+/** `grant`: true ticks both boxes, false ticks none, a list ticks those; undefined leaves grant_scopes out. */
+function connectWith(owner: Owner, scope: string | null, grant?: boolean | string[], name = 'chatgpt') {
+  const grantScopes = grant === undefined ? undefined : grant === true ? BOTH : grant === false ? [] : grant;
+  return connect(owner, { mode: 'new', name }, { scope }, grantScopes === undefined ? {} : { grant_scopes: grantScopes });
 }
 
 describe('metadata', () => {
@@ -97,9 +100,10 @@ describe('consent view', () => {
     expect(plain.view.client.verified).toBe(true);
     expect(plain.view.extra_scopes).toEqual({
       offered: offered([]),
-      opt_in_field: 'grant_owner',
+      opt_in_field: 'grant_scopes',
       unverified_client: false,
       warning: null,
+      combined_warning: COMBINED_ELEVATED_WARNING,
       connection_days: 30,
     });
     const none = await startConnect(owner, { scope: null });
@@ -127,7 +131,7 @@ describe('consent view', () => {
 });
 
 describe('consent POST', () => {
-  it('grants the higher scopes only with grant_owner: true, whether or not the app asked, and lists tools per scope', async () => {
+  it('grants each ticked higher scope, whether or not the app asked, and lists tools per scope', async () => {
     const owner = await signIn();
     const without = await connectWith(owner, ALL, undefined, 'plain');
     expect(without.tokens.scope).toBe('agent');
@@ -143,20 +147,48 @@ describe('consent POST', () => {
     // The common case: the app follows the 401 challenge (agent) or asks for nothing. The opt-in still grants all,
     // and the token response's scope says what was granted (RFC 6749 §3.3).
     for (const [scope, name] of [['agent', 'claude'], [null, 'cursor'], ['agent:respond', 'partial']] as const) {
-      const app = await connectWith(owner, scope as string, true, name);
+      const app = await connectWith(owner, scope, true, name);
       expect(app.tokens.scope).toBe(ALL);
       expect((await grantRow(app.tokens.access_token)).scope).toBe(ALL);
       expect(await names(app.tokens.access_token)).toEqual(Object.keys(TOOL_SCOPES).sort());
     }
   });
 
-  it('lists tools per scope for a grant holding only one higher scope', async () => {
+  it('each checkbox is separate: ticking one grants only that one', async () => {
     const owner = await signIn();
     for (const [extra, tools] of [['agent:respond', RESPOND_TOOLS], ['agent:owner', OWNER_TOOLS]] as const) {
-      const app = await connectWith(owner, 'agent', false, extra.replace(':', '-'));
-      await getDb().update(oauthGrants).set({ scope: `agent ${extra}` }).where(eq(oauthGrants.id, (await grantRow(app.tokens.access_token)).id));
+      // Ticked independently of what the app asked for (here: the other one, or both).
+      const app = await connectWith(owner, ALL, [extra], extra.replace(':', '-'));
+      expect(app.tokens.scope).toBe(`agent ${extra}`);
+      expect((await grantRow(app.tokens.access_token)).scope).toBe(`agent ${extra}`);
       expect(await names(app.tokens.access_token)).toEqual([...AGENT_TOOLS, ...tools].sort());
     }
+    // Order and repeats don't matter: canonical order, no repeats (at most two values are accepted).
+    const reversed = await connectWith(owner, 'agent', ['agent:owner', 'agent:respond'], 'reversed');
+    expect(reversed.tokens.scope).toBe(ALL);
+    const twice = await connectWith(owner, 'agent', ['agent:owner', 'agent:owner'], 'twice');
+    expect(twice.tokens.scope).toBe('agent agent:owner');
+  });
+
+  it('rejects unknown grant_scopes values and the old grant_owner field', async () => {
+    const owner = await signIn();
+    for (const extra of [{ grant_scopes: ['agent'] }, { grant_scopes: ['admin'] }, { grant_scopes: 'agent:owner' }, { grant_scopes: [...BOTH, 'agent:owner'] }, { grant_owner: true }]) {
+      const started = await startConnect(owner, { scope: ALL });
+      const res = await postConsent(
+        owner,
+        {
+          request_id: started.view.request_id,
+          csrf_token: started.view.csrf_token,
+          decision: 'allow',
+          workspace_id: started.view.workspaces[0]!.id,
+          agent: { mode: 'new', name: 'chatgpt' },
+          ...extra,
+        },
+        { binding: started.binding },
+      );
+      expect(res.status, JSON.stringify(extra)).toBe(400);
+    }
+    expect(await getDb().select().from(oauthGrants)).toHaveLength(0);
   });
 
   it('an opted-in token can call the higher tools; an agent-only one still gets insufficient_scope', async () => {
@@ -190,6 +222,10 @@ describe('consent POST', () => {
     expect((await grantRow(plain.tokens.access_token)).absoluteExpiresAt.getTime()).toBe(now + 365 * DAY);
     const full = await connectWith(owner, ALL, true, 'full');
     expect((await grantRow(full.tokens.access_token)).absoluteExpiresAt.getTime()).toBe(now + 30 * DAY);
+    const one = await connectWith(owner, 'agent', ['agent:respond'], 'one');
+    expect((await grantRow(one.tokens.access_token)).absoluteExpiresAt.getTime()).toBe(now + 30 * DAY);
+    const other = await connectWith(owner, 'agent', ['agent:owner'], 'other');
+    expect((await grantRow(other.tokens.access_token)).absoluteExpiresAt.getTime()).toBe(now + 30 * DAY);
     vi.stubEnv('MCP_OAUTH_OWNER_MAX_DAYS', '7');
     const short = await connectWith(owner, ALL, true, 'short');
     expect((await grantRow(short.tokens.access_token)).absoluteExpiresAt.getTime()).toBe(now + 7 * DAY);
@@ -205,9 +241,11 @@ describe('consent POST', () => {
   });
 
   it('a disabled client never gets the higher scope', async () => {
-    expect(grantedScope(true, { disabledAt: new Date() })).toBe('agent');
-    expect(grantedScope(true, { disabledAt: null })).toBe(ALL);
-    expect(grantedScope(false, { disabledAt: null })).toBe('agent');
+    expect(grantedScope(BOTH, { disabledAt: new Date() })).toBe('agent');
+    expect(grantedScope(['agent:owner'], { disabledAt: new Date() })).toBe('agent');
+    expect(grantedScope(BOTH, { disabledAt: null })).toBe(ALL);
+    expect(grantedScope(['agent:owner'], { disabledAt: null })).toBe('agent agent:owner');
+    expect(grantedScope([], { disabledAt: null })).toBe('agent');
 
     const owner = await signIn();
     const started = await startConnect(owner, { scope: ALL });
@@ -221,7 +259,7 @@ describe('consent POST', () => {
         decision: 'allow',
         workspace_id: started.view.workspaces[0]!.id,
         agent: { mode: 'new', name: 'chatgpt' },
-        grant_owner: true,
+        grant_scopes: BOTH,
       },
       { binding: started.binding },
     );
@@ -250,8 +288,7 @@ describe('refresh', () => {
 
   it('a one-higher-scope grant refreshes to the same scope, not more', async () => {
     const owner = await signIn();
-    const respond = await connectWith(owner, 'agent', false);
-    await getDb().update(oauthGrants).set({ scope: 'agent agent:respond' }).where(eq(oauthGrants.id, (await grantRow(respond.tokens.access_token)).id));
+    const respond = await connectWith(owner, 'agent', ['agent:respond']);
     const asked = await token({
       grant_type: 'refresh_token',
       refresh_token: respond.tokens.refresh_token!,
@@ -270,7 +307,7 @@ describe('MCP_OAUTH_OWNER_SCOPE off', () => {
     vi.stubEnv('MCP_OAUTH_OWNER_SCOPE', '');
     const owner = await signIn();
     const started = await startConnect(owner, { scope: ALL });
-    expect(started.view.extra_scopes).toMatchObject({ offered: [], unverified_client: false, warning: null, connection_days: null });
+    expect(started.view.extra_scopes).toMatchObject({ offered: [], unverified_client: false, warning: null, combined_warning: null, connection_days: null });
     const app = await connectWith(owner, ALL, true);
     expect(app.tokens.scope).toBe('agent');
     const grant = await grantRow(app.tokens.access_token);
@@ -290,7 +327,7 @@ describe('MCP_OAUTH_OWNER_SCOPE off', () => {
         decision: 'allow',
         workspace_id: started.view.workspaces[0]!.id,
         agent: { mode: 'new', name: 'chatgpt' },
-        grant_owner: true,
+        grant_scopes: BOTH,
       },
       { binding: started.binding },
     );
@@ -318,6 +355,32 @@ describe('MCP_OAUTH_OWNER_SCOPE off', () => {
     expect(refused.payload.error).toBe('insufficient_scope');
     const refreshed = await token({ grant_type: 'refresh_token', refresh_token: full.tokens.refresh_token!, client_id: CHATGPT_CLIENT_ID });
     expect(refreshed.data.scope).toBe('agent');
+  });
+});
+
+describe('MCP_OAUTH_OWNER_SCOPE off, then on again', () => {
+  it('restores a still-unexpired elevated grant; an expired one stays gone', async () => {
+    const owner = await signIn();
+    const full = await connectWith(owner, ALL, true, 'full');
+    const plain = await connectWith(owner, ALL, false, 'plain');
+    vi.stubEnv('MCP_OAUTH_OWNER_SCOPE', '');
+    expect(await names(full.tokens.access_token)).toEqual(AGENT_TOOLS);
+    // A refresh while off says agent, but the grant row keeps what the user granted.
+    const whileOff = await token({ grant_type: 'refresh_token', refresh_token: full.tokens.refresh_token!, client_id: CHATGPT_CLIENT_ID });
+    expect(whileOff.data.scope).toBe('agent');
+    expect((await grantRow(whileOff.data.access_token)).scope).toBe(ALL);
+
+    vi.stubEnv('MCP_OAUTH_OWNER_SCOPE', '1');
+    expect(await names(whileOff.data.access_token)).toEqual(Object.keys(TOOL_SCOPES).sort());
+    const back = await token({ grant_type: 'refresh_token', refresh_token: whileOff.data.refresh_token, client_id: CHATGPT_CLIENT_ID });
+    expect(back.data.scope).toBe(ALL);
+    // An agent-only grant stays agent-only.
+    expect(await names(plain.tokens.access_token)).toEqual(AGENT_TOOLS);
+
+    // Past the 30-day cap nothing comes back: the grant has ended.
+    now += 30 * DAY;
+    const late = await token({ grant_type: 'refresh_token', refresh_token: back.data.refresh_token, client_id: CHATGPT_CLIENT_ID });
+    expect(late.data.error).toBe('invalid_grant');
   });
 });
 

@@ -648,7 +648,7 @@ What's left: an injected task, or an injected question from the target of a task
 
 ### 5.10 Higher scopes for OAuth apps (`MCP_OAUTH_OWNER_SCOPE`)
 
-**Decided (Karim): a second, higher level of access, spelled out on the Allow page and granted only when the user opts in.** While the flag is on, it is offered on every Allow page, whether or not the app asked for it. Claude, ChatGPT and Cursor ask for what the 401 challenge says (`agent`) or for nothing, so an offer that depended on the app asking would never be seen. The user's opt-in is the authority. RFC 6749 §3.3 lets the issued scope differ from the requested one, and the token response's `scope` then says what was granted. It reuses the two internal scope strings from §5.7, so the tool map (`TOOL_SCOPES` in `lib/oauth/scopes.ts`) doesn't change, and `toolAllowed` stays the one check behind both `tools/list` and `tools/call`.
+**Decided (Karim): a second, higher level of access, spelled out on the Allow page and granted only when the user opts in, one scope at a time.** While the flag is on, it is offered on every Allow page, whether or not the app asked for it. Claude, ChatGPT and Cursor ask for what the 401 challenge says (`agent`) or for nothing, so an offer that depended on the app asking would never be seen. The user's opt-in is the authority. RFC 6749 §3.3 lets the issued scope differ from the requested one, and the token response's `scope` then says what was granted. It reuses the two internal scope strings from §5.7, so the tool map (`TOOL_SCOPES` in `lib/oauth/scopes.ts`) doesn't change, and `toolAllowed` stays the one check behind both `tools/list` and `tools/call`.
 
 | Scope | Tools it adds | Consent title |
 | --- | --- | --- |
@@ -659,14 +659,27 @@ What's left: an injected task, or an injected question from the target of a task
 * **Flag.** `MCP_OAUTH_OWNER_SCOPE=1` (off by default, and only with `MCP_OAUTH_ENABLED=1`). While it's off, the higher scopes aren't advertised, a request for them falls back to `agent` without an error, the consent page shows nothing extra, and an older grant that holds them is treated as `agent` only, both at `/api/mcp` and in token responses.
 * **Metadata.** While the flag is on, `scopes_supported` in both metadata documents is `["agent", "agent:respond", "agent:owner"]`. The `/api/mcp` 401 challenge still says `scope="agent"`, so a client that follows the challenge asks for `agent` only. A client must ask for more on purpose.
 * **Authorize.** The request stores `agent` plus the supported higher scopes the client asked for. That is used only to mark `requested_by_client`. `agent` is always the base, also when the client asks for no scope.
-* **Consent view.** While the flag is on, `extra_scopes.offered` always lists both higher scopes, each with a title, an `allows` list and `requested_by_client` (whether the app asked for it). `extra_scopes.unverified_client` and `warning` are set whenever an unverified app (today, any DCR client) gets the offer. `connection_days` gives the shorter connection length.
-* **Consent POST.** `grant_owner: true` grants every offered scope (`agent agent:respond agent:owner`), whatever the app asked for. Absent or false, the user approves `agent` only. The code, grant and token response always say what was granted. A disabled client never gets a higher scope, and the code exchange filters again, in case the flag was turned off in between.
-* **Lifetime.** A grant that holds a higher scope ends after `MCP_OAUTH_OWNER_MAX_DAYS` days (whole days, 1 to 365, default 30) instead of 365. Refresh and access tokens never outlive their grant, so the user approves again after that. An `agent` grant keeps 365 days.
+* **Consent view.** While the flag is on, `extra_scopes.offered` always lists both higher scopes, each with a title, an `allows` list and `requested_by_client` (whether the app asked for it). The page shows each one with its own checkbox, unticked. `opt_in_field` is `"grant_scopes"`. `unverified_client` and `warning` are set whenever an unverified app (today, any DCR client) gets the offer. `combined_warning` is shown when both boxes are ticked: "With both, anyone who sends this app a task could try to get it to change your sharing or guests." `connection_days` gives the shorter connection length.
+
+  ```ts
+  extra_scopes: {
+    offered: Array<{ name: 'agent:respond' | 'agent:owner'; title: string; allows: string[]; requested_by_client: boolean }>;
+    opt_in_field: 'grant_scopes';
+    unverified_client: boolean;
+    warning: string | null;
+    combined_warning: string | null; // set while both are offered; show it only when both are ticked
+    connection_days: number | null;
+  }
+  ```
+* **Consent POST.** `grant_scopes: string[]` lists the ticked boxes. Only `"agent:respond"` and `"agent:owner"` are accepted, at most two entries, in any order. Anything else, a non-array, or the old `grant_owner` field is a `400 validation_error`, like the rest of the strict consent schema. Each ticked scope is added to `agent`, whatever the app asked for. Absent or `[]`: `agent` only. The code, grant and token response always say what was granted, in canonical order. A disabled client never gets a higher scope, and the code exchange filters again, in case the flag was turned off in between. (`grant_owner: boolean`, from the first draft, never shipped and is gone.)
+* **Lifetime.** A grant that holds either higher scope ends after `MCP_OAUTH_OWNER_MAX_DAYS` days (whole days, 1 to 365, default 30) instead of 365. Refresh and access tokens never outlive their grant, so the user approves again after that. An `agent` grant keeps 365 days.
 * **Refresh** never widens: a `scope` that isn't part of the grant is `invalid_scope`, and the response scope is the grant's.
 * **Dashboard.** `GET /api/v1/connected-apps` adds `scopes` (a list, `agent` first) and `elevated` (true when it holds a higher scope) next to the existing `scope` string.
 * **`rsk_` keys** are unchanged: they hold all three scopes whatever the flag says.
+* **Flag off, then on again.** Turning the flag off doesn't rewrite any grant. `oauth_grants.scope` keeps what the user granted. While it's off, `verify.ts` and token responses pass the stored scope through `effectiveScopes`, which drops the higher scopes, so the app gets `agent` tools only and refreshes report `scope: "agent"`. Refresh never writes the grant's scope. Turning the flag back on restores the higher scopes on the next request for any grant still before its `absolute_expires_at` (at most `MCP_OAUTH_OWNER_MAX_DAYS` after consent; the off period doesn't extend it). It does this with the app's current access token, with no re-consent. A grant that ended in between stays ended, and a grant approved while the flag was off holds `agent` only, so it doesn't gain anything. The dashboard's `scopes`/`elevated` show the stored grant even while the flag is off. To take the higher access away for good, disconnect the app or disable the client (which revokes its grants); turning the flag off alone is only a pause.
+* **Considered, not adopted for now:** offering `agent:owner` only to verified apps (CIMD hosts in `MCP_OAUTH_CIMD_HOSTS`). Unverified apps get the same two checkboxes plus `warning`. Revisit if DCR is turned on widely.
 
-What's left: §5.7's prompt-injection concern still holds for a user who opts in. An injected task can make an elevated app reply on received tasks, change sharing or invite guests. The opt-in copy says what it allows, an unverified app gets a warning, and the connection expires in 30 days by default. Disconnect in the dashboard ends it at once.
+What's left: §5.7's prompt-injection concern still holds for a user who opts in. An injected task can make an elevated app reply on received tasks, change sharing or invite guests. That's worst with both ticked, hence `combined_warning`. The checkbox copy says what each one allows, an unverified app gets a warning, and the connection expires in 30 days by default. Disconnect in the dashboard ends it at once.
 
 ## 6. UI contract for LandingBot
 
