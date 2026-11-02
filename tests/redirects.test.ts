@@ -83,6 +83,11 @@ describe('replyslip.com redirects', () => {
       expect(await redirectFor(host, '/valetto/agent-to-agent')).toBe(A2A);
     });
 
+    it(`${host}: /connect goes to valetto.tech/connect`, async () => {
+      expect(await redirectFor(host, '/connect')).toBe('https://valetto.tech/connect');
+      expect(await redirectFor(host, '/connect?ref=x')).toBe('https://valetto.tech/connect?ref=x');
+    });
+
     it(`${host}: API, MCP, token, app and file paths pass through`, async () => {
       for (const path of NEVER_REDIRECTED) expect(await redirectFor(host, path), path).toBeNull();
       // ReplySlip has no /early-access page; only valetto.tech serves one.
@@ -107,7 +112,7 @@ describe('valetto.tech redirects', () => {
   });
 
   it('Valetto pages and their rewrite sources are untouched', async () => {
-    for (const path of ['/', '/early-access', '/agent-to-agent', '/privacy', '/terms', '/valetto', '/valetto/early-access', '/valetto/agent-to-agent', '/valetto/privacy', '/valetto/terms']) {
+    for (const path of ['/', '/connect', '/early-access', '/agent-to-agent', '/privacy', '/terms', '/valetto', '/valetto/early-access', '/valetto/agent-to-agent', '/valetto/privacy', '/valetto/terms']) {
       expect(await redirectFor('valetto.tech', path), path).toBeNull();
     }
   });
@@ -122,6 +127,7 @@ describe('valetto.tech redirects', () => {
     expect(await redirectFor('www.valetto.tech', '/agent-to-agent')).toBe(A2A);
     expect(await redirectFor('www.valetto.tech', '/')).toBe('https://valetto.tech/');
     expect(await redirectFor('www.valetto.tech', '/privacy')).toBe('https://valetto.tech/privacy');
+    expect(await redirectFor('www.valetto.tech', '/connect')).toBe('https://valetto.tech/connect');
     // Unknown paths only get the existing www -> apex hop, never the homepage redirect.
     expect(await redirectFor('www.valetto.tech', '/foo')).toBe('https://valetto.tech/foo');
     expect(await redirectFor('www.valetto.tech', '/agents')).toBe('https://valetto.tech/agents');
@@ -130,7 +136,7 @@ describe('valetto.tech redirects', () => {
 
 describe('preview hosts', () => {
   it('*.vercel.app serves every path as-is', async () => {
-    for (const path of ['/', '/how-it-works', '/valetto', '/privacy']) {
+    for (const path of ['/', '/how-it-works', '/valetto', '/privacy', '/connect']) {
       expect(await redirectFor('replyslip-git-main.vercel.app', path), path).toBeNull();
     }
   });
