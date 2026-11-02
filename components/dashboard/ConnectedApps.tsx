@@ -6,6 +6,12 @@ import { CopyButton } from './CopyButton';
 import { LocalTime } from './LocalTime';
 import {
   appHost,
+  currentAccess,
+  ELEVATED_BADGE,
+  isElevated,
+  isElevationPaused,
+  PAUSED_BADGE,
+  PAUSED_NOTE,
   appName,
   CONNECTED_APPS_PATH,
   MCP_URL,
@@ -32,16 +38,25 @@ async function fetchConnectedApps(): Promise<Load> {
   }
 }
 
-function AppCell({ app }: { app: ConnectedApp }) {
+export function AppCell({ app }: { app: ConnectedApp }) {
+  const paused = isElevationPaused(app);
+  const access = currentAccess(app);
   return (
     <div className="dash-app">
       <span className="dash-app-name">
         {appName(app)}
         {app.client.verified ? null : <span className="dash-app-flag">Unverified</span>}
+        {paused ? (
+          <span className="dash-app-paused">{PAUSED_BADGE}</span>
+        ) : isElevated(app) ? (
+          <span className="dash-app-elevated">{ELEVATED_BADGE}</span>
+        ) : null}
       </span>
       <span className="dash-muted" translate="no">
         {appHost(app)}
       </span>
+      {access ? <span className="dash-app-access">{access}</span> : null}
+      {paused ? <span className="dash-app-access dash-app-paused-note">{PAUSED_NOTE}</span> : null}
     </div>
   );
 }
