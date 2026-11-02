@@ -4,7 +4,11 @@ import { describe, expect, it } from 'vitest';
 import { AppCell } from '@/components/dashboard/ConnectedApps';
 import {
   accessSummary,
+  currentAccess,
   isElevated,
+  isElevationPaused,
+  PAUSED_BADGE,
+  PAUSED_NOTE,
   appHost,
   appName,
   endedAt,
@@ -24,6 +28,7 @@ function app(over: Partial<ConnectedApp> & { id: string }): ConnectedApp {
     scope: 'agent',
     scopes: ['agent'],
     elevated: false,
+    elevated_paused: false,
     approved_by_email: 'owner@example.com',
     created_at: '2026-10-01T15:00:00.000Z',
     last_used_at: null,
@@ -113,10 +118,40 @@ describe('connected app access level (§5.10)', () => {
     expect(high).toContain('manage your workspace settings and guests');
   });
 
+  it('shows a paused note instead of the Extra access badge on an active paused connection', () => {
+    const paused = app({ id: '4', ...elevated, elevated_paused: true });
+    expect(isElevationPaused(paused)).toBe(true);
+    expect(currentAccess(paused)).toBe('Can send tasks and read its own tasks.');
+    const html = cell(paused);
+    expect(html).toContain(`<span class="dash-app-paused">${PAUSED_BADGE}</span>`);
+    expect(html).toContain(PAUSED_NOTE);
+    expect(html).not.toContain('dash-app-elevated');
+    expect(html).not.toContain('manage your workspace settings and guests');
+  });
+
+  it('never shows paused on revoked or expired connections, or when the flag is false or missing', () => {
+    for (const status of ['revoked', 'expired'] as const) {
+      const ended = app({ id: `5-${status}`, ...elevated, elevated_paused: true, status, revoked_at: status === 'revoked' ? '2026-10-20T15:00:00.000Z' : null });
+      expect(isElevationPaused(ended)).toBe(false);
+      const html = cell(ended);
+      expect(html).not.toContain(PAUSED_BADGE);
+      expect(html).not.toContain(PAUSED_NOTE);
+      expect(html).toContain('<span class="dash-app-elevated">Extra access</span>');
+    }
+    const live = app({ id: '6', ...elevated, elevated_paused: false });
+    expect(isElevationPaused(live)).toBe(false);
+    expect(cell(live)).not.toContain(PAUSED_BADGE);
+    const older: Partial<ConnectedApp> = app({ id: '7', ...elevated });
+    delete older.elevated_paused;
+    expect(isElevationPaused(older)).toBe(false);
+    expect(cell(older as ConnectedApp)).toContain('<span class="dash-app-elevated">Extra access</span>');
+  });
+
   it('looks as before when the API sends neither field', () => {
     const old: Partial<ConnectedApp> = app({ id: '3' });
     delete old.scopes;
     delete old.elevated;
+    delete old.elevated_paused;
     expect(accessSummary(old)).toBeNull();
     expect(isElevated(old)).toBe(false);
     const html = cell(old as ConnectedApp);

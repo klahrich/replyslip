@@ -56,6 +56,28 @@ export function isElevated(app: Partial<Pick<ConnectedApp, 'elevated'>>): boolea
   return app.elevated === true;
 }
 
+/** The badge, in place of ELEVATED_BADGE, while a connection's extra access is switched off on our side. */
+export const PAUSED_BADGE = 'Extra access paused';
+
+/** The line under a paused connection: what it can do right now, then that the extra part is on hold. */
+export const PAUSED_NOTE = 'Its extra access is paused for now, so it has normal access only.';
+
+const HIGHER_SCOPES = new Set(['agent:respond', 'agent:owner']);
+
+/**
+ * True only for an active connection the API marks `elevated_paused` (higher access stored, but switched off right now).
+ * Revoked and expired connections never show as paused, and a missing field counts as not paused.
+ */
+export function isElevationPaused(app: Partial<Pick<ConnectedApp, 'elevated_paused' | 'status'>>): boolean {
+  return app.status === 'active' && app.elevated_paused === true;
+}
+
+/** What the row says the app can do: everything in `scopes`, or only the normal part while its extra access is paused. */
+export function currentAccess(app: Partial<Pick<ConnectedApp, 'scopes' | 'elevated_paused' | 'status'>>): string | null {
+  if (!isElevationPaused(app) || !Array.isArray(app.scopes)) return accessSummary(app);
+  return accessSummary({ scopes: app.scopes.filter((scope) => !HIGHER_SCOPES.has(scope)) });
+}
+
 /** Active connections first (the API already sorts newest first), then the past 30 days of revoked or expired ones. */
 export function splitConnectedApps(list: ConnectedApp[]): { current: ConnectedApp[]; past: ConnectedApp[] } {
   return {
