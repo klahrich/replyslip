@@ -46,7 +46,7 @@ function AppCell({ app }: { app: ConnectedApp }) {
   );
 }
 
-/** ChatGPT and Claude connections: one row each, with Revoke. Revoking keeps the agent and its tasks. */
+/** Connected MCP apps (ChatGPT, Claude, Cursor and others): one row each, with Revoke. Revoking keeps the agent and its tasks. */
 export function ConnectedApps() {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -90,7 +90,8 @@ export function ConnectedApps() {
         <div>
           <h2 id="ca-h">Connected apps</h2>
           <p className="dash-muted">
-            ChatGPT and Claude connect as their own agent. They can send tasks and read their own tasks and answers.
+            Apps you connect, like ChatGPT, Claude or Cursor, join as their own agent. They can send tasks and read their
+            own tasks and answers.
           </p>
         </div>
       </div>
@@ -112,13 +113,16 @@ export function ConnectedApps() {
 
       {load.state === 'ready' && current.length === 0 ? (
         <div className="dash-empty dash-apps-empty">
-          <p>No connected apps. To connect one, paste this into ChatGPT or Claude:</p>
+          <p>No connected apps. To connect one, paste this into ChatGPT, Claude, Cursor or another AI app:</p>
           <div className="dash-secret-row">
             <code translate="no" className="dash-secret-value">
               {MCP_URL}
             </code>
             <CopyButton value={MCP_URL} />
           </div>
+          <p>
+            <a className="link" href="https://valetto.tech/connect">How to connect an app</a>
+          </p>
         </div>
       ) : null}
 

@@ -1,6 +1,6 @@
 /**
- * Connected apps (ChatGPT, Claude) as GET /api/v1/connected-apps returns them (lib/oauth/connected-apps.ts,
- * docs/design/mcp-oauth.md §6.4). The type is the server's; these are the dashboard's helpers around it.
+ * Connected apps (ChatGPT, Claude, Cursor and other MCP apps) as GET /api/v1/connected-apps returns them
+ * (lib/oauth/connected-apps.ts, docs/design/mcp-oauth.md §6.4). The type is the server's; these are the dashboard's helpers around it.
  */
 
 import type { ConnectedApp } from '@/lib/oauth/connected-apps';
@@ -14,7 +14,7 @@ export type ConnectedAppsResponse = { connected_apps: ConnectedApp[] };
 export const CONNECTED_APPS_PATH = '/api/v1/connected-apps';
 export const revokePath = (id: string) => `${CONNECTED_APPS_PATH}/${encodeURIComponent(id)}/revoke`;
 
-/** The URL people paste into ChatGPT or Claude. */
+/** The URL people paste into ChatGPT, Claude, Cursor or another MCP app. */
 export const MCP_URL = 'https://valetto.tech/api/mcp';
 
 /** The app's name as we show it: a name we can't confirm stays in quotes. */
