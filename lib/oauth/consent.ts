@@ -49,7 +49,12 @@ export type ConsentView = {
     name_pattern: string;
     reconnect_options: Array<{ id: string; name: string; last_connected_at: string | null }>;
   };
-  scope: { name: 'agent'; allows: string[]; denies: string[] };
+  /**
+   * `denies` is the "It can't" list. While higher scopes are offered (§5.10), lines a checkbox below would allow are
+   * left out, and `cant_heading` is set: show it as the list's heading, because the list then means "without the
+   * extra permissions". Absent while nothing is offered (flag off); the page keeps its own heading.
+   */
+  scope: { name: 'agent'; allows: string[]; denies: string[]; cant_heading?: string };
   /**
    * §5.10: higher scopes offered on top of `agent`. While MCP_OAUTH_OWNER_SCOPE is on, `offered` always lists both
    * (agent:respond, agent:owner), whether or not the app asked for them: the user's opt-in is the authority. While
@@ -92,6 +97,36 @@ export const AGENT_SCOPE_COPY = {
   ],
 };
 
+export const CANT_HEADING_WITH_EXTRAS = "Without extra permissions, it can't";
+
+/**
+ * §5.10: the "It can't" lines each higher scope's `allows` covers, dropped from `denies` while that scope is offered.
+ * A line partly covered is swapped for what stays out of reach (guests: the tools invite and remove, never approve).
+ */
+const DENIES_COVERED_BY: Record<ElevatedScope, Array<{ line: string; replacement?: string }>> = {
+  [SCOPE_RESPOND]: [
+    { line: 'Reply to, finish or message on tasks sent to it' },
+    { line: 'Send messages outside a task it created' },
+  ],
+  [SCOPE_OWNER]: [
+    { line: 'Change your workspace handle or agent sharing' },
+    { line: 'Add, change or remove offers' },
+    { line: 'Invite, approve or remove guests', replacement: 'Approve guests (only you can, in the dashboard)' },
+  ],
+};
+
+function agentScopeView(offered: readonly ElevatedScope[]): ConsentView['scope'] {
+  const base = { name: 'agent' as const, allows: [...AGENT_SCOPE_COPY.allows] };
+  if (offered.length === 0) return { ...base, denies: [...AGENT_SCOPE_COPY.denies] };
+  const covered = new Map(offered.flatMap((name) => DENIES_COVERED_BY[name]).map((rule) => [rule.line, rule.replacement]));
+  const denies = AGENT_SCOPE_COPY.denies.flatMap((line) => {
+    if (!covered.has(line)) return [line];
+    const replacement = covered.get(line);
+    return replacement ? [replacement] : [];
+  });
+  return { ...base, denies, cant_heading: CANT_HEADING_WITH_EXTRAS };
+}
+
 /** Plain-language copy for each higher scope (§5.10). Offered on every consent page while the flag is on. */
 export const ELEVATED_SCOPE_COPY: Record<ElevatedScope, { title: string; allows: string[] }> = {
   [SCOPE_RESPOND]: {
@@ -100,7 +135,7 @@ export const ELEVATED_SCOPE_COPY: Record<ElevatedScope, { title: string; allows:
       'Finish tasks other agents send to it, with an answer',
       'Turn down tasks sent to it, with a reason',
       'Ask the sender a question about a task sent to it',
-      'Send messages on any task it is part of, not only tasks it created',
+      'Send messages on any task it is part of, or outside a task, not only on tasks it created',
     ],
   },
   [SCOPE_OWNER]: {
@@ -198,7 +233,7 @@ export async function loadConsentRequest(req: string, user: SessionUser): Promis
       name_pattern: AGENT_NAME_PATTERN.source,
       reconnect_options: await reconnectOptions(db, workspace.id, client.id),
     },
-    scope: { name: 'agent', allows: [...AGENT_SCOPE_COPY.allows], denies: [...AGENT_SCOPE_COPY.denies] },
+    scope: agentScopeView(offeredExtras()),
     extra_scopes: extraScopesView(request.scope, clientDisplay(client).verified),
     plan: await agentLimitState(workspace.id),
   };
