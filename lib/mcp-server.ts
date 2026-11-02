@@ -24,7 +24,7 @@ import { redeemInvite } from './invites';
 import { answerTask, askTask, completeTask, createTask, failTask, getTask, listTasks, sendMessage } from './tasks';
 import { OAUTH_SCOPE, RSK_SCOPES, SCOPE_RESPOND, oauthEnabled, oauthIssuer, oauthResource } from './oauth/config';
 import { PROTECTED_RESOURCE_METADATA_PATH } from './oauth/metadata';
-import { INSUFFICIENT_SCOPE_MESSAGE, TOOL_SCOPES, hasScope, type ToolName } from './oauth/scopes';
+import { INSUFFICIENT_SCOPE_MESSAGE, hasScope, toolAllowed, type ToolName } from './oauth/scopes';
 import { authenticateOAuthAccessToken } from './oauth/verify';
 
 type ToolCtx = {
@@ -52,11 +52,45 @@ function principalFrom(ctx: ToolCtx): AgentPrincipal {
   };
 }
 
-/** §5.7: the per-tool scope check. rsk_ keys hold every scope, so this only ever stops OAuth tokens. */
+/**
+ * §5.7: the per-tool scope check at tools/call. rsk_ keys hold every scope, so this only ever stops OAuth tokens.
+ * tools/list already hides these tools from such tokens (filterListedTools); this stays as defense in depth.
+ */
 function requireToolScope(ctx: ToolCtx, tool: ToolName): void {
-  if (!hasScope(ctx.http?.authInfo?.scopes, TOOL_SCOPES[tool])) {
+  if (!toolAllowed(tool, ctx.http?.authInfo?.scopes)) {
     throw new HttpError(403, 'insufficient_scope', INSUFFICIENT_SCOPE_MESSAGE);
   }
+}
+
+type McpServerInstance = Parameters<Parameters<typeof createMcpHandler>[0]>[0];
+type ListToolsHandler = (request: unknown, ctx: ToolCtx) => unknown;
+
+/**
+ * tools/list shows a token only the tools its scope allows at tools/call (toolAllowed, the same predicate). The
+ * McpServer installs its tools/list handler through server.setRequestHandler when the first tool is registered; this
+ * wraps that handler for this per-request instance and filters its result. Call before any registerTool, and don't
+ * declare the tools capability in the server options (McpServer would then install tools/list in its constructor,
+ * unfiltered). An rsk_ key holds every scope, so its list is unchanged.
+ *
+ * setRequestHandler has two forms, (method, handler) and (method, schemas, handler); mcp-handler uses the second for
+ * events/*. Every call is passed through with its arguments unchanged, except that for tools/list the handler (the
+ * last argument, in either form) is wrapped.
+ */
+export function filterListedTools(server: McpServerInstance): void {
+  const lowLevel = server.server;
+  const original = lowLevel.setRequestHandler.bind(lowLevel) as (...args: unknown[]) => void;
+  const patched = (...args: unknown[]) => {
+    const handler = args[args.length - 1];
+    if (args[0] !== 'tools/list' || typeof handler !== 'function') return original(...args);
+    const listTools = handler as ListToolsHandler;
+    const filtered: ListToolsHandler = async (request, ctx) => {
+      const result = (await listTools(request, ctx)) as { tools: { name: string }[] };
+      const scopes = ctx.http?.authInfo?.scopes;
+      return { ...result, tools: result.tools.filter((tool) => toolAllowed(tool.name, scopes)) };
+    };
+    return original(...args.slice(0, -1), filtered);
+  };
+  (lowLevel as unknown as { setRequestHandler: typeof patched }).setRequestHandler = patched;
 }
 
 function ok(payload: unknown) {
@@ -101,6 +135,8 @@ const docsByName = new Map(TOOL_DOCS.map((tool) => [tool.name, tool]));
 
 export const mcpHandler = createMcpHandler(
   (server) => {
+    filterListedTools(server);
+
     server.registerTool(
       'send_message',
       {
