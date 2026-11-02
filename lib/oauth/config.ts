@@ -10,11 +10,18 @@ import { isForbiddenScheme, type SchemePolicy } from './redirect';
 export const DEFAULT_ISSUER = 'https://valetto.tech';
 export const DEFAULT_CIMD_HOSTS = ['chatgpt.com', 'claude.ai'];
 export const OAUTH_SCOPE = 'agent';
-/** Internal scope strings: only an rsk_ key holds them. Never advertised, never grantable (§5.7). */
+/**
+ * The higher scopes (§5.10). An rsk_ key always holds them. An OAuth app gets them only while MCP_OAUTH_OWNER_SCOPE=1
+ * and only when the user opts in on the consent page, which offers them whether or not the app asked.
+ */
 export const SCOPE_RESPOND = 'agent:respond';
 export const SCOPE_OWNER = 'agent:owner';
 export const RSK_SCOPES = [OAUTH_SCOPE, SCOPE_RESPOND, SCOPE_OWNER];
-export const OAUTH_SCOPES = [OAUTH_SCOPE];
+/** The extra OAuth scopes above `agent`, in canonical order. */
+export const ELEVATED_SCOPES = [SCOPE_RESPOND, SCOPE_OWNER] as const;
+export type ElevatedScope = (typeof ELEVATED_SCOPES)[number];
+/** Default for MCP_OAUTH_OWNER_MAX_DAYS: how long a connection holding a higher scope lasts before re-approval. */
+export const OWNER_GRANT_DEFAULT_DAYS = 30;
 
 export class OAuthConfigError extends Error {
   constructor(message: string) {
@@ -26,6 +33,31 @@ export class OAuthConfigError extends Error {
 /** The whole OAuth surface. Off unless MCP_OAUTH_ENABLED=1: every OAuth route is 404 and /api/mcp keeps rsk_ only. */
 export function oauthEnabled(): boolean {
   return process.env.MCP_OAUTH_ENABLED?.trim() === '1';
+}
+
+/** Higher OAuth scopes (§5.10). Off unless MCP_OAUTH_OWNER_SCOPE=1: never offered or granted, asks fall back to agent. */
+export function ownerScopeEnabled(): boolean {
+  return oauthEnabled() && process.env.MCP_OAUTH_OWNER_SCOPE?.trim() === '1';
+}
+
+/** The scopes an OAuth app can hold right now: `agent`, plus the higher ones while the flag is on. Advertised as-is. */
+export function oauthScopesSupported(): string[] {
+  return ownerScopeEnabled() ? [OAUTH_SCOPE, ...ELEVATED_SCOPES] : [OAUTH_SCOPE];
+}
+
+export function isElevatedScope(scope: string): scope is ElevatedScope {
+  return (ELEVATED_SCOPES as readonly string[]).includes(scope);
+}
+
+/**
+ * Lifetime of a connection that holds a higher scope: MCP_OAUTH_OWNER_MAX_DAYS whole days (1 to 365), default 30.
+ * Anything else falls back to the default. Refresh tokens never outlive the connection.
+ */
+export function ownerGrantMaxDays(): number {
+  const raw = process.env.MCP_OAUTH_OWNER_MAX_DAYS?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return OWNER_GRANT_DEFAULT_DAYS;
+  const days = Number(raw);
+  return days >= 1 && days <= 365 ? days : OWNER_GRANT_DEFAULT_DAYS;
 }
 
 /** DCR (RFC 7591). Off unless MCP_OAUTH_DCR=1, and only meaningful with MCP_OAUTH_ENABLED=1. */
@@ -140,10 +172,17 @@ export function normalizeResource(value: string): string | null {
   return candidate === expected ? expected : null;
 }
 
-/** §2.5: keep only `agent`; drop offline_access, openid, agent:respond, agent:owner and anything unknown. */
+/**
+ * §2.5, §5.10: the scope a request may carry. Keeps `agent` plus, while MCP_OAUTH_OWNER_SCOPE=1, the higher scopes the
+ * client asked for; drops offline_access, openid and anything unknown. `agent` is always the base, so a request for no
+ * scope (or only unknown ones) is `agent`. Canonical order, no duplicates.
+ */
 export function grantableScope(scope: string | null | undefined): string {
-  const kept = (scope ?? '')
-    .split(' ')
-    .filter((value) => OAUTH_SCOPES.includes(value));
-  return kept.length > 0 ? [...new Set(kept)].join(' ') : OAUTH_SCOPE;
+  return effectiveScopes(scope).join(' ');
+}
+
+/** grantableScope as a list: `agent` first, then each supported higher scope present in `scope`. */
+export function effectiveScopes(scope: string | null | undefined): string[] {
+  const asked = new Set((scope ?? '').split(' '));
+  return [OAUTH_SCOPE, ...oauthScopesSupported().filter((value) => value !== OAUTH_SCOPE && asked.has(value))];
 }

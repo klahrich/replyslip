@@ -3,6 +3,7 @@ import { getDb } from '@/db';
 import { agents, oauthClients, oauthGrants, users } from '@/db/schema';
 import { HttpError } from '../errors';
 import { clientDisplay } from './clients';
+import { isElevatedScope, ownerScopeEnabled } from './config';
 import { revokeGrant } from './grants';
 import { redirectHost } from './redirect';
 import { oauthNow } from './tokens';
@@ -14,7 +15,17 @@ export type ConnectedApp = {
   client: { display_name: string; client_name: string; verified: boolean; kind: 'cimd' | 'dcr' };
   redirect_host: string;
   agent: { id: string; name: string; revoked: boolean };
+  /** Space-separated, as granted. Kept for older callers; prefer `scopes`. */
   scope: string;
+  /** §5.10: the scopes the user granted, `agent` first, e.g. ["agent"] or ["agent", "agent:respond", "agent:owner"]. */
+  scopes: string[];
+  /** True when `scopes` holds a higher scope (agent:respond or agent:owner). Such a connection lasts 30 days by default. */
+  elevated: boolean;
+  /**
+   * §5.10: true when `elevated` but MCP_OAUTH_OWNER_SCOPE is off right now, so the higher access is paused (the app
+   * gets `agent` tools only; it comes back if the flag is turned on before `expires_at`). False otherwise.
+   */
+  elevated_paused: boolean;
   approved_by_email: string;
   created_at: string;
   last_used_at: string | null;
@@ -55,6 +66,9 @@ function serialize(row: Row): ConnectedApp {
     redirect_host: redirectHost(grant.redirectUri),
     agent: { id: agent.id, name: agent.name, revoked: agent.revokedAt !== null },
     scope: grant.scope,
+    scopes: grant.scope.split(' ').filter(Boolean),
+    elevated: grant.scope.split(' ').some(isElevatedScope),
+    elevated_paused: grant.scope.split(' ').some(isElevatedScope) && !ownerScopeEnabled(),
     approved_by_email: row.email,
     created_at: grant.createdAt.toISOString(),
     last_used_at: grant.lastUsedAt?.toISOString() ?? null,

@@ -1,11 +1,11 @@
-import { absoluteIssuerUrl, dcrEnabled, oauthIssuer, oauthResource, OAUTH_SCOPES } from './config';
+import { absoluteIssuerUrl, dcrEnabled, oauthIssuer, oauthResource, oauthScopesSupported } from './config';
 
 /** RFC 9728 protected resource metadata (§2.1). Served at the path-suffixed URL and at the root fallback. */
 export function protectedResourceMetadata() {
   return {
     resource: oauthResource(),
     authorization_servers: [oauthIssuer()],
-    scopes_supported: OAUTH_SCOPES,
+    scopes_supported: oauthScopesSupported(),
     bearer_methods_supported: ['header'],
     resource_name: 'Valetto',
     resource_documentation: absoluteIssuerUrl('/docs/api.md'),
@@ -32,7 +32,7 @@ export function authorizationServerMetadata() {
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: authMethods,
     revocation_endpoint_auth_methods_supported: authMethods,
-    scopes_supported: OAUTH_SCOPES,
+    scopes_supported: oauthScopesSupported(),
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
     service_documentation: absoluteIssuerUrl('/docs/api.md'),

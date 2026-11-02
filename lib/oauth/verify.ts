@@ -4,7 +4,7 @@ import { agents, oauthAccessTokens, oauthClients, oauthGrants, users } from '@/d
 import type { AgentPrincipal } from '../agents';
 import { OAUTH_LAST_USED_THROTTLE_MS } from './constants';
 import { sha256 } from '../crypto';
-import { oauthResource } from './config';
+import { effectiveScopes, oauthResource } from './config';
 import { revokeGrant } from './grants';
 import { hasPrefix, oauthNow } from './tokens';
 
@@ -75,6 +75,7 @@ export async function authenticateOAuthAccessToken(token: string): Promise<OAuth
     grantId: row.grantId,
     clientId: row.clientId,
     expiresAt: Math.floor(row.accessExpiresAt.getTime() / 1000),
-    scopes: row.scope.split(' ').filter(Boolean),
+    // §5.10: while MCP_OAUTH_OWNER_SCOPE is off, higher scopes on an older grant are ignored (fail closed).
+    scopes: effectiveScopes(row.scope),
   };
 }

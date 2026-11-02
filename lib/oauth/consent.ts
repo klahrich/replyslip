@@ -9,7 +9,18 @@ import { HttpError } from '../errors';
 import { planLimitMessage, workspacePlanUsage } from '../plans';
 import { bindingMatches } from './authorize';
 import { clientDisplay, type ClientDisplay } from './clients';
-import { dcrEnabled, oauthIssuer } from './config';
+import {
+  ELEVATED_SCOPES,
+  OAUTH_SCOPE,
+  SCOPE_OWNER,
+  SCOPE_RESPOND,
+  dcrEnabled,
+  effectiveScopes,
+  oauthIssuer,
+  ownerGrantMaxDays,
+  ownerScopeEnabled,
+  type ElevatedScope,
+} from './config';
 import { agentNameBase, createAuthorizationCode, firstFreeAgentName, isReconnectTarget, reconnectOptions } from './grants';
 import { isLoopbackHost, redirectHost, redirectKind, withQuery, type RedirectKind } from './redirect';
 import { REQUEST_TOKEN_PATTERN, oauthNow } from './tokens';
@@ -38,7 +49,33 @@ export type ConsentView = {
     name_pattern: string;
     reconnect_options: Array<{ id: string; name: string; last_connected_at: string | null }>;
   };
-  scope: { name: 'agent'; allows: string[]; denies: string[] };
+  /**
+   * `denies` is the "It can't" list. While higher scopes are offered (§5.10), lines a checkbox below would allow are
+   * left out, and `cant_heading` is set: show it as the list's heading, because the list then means "without the
+   * extra permissions". Absent while nothing is offered (flag off); the page keeps its own heading.
+   */
+  scope: { name: 'agent'; allows: string[]; denies: string[]; cant_heading?: string };
+  /**
+   * §5.10: higher scopes offered on top of `agent`. While MCP_OAUTH_OWNER_SCOPE is on, `offered` always lists both
+   * (agent:respond, agent:owner), whether or not the app asked for them: the user's opt-in is the authority. While
+   * the flag is off it is empty; then show nothing extra. Show each one with its `allows` list behind its own
+   * unchecked checkbox. The POST's `grant_scopes` lists the ticked ones; each is added to `agent`. None ticked (or the
+   * field absent): `agent` only.
+   */
+  extra_scopes: {
+    /** `requested_by_client`: the app asked for this scope itself (most apps ask only for `agent` or nothing). */
+    offered: Array<{ name: ElevatedScope; title: string; allows: string[]; requested_by_client: boolean }>;
+    /** The consent POST field: an array of the ticked `offered[].name` values. */
+    opt_in_field: 'grant_scopes';
+    /** True when `offered` is non-empty and the app is not verified (client.verified false). Show `warning`. */
+    unverified_client: boolean;
+    /** Plain-language warning for an unverified app; null otherwise. */
+    warning: string | null;
+    /** Show when both are ticked; null when fewer than two are offered. */
+    combined_warning: string | null;
+    /** With either one ticked, the connection ends after this many days and must be approved again; null if nothing offered. */
+    connection_days: number | null;
+  };
   plan: { at_agent_limit: boolean; agent_limit: number | null };
 };
 
@@ -59,6 +96,65 @@ export const AGENT_SCOPE_COPY = {
     'Change dashboard settings',
   ],
 };
+
+export const CANT_HEADING_WITH_EXTRAS = "Without extra permissions, it can't";
+
+/**
+ * §5.10: the "It can't" lines each higher scope's `allows` covers, dropped from `denies` while that scope is offered.
+ * A line partly covered is swapped for what stays out of reach (guests: the tools invite and remove, never approve).
+ */
+const DENIES_COVERED_BY: Record<ElevatedScope, Array<{ line: string; replacement?: string }>> = {
+  [SCOPE_RESPOND]: [
+    { line: 'Reply to, finish or message on tasks sent to it' },
+    { line: 'Send messages outside a task it created' },
+  ],
+  [SCOPE_OWNER]: [
+    { line: 'Change your workspace handle or agent sharing' },
+    { line: 'Add, change or remove offers' },
+    { line: 'Invite, approve or remove guests', replacement: 'Approve guests (only you can, in the dashboard)' },
+  ],
+};
+
+function agentScopeView(offered: readonly ElevatedScope[]): ConsentView['scope'] {
+  const base = { name: 'agent' as const, allows: [...AGENT_SCOPE_COPY.allows] };
+  if (offered.length === 0) return { ...base, denies: [...AGENT_SCOPE_COPY.denies] };
+  const covered = new Map(offered.flatMap((name) => DENIES_COVERED_BY[name]).map((rule) => [rule.line, rule.replacement]));
+  const denies = AGENT_SCOPE_COPY.denies.flatMap((line) => {
+    if (!covered.has(line)) return [line];
+    const replacement = covered.get(line);
+    return replacement ? [replacement] : [];
+  });
+  return { ...base, denies, cant_heading: CANT_HEADING_WITH_EXTRAS };
+}
+
+/** Plain-language copy for each higher scope (§5.10). Offered on every consent page while the flag is on. */
+export const ELEVATED_SCOPE_COPY: Record<ElevatedScope, { title: string; allows: string[] }> = {
+  [SCOPE_RESPOND]: {
+    title: 'Work on tasks sent to it',
+    allows: [
+      'Finish tasks other agents send to it, with an answer',
+      'Turn down tasks sent to it, with a reason',
+      'Ask the sender a question about a task sent to it',
+      'Send messages on any task it is part of, or outside a task, not only on tasks it created',
+    ],
+  },
+  [SCOPE_OWNER]: {
+    title: 'Manage your workspace settings and guests',
+    allows: [
+      'Change your workspace handle',
+      'Share or stop sharing your agents',
+      'Add, change or remove offers',
+      'Invite guests, remove them, and see who has access',
+      'Accept invites from other workspaces',
+    ],
+  },
+};
+
+export const COMBINED_ELEVATED_WARNING =
+  'With both, anyone who sends this app a task could try to get it to change your sharing or guests.';
+
+export const UNVERIFIED_ELEVATED_WARNING =
+  "Valetto can't confirm who made this app. Only give it these extra permissions if you trust it.";
 
 const NOT_FOUND = () => new HttpError(404, 'request_not_found', 'This connection request was not found.');
 const EXPIRED = () => new HttpError(410, 'request_expired', 'This connection request has expired. Start again from the app.');
@@ -137,9 +233,46 @@ export async function loadConsentRequest(req: string, user: SessionUser): Promis
       name_pattern: AGENT_NAME_PATTERN.source,
       reconnect_options: await reconnectOptions(db, workspace.id, client.id),
     },
-    scope: { name: 'agent', allows: [...AGENT_SCOPE_COPY.allows], denies: [...AGENT_SCOPE_COPY.denies] },
+    scope: agentScopeView(offeredExtras()),
+    extra_scopes: extraScopesView(request.scope, clientDisplay(client).verified),
     plan: await agentLimitState(workspace.id),
   };
+}
+
+/** The higher scopes offered on the consent page: all of them while the flag is on, none while it is off. */
+function offeredExtras(): readonly ElevatedScope[] {
+  return ownerScopeEnabled() ? ELEVATED_SCOPES : [];
+}
+
+function extraScopesView(requestScope: string, verified: boolean): ConsentView['extra_scopes'] {
+  const asked = new Set(effectiveScopes(requestScope));
+  const offered = offeredExtras().map((name) => ({
+    name,
+    title: ELEVATED_SCOPE_COPY[name].title,
+    allows: [...ELEVATED_SCOPE_COPY[name].allows],
+    requested_by_client: asked.has(name),
+  }));
+  const unverified = offered.length > 0 && !verified;
+  return {
+    offered,
+    opt_in_field: 'grant_scopes',
+    unverified_client: unverified,
+    warning: unverified ? UNVERIFIED_ELEVATED_WARNING : null,
+    combined_warning: offered.length > 1 ? COMBINED_ELEVATED_WARNING : null,
+    connection_days: offered.length > 0 ? ownerGrantMaxDays() : null,
+  };
+}
+
+/**
+ * §5.10: the scope the user actually grants. Always `agent`, plus each offered higher scope the user ticked
+ * (`grant_scopes`), while the flag is on, and never for a disabled client, whether or not the app asked for it.
+ * RFC 6749 §3.3 lets the issued scope differ from the requested one; the token response's `scope` says what was
+ * granted. Canonical order, no duplicates.
+ */
+export function grantedScope(ticked: readonly string[], client: Pick<OAuthClientRow, 'disabledAt'>): string {
+  const chosen = new Set(ticked);
+  const extras = client.disabledAt ? [] : offeredExtras().filter((name) => chosen.has(name));
+  return [OAUTH_SCOPE, ...extras].join(' ');
 }
 
 export const consentBodySchema = z.discriminatedUnion('decision', [
@@ -153,6 +286,8 @@ export const consentBodySchema = z.discriminatedUnion('decision', [
         z.object({ mode: z.literal('new'), name: z.string().min(1).max(200) }).strict(),
         z.object({ mode: z.literal('reconnect'), agent_id: z.string().uuid() }).strict(),
       ]),
+      /** §5.10: the ticked higher scopes from extra_scopes.offered, each added to `agent`. Absent or []: `agent` only. */
+      grant_scopes: z.array(z.enum(ELEVATED_SCOPES)).max(ELEVATED_SCOPES.length).optional(),
     })
     .strict(),
   z
@@ -194,7 +329,8 @@ export async function decideConsent(req: Request, user: WorkspaceUser, body: Con
     return { redirect_to: withQuery(request.redirectUri, { error: 'access_denied', state: request.state, iss }) };
   }
 
-  await clientRow(request.clientId);
+  const client = await clientRow(request.clientId);
+  const scope = grantedScope(body.grant_scopes ?? [], client);
 
   if (body.workspace_id !== user.workspace.id) {
     throw new HttpError(400, 'validation_error', 'Choose your workspace.', {
@@ -248,7 +384,7 @@ export async function decideConsent(req: Request, user: WorkspaceUser, body: Con
       agent,
       redirectUri: request.redirectUri,
       codeChallenge: request.codeChallenge,
-      scope: request.scope,
+      scope,
       resource: request.resource,
     });
   });

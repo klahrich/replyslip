@@ -129,6 +129,7 @@ export async function connect(
   owner: Owner,
   agent: { mode: 'new'; name: string } | { mode: 'reconnect'; agent_id: string } = { mode: 'new', name: 'chatgpt' },
   overrides: Record<string, string | null> = {},
+  consentExtra: Record<string, unknown> = {},
 ) {
   const started = await startConnect(owner, overrides);
   const decided = await postConsent(
@@ -139,6 +140,7 @@ export async function connect(
       decision: 'allow',
       workspace_id: started.view.workspaces[0]!.id,
       agent,
+      ...consentExtra,
     },
     { binding: started.binding },
   );
