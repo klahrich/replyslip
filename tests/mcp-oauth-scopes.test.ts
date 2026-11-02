@@ -10,7 +10,8 @@ import { getDb } from '@/db';
 import { agents, messages, oauthClients, tasks, wakes, workspaces } from '@/db/schema';
 import { mcpAuthHandler } from '@/lib/mcp-server';
 import { setCimdFetcherForTests } from '@/lib/oauth/cimd';
-import { TOOL_SCOPES } from '@/lib/oauth/scopes';
+import { RSK_SCOPES } from '@/lib/oauth/config';
+import { TOOL_SCOPES, toolAllowed } from '@/lib/oauth/scopes';
 import nextConfig from '../next.config';
 import { call, createAgent, createKey, mcpListTools, mcpTool, signIn } from './helpers';
 import { stubCimd } from './oauth-fixtures';
@@ -61,13 +62,45 @@ async function snapshot(workspaceId: string) {
 
 describe('tool scopes', () => {
   it('every registered tool has a scope entry, and the 19 tools are all listed for rsk_', async () => {
-    const { appKey, oauth } = await setup();
+    const { appKey } = await setup();
     const listed = (await mcpListTools(appKey)).map((tool) => tool.name).sort();
     expect(listed).toEqual(Object.keys(TOOL_SCOPES).sort());
     expect(listed).toHaveLength(19);
-    // Tools are not hidden from OAuth clients; the call is refused instead.
-    expect((await mcpListTools(oauth)).map((tool) => tool.name).sort()).toEqual(listed);
     expect(DENIED_TOOLS).toHaveLength(11);
+  });
+
+  it('tools/list for an rsoa_ token leaves out exactly the tools tools/call would refuse', async () => {
+    const { appKey, oauth } = await setup();
+    const full = await mcpListTools(appKey);
+    const listed = await mcpListTools(oauth);
+    const names = listed.map((tool) => tool.name).sort();
+    expect(names).toEqual(
+      ['answer_task', 'create_task', 'get_agent_card', 'get_task', 'list_agents', 'list_tasks', 'send_message', 'whoami'].sort(),
+    );
+    expect(names).toEqual(Object.keys(TOOL_SCOPES).filter((name) => toolAllowed(name, ['agent'])).sort());
+    for (const denied of DENIED_TOOLS) expect(names).not.toContain(denied);
+    // The tools that remain are listed exactly as rsk_ sees them (same schema, title, description).
+    for (const tool of listed) expect(tool).toEqual(full.find((entry) => entry.name === tool.name));
+  });
+
+  it('rsk_ listing is unchanged with agent guests off, and OAuth still sees only agent tools', async () => {
+    const { appKey, oauth } = await setup();
+    vi.stubEnv('VALETTO_AGENT_GUESTS', '');
+    const rsk = (await mcpListTools(appKey)).map((tool) => tool.name);
+    expect(rsk).toHaveLength(18);
+    expect(rsk).not.toContain('redeem_invite');
+    expect((await mcpListTools(oauth)).map((tool) => tool.name)).toHaveLength(8);
+  });
+
+  it('toolAllowed is the shared predicate: rsk_ scopes allow everything, unknown names never pass', () => {
+    for (const name of Object.keys(TOOL_SCOPES)) {
+      expect(toolAllowed(name, [...RSK_SCOPES])).toBe(true);
+      expect(toolAllowed(name, ['agent'])).toBe(TOOL_SCOPES[name as keyof typeof TOOL_SCOPES] === 'agent');
+      expect(toolAllowed(name, undefined)).toBe(false);
+    }
+    expect(toolAllowed('not_a_tool', [...RSK_SCOPES])).toBe(false);
+    expect(toolAllowed('constructor', [...RSK_SCOPES])).toBe(false);
+    expect(toolAllowed('__proto__', [...RSK_SCOPES])).toBe(false);
   });
 
   it('an rsoa_ token gets insufficient_scope on the 11 respond/owner tools and changes nothing', async () => {

@@ -35,3 +35,16 @@ export const OWN_TASKS_ONLY_MESSAGE = 'Connected apps can only message on tasks 
 export function hasScope(scopes: readonly string[] | undefined, needed: string): boolean {
   return Array.isArray(scopes) && scopes.includes(needed);
 }
+
+export function isToolName(name: string): name is ToolName {
+  return Object.hasOwn(TOOL_SCOPES, name);
+}
+
+/**
+ * The one predicate behind both tools/list (a token only sees tools it may call) and the tools/call refusal, so the
+ * two can't drift. A name missing from TOOL_SCOPES is never allowed (fail closed). rsk_ keys hold every scope, so
+ * every tool passes for them.
+ */
+export function toolAllowed(name: string, scopes: readonly string[] | undefined): boolean {
+  return isToolName(name) && hasScope(scopes, TOOL_SCOPES[name]);
+}
