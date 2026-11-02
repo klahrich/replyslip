@@ -58,12 +58,19 @@ describe('keyword pre-check (spec 4.3)', () => {
     }
   });
 
-  it('skips the model on a keyword hit', async () => {
+  it('hands off a keyword hit whatever the model says, after one call', async () => {
+    const { result, calls } = await ask('How much is a patio?', answer({}));
+    expect(calls).toHaveLength(1);
+    expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'keyword_visitor', llmCalled: true });
+    expect(result.body).toBe(needsOwnerReply('en'));
+  });
+
+  it('still hands off a keyword hit as a keyword when the model call fails', async () => {
     const result = await answerVisitorMessage(
       { ...base, visitorMessage: 'How much is a patio?' },
       { transport: NO_MODEL, config: TEST_LLM_CONFIG },
     );
-    expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'keyword_visitor', llmCalled: false, costMicroUsd: 0 });
+    expect(result).toMatchObject({ status: 'needs_owner', decidedBy: 'keyword_visitor', costMicroUsd: 0 });
     expect(result.body).toBe(needsOwnerReply('en'));
   });
 
@@ -514,7 +521,7 @@ describe('server language check (spec 6b)', () => {
 });
 
 describe('fixture questions: keyword pre-check owner share', () => {
-  // Every question goes through the answer function with a fake provider; a keyword hit is the one that never calls it.
+  // Every question goes through the answer function with a fake provider (one call each); a keyword hit always hands off.
   async function measure(file: string) {
     const questions = JSON.parse(readFileSync(join(FIXTURE_DIR, file), 'utf8')) as Record<string, string[] | string>;
     const lines: string[] = [];
@@ -526,9 +533,8 @@ describe('fixture questions: keyword pre-check owner share', () => {
       for (const question of list) {
         const model = fakeModel(() => answer({}));
         const result = await answerVisitorMessage({ ...base, visitorMessage: question }, { transport: model.transport, config: TEST_LLM_CONFIG });
-        const skipped = result.decidedBy === 'keyword_visitor';
-        expect(model.calls.length, question).toBe(skipped ? 0 : 1);
-        if (skipped) hits += 1;
+        expect(model.calls.length, question).toBe(1);
+        if (result.decidedBy === 'keyword_visitor') hits += 1;
       }
       total += list.length;
       owner += hits;

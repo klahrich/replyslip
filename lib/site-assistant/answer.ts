@@ -2,8 +2,8 @@ import { costMicroUsd, estimateInputTokens, siteFallbackLlmConfig, siteLlmConfig
 import { detectVisitorLanguage, findOwnerKeyword, guessLanguage } from './keywords';
 import { callSiteLlm, shouldTryFallback, type SiteLlmTransport } from './llm';
 import { normalizeForMatch } from './normalize';
-import { cappedReply, needsOwnerReply, offTopicReply, replyLanguage } from './replies';
-import { applyRules, contactIndex, type DecidedBy } from './rules';
+import { cappedReply, needsOwnerReply, offTopicReply, partialHandoffReply, replyLanguage } from './replies';
+import { applyRules, checkedAnsweredPart, contactIndex, type DecidedBy } from './rules';
 import { siteAnswerSchema, type SiteLanguage } from './schema';
 
 export type SiteHistoryMessage = { role: 'visitor' | 'assistant'; body: string };
@@ -59,7 +59,7 @@ export type SiteAnswerDeps = {
   config?: SiteLlmConfig;
   /**
    * Called once, right before the model call, with the worst-case cost in micro-USD. Return ok: false to stop
-   * (the caller's caps). Not called when the keyword pre-check or a missing key skips the call.
+   * (the caller's caps). Not called when the language check or a missing key skips the call.
    */
   /**
    * Reserves a worst-case cost atomically against the caps. Called before the first call, and again before a
@@ -82,10 +82,12 @@ export const SITE_INSTRUCTIONS = [
   '- If <business_context> does not clearly answer the question, use status "needs_owner". Never guess.',
   '- For "answered", copy 1 to 3 short supporting passages from <business_context> into "sources", character for character.',
   '- Questions about prices, costs, quotes, availability, scheduling, booking or complaints: status "needs_owner" with the matching topic.',
+  '- A message can ask several things. Use "needs_owner" if any part needs the business (the topics above, or anything <business_context> does not clearly answer); "topic" is the part handed off.',
+  '- With "needs_owner", put the answer to every part <business_context> clearly answers in "answered_part", and copy its supporting passages into "sources" as above. Answer only those parts: say nothing about the handed-off part (no price, availability, timing, promise or next step), and don\'t say you will check with the team; the server adds that line. Use null when no part is answerable, and for any other status.',
   '- Questions unrelated to this business: status "off_topic".',
   '- "language" is the language of the visitor message: "en", "fr" or "other". Reply in that language.',
-  '- Keep "reply" short (under 600 characters), plain text, no markdown.',
-  '- Never include a URL, email address or phone number unless it appears in <business_context>.',
+  '- Keep "reply" and "answered_part" short (under 600 characters), plain text, no markdown. With "needs_owner", "reply" is not shown.',
+  '- Never include a URL, email address or phone number unless it appears in <business_context>, in "reply" or "answered_part".',
   '- "owner_question": one sentence summarizing the question for the owner when status is "needs_owner", else null.',
 ].join('\n');
 
@@ -148,20 +150,24 @@ export function cappedResult(input: SiteAnswerInput, decidedBy: DecidedBy): Site
 export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAnswerDeps = {}): Promise<SiteAnswerResult> {
   const { detected, reply: guessed } = visitorLanguage(input);
 
-  // Rule 8: a keyword hit on the visitor message skips the call; the result would be forced anyway.
-  if (findOwnerKeyword(input.visitorMessage)) return fixedOwner(input, 'keyword_visitor', guessed);
-  // Confidently neither English nor French: the owner answers, with no model call.
-  if (detected === 'other') return fixedOwner(input, 'language_other', 'other');
+  // Rule 8: a keyword hit on the visitor message always hands off. The model is still called, so the other parts of
+  // a mixed question ("Do you do X, and how much?") can be answered from the pages before the handoff line.
+  const visitorKeyword = findOwnerKeyword(input.visitorMessage) !== null;
+  // Without a usable model answer, such a message is handed off for its keyword, as it was before the call.
+  const failed = (decidedBy: DecidedBy): DecidedBy => (visitorKeyword ? 'keyword_visitor' : decidedBy);
+  // Confidently neither English nor French: the owner answers, with no model call (a keyword hit still records as one).
+  if (detected === 'other') return visitorKeyword ? fixedOwner(input, 'keyword_visitor', guessed) : fixedOwner(input, 'language_other', 'other');
 
   const config = deps.config ?? siteLlmConfig();
-  if (!config.apiKey) return fixedOwner(input, 'llm_unconfigured', guessed);
+  if (!config.apiKey) return fixedOwner(input, failed('llm_unconfigured'), guessed);
 
   const promptInput = buildPromptInput(input);
   const estimatedIn = estimateInputTokens(SITE_INSTRUCTIONS.length + promptInput.length + 1_500);
   const worstCase = costMicroUsd(estimatedIn, config.maxOutputTokens, config);
   if (deps.reserve) {
     const decision = await deps.reserve(worstCase);
-    if (!decision.ok) return cappedResult(input, decision.decidedBy);
+    // A keyword question is handed off anyway: a cost cap only skips the call (the answerable part isn't shown).
+    if (!decision.ok) return visitorKeyword ? fixedOwner(input, 'keyword_visitor', guessed) : cappedResult(input, decision.decidedBy);
   }
 
   let result = await callSiteLlm(config, SITE_INSTRUCTIONS, promptInput, deps.transport);
@@ -183,7 +189,7 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
     const fallbackWorstCase = costMicroUsd(estimatedIn, fallbackConfig.maxOutputTokens, fallbackConfig);
     if (deps.reserve) {
       const decision = await deps.reserve(fallbackWorstCase);
-      if (!decision.ok) return fixedOwner(input, 'llm_fallback_capped', guessed, { llmCalled: true, ...spent, model });
+      if (!decision.ok) return fixedOwner(input, failed('llm_fallback_capped'), guessed, { llmCalled: true, ...spent, model });
     }
     model = fallbackConfig.model;
     callConfig = fallbackConfig;
@@ -192,7 +198,7 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
   }
   if (result.kind === 'timeout') {
     // Usage is unknown: charge that call's worst case (plus whatever the failed first call used).
-    return fixedOwner(input, 'llm_timeout', guessed, {
+    return fixedOwner(input, failed('llm_timeout'), guessed, {
       llmCalled: true,
       inputTokens: spent.inputTokens,
       outputTokens: spent.outputTokens,
@@ -207,22 +213,26 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
     costMicroUsd: spent.costMicroUsd + costMicroUsd(result.inputTokens, result.outputTokens, callConfig),
     model,
   };
-  if (result.kind === 'error') return fixedOwner(input, 'llm_error', guessed, usage);
-  if (result.kind === 'invalid') return fixedOwner(input, 'invalid_output', guessed, { ...usage, rawOutput: { error: result.detail } });
+  if (result.kind === 'error') return fixedOwner(input, failed('llm_error'), guessed, usage);
+  if (result.kind === 'invalid') return fixedOwner(input, failed('invalid_output'), guessed, { ...usage, rawOutput: { error: result.detail } });
 
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(result.outputText);
   } catch {
-    return fixedOwner(input, 'invalid_output', guessed, { ...usage, rawOutput: { text: result.outputText.slice(0, 4_000) } });
+    return fixedOwner(input, failed('invalid_output'), guessed, { ...usage, rawOutput: { text: result.outputText.slice(0, 4_000) } });
   }
   const parsed = siteAnswerSchema.safeParse(parsedJson);
-  if (!parsed.success) return fixedOwner(input, 'invalid_output', guessed, { ...usage, rawOutput: parsedJson });
+  if (!parsed.success) return fixedOwner(input, failed('invalid_output'), guessed, { ...usage, rawOutput: parsedJson });
 
   // A confident server detection wins over the model's tag. Undecided (short or close text): the model's tag
   // stands, so a model "other" still sends the message to the owner (rules.ts, language_other).
   const answer = { ...parsed.data, language: detected ?? parsed.data.language };
-  const outcome = applyRules(answer, normalizeForMatch(input.contextMd), contactIndex(input.contextMd));
+  const contacts = contactIndex(input.contextMd);
+  const ruled = applyRules(answer, normalizeForMatch(input.contextMd), contacts);
+  // The language rule stays first; otherwise a keyword in the visitor's message wins over every other rule.
+  const outcome =
+    visitorKeyword && ruled.decidedBy !== 'language_other' ? { ...ruled, status: 'needs_owner' as const, decidedBy: 'keyword_visitor' as const } : ruled;
   const language = answer.language;
   const base = {
     topic: answer.topic,
@@ -239,10 +249,13 @@ export async function answerVisitorMessage(input: SiteAnswerInput, deps: SiteAns
   if (outcome.status === 'off_topic') {
     return { ...base, status: 'off_topic', body: offTopicReply(replyLanguage(language, input.businessLanguage), input.businessName), ownerQuestion: null };
   }
+  // A mixed question: the parts the pages answer (checked like an answered reply), then the fixed handoff line.
+  const answeredPart = checkedAnsweredPart(answer, outcome, contacts);
+  const handoffLanguage = replyLanguage(language, input.businessLanguage);
   return {
     ...base,
     status: 'needs_owner',
-    body: needsOwnerReply(replyLanguage(language, input.businessLanguage)),
+    body: answeredPart ? partialHandoffReply(answeredPart, handoffLanguage) : needsOwnerReply(handoffLanguage),
     ownerQuestion: answer.owner_question?.trim() || input.visitorMessage,
   };
 }

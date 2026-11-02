@@ -1,5 +1,6 @@
 /**
- * Fixed server text (spec 4.2). The visitor never sees model text for needs_owner, off_topic or capped.
+ * Fixed server text (spec 4.2). The visitor never sees model text for off_topic or capped. A needs_owner reply is
+ * fixed text, except for a checked partial answer placed before the fixed handoff line (partialHandoffReply).
  * Demo replies never ask for an email or phone: the demo takes no visitor contact.
  */
 export type ReplyLanguage = 'en' | 'fr';
@@ -43,6 +44,24 @@ export function needsOwnerReply(language: ReplyLanguage): string {
   return language === 'fr' ? 'Je vérifie avec l’équipe et je vous reviens.' : "I'll check with the team and get back to you.";
 }
 
+/**
+ * A needs_owner reply that first answers the parts of the question the business's pages cover (`answered`, model
+ * text the server already checked), then hands off only the rest with fixed server text.
+ */
+export function partialHandoffReply(answered: string, language: ReplyLanguage): string {
+  return `${answered.trim()}\n\n${PARTIAL_HANDOFF_LINE[language]}`;
+}
+
+const PARTIAL_HANDOFF_LINE: Record<ReplyLanguage, string> = {
+  en: "For the rest, I'll check with the team and get back to you.",
+  fr: 'Pour le reste, je vérifie avec l’équipe et je vous reviens.',
+};
+
+/** True when a stored needs_owner body is a partial handoff (an answered part, then the fixed line). */
+export function isPartialHandoff(body: string): boolean {
+  return Object.values(PARTIAL_HANDOFF_LINE).some((line) => body.endsWith(`\n\n${line}`) && body.length > line.length + 2);
+}
+
 export function offTopicReply(language: ReplyLanguage, name: string): string {
   return language === 'fr'
     ? `Je peux seulement répondre aux questions sur ${endSentence(name)}`
@@ -60,13 +79,16 @@ export function cappedReply(language: ReplyLanguage): string {
  * once), and a description of what the live site would do (take an email or phone so the owner can answer). It
  * describes; it never asks, and the demo has no contact step.
  */
-export function demoNote(reason: HandoffReason, language: ReplyLanguage, name: string): string {
+export function demoNote(reason: HandoffReason, language: ReplyLanguage, name: string, opts: { partial?: boolean } = {}): string {
+  // A partial handoff already answered part of the question, so "couldn't find this" would read wrong.
+  const partial = opts.partial === true && reason === 'not_in_context';
   if (language === 'fr') {
     const live = 'Sur le vrai site, vous pourriez laisser votre courriel ou votre numéro, et l’entreprise vous répondrait.';
     switch (reason) {
       case 'owner_topic':
         return `Les questions de prix, de disponibilités, de réservations et de plaintes vont directement à ${endSentence(name)} ${live}`;
       case 'not_in_context':
+        if (partial) return `J’ai trouvé une partie de la réponse sur le site de ${endSentence(name)} Pour le reste, je préfère transmettre la question plutôt que de deviner. ${live}`;
         return `Je n’ai pas trouvé ça sur le site de ${name}, alors je préfère transmettre la question plutôt que de deviner. ${live}`;
       case 'other_language':
         return `Je peux discuter en français et en anglais. Pour les autres langues, je transmettrais votre question à ${endSentence(name)} ${live}`;
@@ -79,6 +101,7 @@ export function demoNote(reason: HandoffReason, language: ReplyLanguage, name: s
     case 'owner_topic':
       return `Prices, availability, bookings and complaints always go straight to ${endSentence(name)} ${live}`;
     case 'not_in_context':
+      if (partial) return `I found part of this on ${name}'s website. For the rest, I'd pass it to them rather than guess. ${live}`;
       return `I couldn't find this on ${name}'s website, so I'd pass it to them rather than guess. ${live}`;
     case 'other_language':
       return `I can chat in English and French. For other languages, I'd pass your question to ${endSentence(name)} ${live}`;

@@ -25,7 +25,7 @@ import {
 } from './caps';
 import { SITE_DEMO_LINK_TTL_DAYS, SITE_DEMO_RETENTION_DAYS, SITE_MESSAGE_MAX_CHARS } from './config';
 import type { SiteLlmTransport } from './llm';
-import { bannerText, cappedReply, demoNote, noticeText, replyLanguage } from './replies';
+import { bannerText, cappedReply, demoNote, isPartialHandoff, noticeText, replyLanguage } from './replies';
 import { detectVisitorLanguage } from './keywords';
 import { handoffReason } from './rules';
 
@@ -212,7 +212,9 @@ export function publicMessage(row: SiteMessageRow, business: { displayName: stri
     language: row.language,
     client_message_id: row.clientMessageId,
     handoff_reason: reason,
-    demo_note: reason ? demoNote(reason, replyLanguage(row.language, business.language), business.displayName) : null,
+    demo_note: reason
+      ? demoNote(reason, replyLanguage(row.language, business.language), business.displayName, { partial: isPartialHandoff(row.body) })
+      : null,
   };
 }
 

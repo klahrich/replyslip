@@ -50,6 +50,7 @@ export function answer(partial: Partial<SiteModelAnswer>): SiteModelAnswer {
     topic: 'general',
     sources: ['serving Ottawa, Kanata and Orleans since 2009'],
     owner_question: null,
+    answered_part: null,
     language: 'en',
     ...partial,
   };
