@@ -7,6 +7,7 @@ import { ExtraScopes } from './ExtraScopes';
 import {
   appLabel,
   canAllow,
+  cantHeading,
   decisionBody,
   extraScopesOffer,
   initialSelection,
@@ -206,7 +207,7 @@ export function ConsentForm({ view }: { view: ConsentView }) {
         ) : null}
         {view.scope.denies.length ? (
           <section>
-            <h2>It can’t</h2>
+            <h2>{cantHeading(view)}</h2>
             <ul className="oc-list is-no">
               {view.scope.denies.map((line) => (
                 <li key={line}>{line}</li>

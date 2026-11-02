@@ -5,7 +5,9 @@ import { ConsentForm } from '@/components/site/oauth/ConsentForm';
 import { ExtraScopes } from '@/components/site/oauth/ExtraScopes';
 import {
   appLabel,
+  CANT_HEADING_DEFAULT,
   canAllow,
+  cantHeading,
   decisionBody,
   extraScopeFields,
   extraScopesOffer,
@@ -353,5 +355,26 @@ describe('extra permissions on the Allow page (§5.10)', () => {
       expect(body).not.toHaveProperty('grant_scopes');
       expect(body).not.toHaveProperty('grant_owner');
     }
+  });
+});
+
+describe("the It can't heading", () => {
+  const CANT_WITH_EXTRAS = "Without extra permissions, it can't";
+  const withHeading = (v: ConsentView): ConsentView => ({ ...v, scope: { ...v.scope, cant_heading: CANT_WITH_EXTRAS } });
+
+  it('uses scope.cant_heading from the server when it is sent', () => {
+    const v = withHeading(offering());
+    expect(cantHeading(v)).toBe(CANT_WITH_EXTRAS);
+    const html = decode(render(v));
+    expect(html).toContain(`<h2>${CANT_WITH_EXTRAS}</h2>`);
+    expect(html).not.toContain(`<h2>${CANT_HEADING_DEFAULT}</h2>`);
+  });
+
+  it('keeps the page heading when cant_heading is absent or blank', () => {
+    const plain = view();
+    expect(plain.scope).not.toHaveProperty('cant_heading');
+    expect(cantHeading(plain)).toBe(CANT_HEADING_DEFAULT);
+    expect(render(plain)).toContain(`<h2>${CANT_HEADING_DEFAULT}</h2>`);
+    expect(cantHeading({ scope: { ...plain.scope, cant_heading: '  ' } })).toBe(CANT_HEADING_DEFAULT);
   });
 });

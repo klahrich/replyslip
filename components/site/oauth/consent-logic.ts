@@ -302,3 +302,11 @@ export function problemCopy(problem: ConsentProblem): ProblemCopy {
       };
   }
 }
+
+/** The page's own "It can't" heading, used while the server sends no `cant_heading` (nothing extra offered). */
+export const CANT_HEADING_DEFAULT = 'It can’t';
+
+/** The "It can't" list heading: the server's `scope.cant_heading` while extras are offered, else the page's own. */
+export function cantHeading(view: Pick<ConsentView, 'scope'>): string {
+  return view.scope.cant_heading?.trim() || CANT_HEADING_DEFAULT;
+}
