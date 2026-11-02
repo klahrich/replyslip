@@ -8,7 +8,7 @@ import { setCimdFetcherForTests } from '@/lib/oauth/cimd';
 import { disableClient } from '@/lib/oauth/clients';
 import { mcpAuthHandler } from '@/lib/mcp-server';
 import { RSK_SCOPES } from '@/lib/oauth/config';
-import { COMBINED_ELEVATED_WARNING, ELEVATED_SCOPE_COPY, UNVERIFIED_ELEVATED_WARNING, grantedScope } from '@/lib/oauth/consent';
+import { AGENT_SCOPE_COPY, CANT_HEADING_WITH_EXTRAS, COMBINED_ELEVATED_WARNING, ELEVATED_SCOPE_COPY, UNVERIFIED_ELEVATED_WARNING, grantedScope } from '@/lib/oauth/consent';
 import { protectedResourceMetadata } from '@/lib/oauth/metadata';
 import { TOOL_SCOPES, toolAllowed } from '@/lib/oauth/scopes';
 import { setOAuthClockForTests } from '@/lib/oauth/tokens';
@@ -112,6 +112,36 @@ describe('consent view', () => {
     expect(asked.view.extra_scopes.offered).toEqual(offered(['agent:respond', 'agent:owner']));
     const one = await startConnect(owner, { scope: 'agent:owner' });
     expect(one.view.extra_scopes.offered).toEqual(offered(['agent:owner']));
+  });
+
+  it("drops the can't lines the offered scopes cover, and sets cant_heading", async () => {
+    const owner = await signIn();
+    const on = await startConnect(owner, { scope: 'agent' });
+    expect(on.view.scope).toEqual({
+      name: 'agent',
+      allows: AGENT_SCOPE_COPY.allows,
+      denies: [
+        'Approve guests (only you can, in the dashboard)',
+        'Review or release customer requests, or see customer emails',
+        'Change dashboard settings',
+      ],
+      cant_heading: CANT_HEADING_WITH_EXTRAS,
+    });
+    expect(CANT_HEADING_WITH_EXTRAS).toBe("Without extra permissions, it can't");
+    // No can't line repeats something a checkbox below offers.
+    const offeredAllows = on.view.extra_scopes.offered.flatMap((s) => s.allows);
+    for (const line of on.view.scope.denies) expect(offeredAllows).not.toContain(line);
+  });
+
+  it("flag off: the scope block is byte-identical to the original (no cant_heading, every can't line)", async () => {
+    vi.stubEnv('MCP_OAUTH_OWNER_SCOPE', '');
+    const owner = await signIn();
+    const off = await startConnect(owner, { scope: ALL });
+    expect(JSON.stringify(off.view.scope)).toBe(
+      JSON.stringify({ name: 'agent', allows: AGENT_SCOPE_COPY.allows, denies: AGENT_SCOPE_COPY.denies }),
+    );
+    expect(off.view.scope.denies).toHaveLength(7);
+    expect('cant_heading' in off.view.scope).toBe(false);
   });
 
   it('flags an unverified (DCR) app, whatever it asked for', async () => {
@@ -408,8 +438,25 @@ describe('connected apps API', () => {
         (app) => [app.agent.name, app],
       ),
     );
-    expect(byAgent.plain).toMatchObject({ scope: 'agent', scopes: ['agent'], elevated: false });
-    expect(byAgent.full).toMatchObject({ scope: ALL, scopes: ['agent', 'agent:respond', 'agent:owner'], elevated: true });
+    expect(byAgent.plain).toMatchObject({ scope: 'agent', scopes: ['agent'], elevated: false, elevated_paused: false });
+    expect(byAgent.full).toMatchObject({
+      scope: ALL,
+      scopes: ['agent', 'agent:respond', 'agent:owner'],
+      elevated: true,
+      elevated_paused: false,
+    });
+
+    // Flag off: the stored scopes and `elevated` stay, and elevated_paused says the higher access is paused.
+    vi.stubEnv('MCP_OAUTH_OWNER_SCOPE', '');
+    const off = await call(listConnectedRoute, `${ISSUER}/api/v1/connected-apps`, { cookie: owner.cookie });
+    const offByAgent = Object.fromEntries(
+      (off.data.connected_apps as Array<{ agent: { name: string }; scopes: string[]; elevated: boolean; elevated_paused: boolean }>).map(
+        (app) => [app.agent.name, app],
+      ),
+    );
+    expect(offByAgent.plain).toMatchObject({ scopes: ['agent'], elevated: false, elevated_paused: false });
+    expect(offByAgent.full).toMatchObject({ scopes: ['agent', 'agent:respond', 'agent:owner'], elevated: true, elevated_paused: true });
+    vi.stubEnv('MCP_OAUTH_OWNER_SCOPE', '1');
     const [fullAgent] = await getDb().select().from(agents).where(eq(agents.name, 'full'));
     expect(fullAgent!.description).toBe('Connected app: ChatGPT (OAuth). Can work on tasks sent to it.');
   });

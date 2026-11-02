@@ -3,7 +3,7 @@ import { getDb } from '@/db';
 import { agents, oauthClients, oauthGrants, users } from '@/db/schema';
 import { HttpError } from '../errors';
 import { clientDisplay } from './clients';
-import { isElevatedScope } from './config';
+import { isElevatedScope, ownerScopeEnabled } from './config';
 import { revokeGrant } from './grants';
 import { redirectHost } from './redirect';
 import { oauthNow } from './tokens';
@@ -21,6 +21,11 @@ export type ConnectedApp = {
   scopes: string[];
   /** True when `scopes` holds a higher scope (agent:respond or agent:owner). Such a connection lasts 30 days by default. */
   elevated: boolean;
+  /**
+   * §5.10: true when `elevated` but MCP_OAUTH_OWNER_SCOPE is off right now, so the higher access is paused (the app
+   * gets `agent` tools only; it comes back if the flag is turned on before `expires_at`). False otherwise.
+   */
+  elevated_paused: boolean;
   approved_by_email: string;
   created_at: string;
   last_used_at: string | null;
@@ -63,6 +68,7 @@ function serialize(row: Row): ConnectedApp {
     scope: grant.scope,
     scopes: grant.scope.split(' ').filter(Boolean),
     elevated: grant.scope.split(' ').some(isElevatedScope),
+    elevated_paused: grant.scope.split(' ').some(isElevatedScope) && !ownerScopeEnabled(),
     approved_by_email: row.email,
     created_at: grant.createdAt.toISOString(),
     last_used_at: grant.lastUsedAt?.toISOString() ?? null,
