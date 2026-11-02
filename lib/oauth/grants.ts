@@ -25,7 +25,7 @@ import { sha256 } from '../crypto';
 import { isUniqueViolation } from '../errors';
 import { agentCountForUpdate, loadFirstAgentNotice, queueFirstAgentAlert, type FirstAgentNotice } from '../first-agent-alert';
 import { PlanLimitError, assertWithinLimit } from '../plans';
-import { normalizeResource } from './config';
+import { SCOPE_RESPOND, effectiveScopes, grantableScope, isElevatedScope, normalizeResource, ownerGrantMaxDays } from './config';
 import { OAuthError } from './errors';
 import { isValidCodeVerifier, verifyPkce } from './pkce';
 import { hasPrefix, mintToken, oauthNow } from './tokens';
@@ -89,8 +89,19 @@ export async function firstFreeAgentName(db: Db, workspaceId: string, base: stri
   return candidates.find((name) => !names.has(name)) ?? null;
 }
 
-export function connectedAppDescription(clientName: string): string {
-  return `Connected app: ${clientName} (OAuth). Reads tasks; can't complete them.`;
+export function connectedAppDescription(clientName: string, scope = 'agent'): string {
+  return scope.split(' ').includes(SCOPE_RESPOND)
+    ? `Connected app: ${clientName} (OAuth). Can work on tasks sent to it.`
+    : `Connected app: ${clientName} (OAuth). Reads tasks; can't complete them.`;
+}
+
+/**
+ * §5.10: a connection that holds a higher scope lasts MCP_OAUTH_OWNER_MAX_DAYS (default 30) instead of 365 days, so
+ * refresh tokens stop then too and the user approves again.
+ */
+export function grantLifetimeMs(scope: string): number {
+  const elevated = scope.split(' ').some(isElevatedScope);
+  return elevated ? Math.min(OAUTH_GRANT_MAX_TTL_MS, ownerGrantMaxDays() * 24 * 60 * 60 * 1000) : OAUTH_GRANT_MAX_TTL_MS;
 }
 
 /** Agents in the workspace that an earlier OAuth grant created and that are still active, newest connection first. */
@@ -216,7 +227,8 @@ async function insertTokens(
       1,
       Math.floor(Math.min(OAUTH_ACCESS_TOKEN_TTL_MS, grant.absoluteExpiresAt.getTime() - now.getTime()) / 1000),
     ),
-    scope: grant.scope,
+    // What the token can do now: with MCP_OAUTH_OWNER_SCOPE off, higher scopes on an older grant don't count (verify.ts).
+    scope: effectiveScopes(grant.scope).join(' '),
   };
   if (options.refresh) {
     const refresh = mintToken('refresh');
@@ -304,6 +316,10 @@ export async function exchangeAuthorizationCode(input: CodeExchangeInput): Promi
     throw new OAuthError('invalid_target', 'The resource does not match this code.');
   }
 
+  // The code carries what the user granted at consent. Re-filter in case MCP_OAUTH_OWNER_SCOPE was turned off since,
+  // or the client was disabled (resolveClient already refuses those).
+  const scope = client.disabledAt ? 'agent' : grantableScope(code.scope);
+
   let outcome: ExchangeOutcome;
   try {
     outcome = await db.transaction(async (tx): Promise<ExchangeOutcome> => {
@@ -363,7 +379,7 @@ export async function exchangeAuthorizationCode(input: CodeExchangeInput): Promi
           .values({
             workspaceId: code.workspaceId,
             name,
-            description: connectedAppDescription(client.clientName),
+            description: connectedAppDescription(client.clientName, scope),
           })
           .returning();
         if (!agent) throw new OAuthError('server_error', 'Something went wrong.', 500);
@@ -380,10 +396,10 @@ export async function exchangeAuthorizationCode(input: CodeExchangeInput): Promi
           workspaceId: code.workspaceId,
           agentId,
           agentCreated,
-          scope: code.scope,
+          scope,
           resource: code.resource,
           redirectUri: code.redirectUri,
-          absoluteExpiresAt: new Date(now.getTime() + OAUTH_GRANT_MAX_TTL_MS),
+          absoluteExpiresAt: new Date(now.getTime() + grantLifetimeMs(scope)),
           lastUsedAt: now,
           createdAt: now,
         })

@@ -1,8 +1,10 @@
 import { OAUTH_SCOPE, SCOPE_OWNER, SCOPE_RESPOND } from './config';
 
 /**
- * §5.7: the scope each MCP tool needs. `agent` tools work for OAuth apps; `agent:respond` and `agent:owner` are held
- * only by rsk_ keys. A test lists every registered tool against this map, so a new tool must pick a scope.
+ * §5.7, §5.10: the scope each MCP tool needs. Every OAuth app holds `agent`. `agent:respond` (work on tasks sent to the
+ * agent) and `agent:owner` (workspace settings and guests) are held by every rsk_ key, and by an OAuth app only when
+ * the user opted in at consent while MCP_OAUTH_OWNER_SCOPE=1. A test lists every registered tool against this map, so
+ * a new tool must pick a scope.
  */
 export const TOOL_SCOPES = {
   whoami: OAUTH_SCOPE,
