@@ -71,6 +71,9 @@
 
 .oc-returning{display:flex;align-items:center;gap:14px;min-height:120px}
 .oc-returning p{margin:0;font-size:1.0625rem}
+.oc-returning-wrap .oc-note{margin:0 0 8px}
+.oc-returning-wrap .oc-note a{color:var(--oc-ink)}
+.oc-opens{margin:16px 0 0}
 .oc-spinner{width:22px;height:22px;border-radius:50%;border:2.5px solid var(--oc-soft);border-top-color:var(--oc-sage);animation:oc-spin .8s linear infinite}
 @keyframes oc-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.oc-spinner{animation-duration:2.4s}}
