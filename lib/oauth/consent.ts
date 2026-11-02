@@ -9,7 +9,7 @@ import { HttpError } from '../errors';
 import { planLimitMessage, workspacePlanUsage } from '../plans';
 import { bindingMatches } from './authorize';
 import { clientDisplay, type ClientDisplay } from './clients';
-import { oauthIssuer } from './config';
+import { dcrEnabled, oauthIssuer } from './config';
 import { agentNameBase, createAuthorizationCode, firstFreeAgentName, isReconnectTarget, reconnectOptions } from './grants';
 import { isLoopbackHost, redirectHost, redirectKind, withQuery, type RedirectKind } from './redirect';
 import { REQUEST_TOKEN_PATTERN, oauthNow } from './tokens';
@@ -79,6 +79,8 @@ function requireWorkspace(user: SessionUser): WorkspaceUser {
 async function clientRow(id: string): Promise<OAuthClientRow> {
   const [client] = await getDb().select().from(oauthClients).where(eq(oauthClients.id, id)).limit(1);
   if (!client || client.disabledAt) throw NOT_FOUND();
+  // A request a DCR client started before MCP_OAUTH_DCR was turned off can't be approved afterwards.
+  if (client.kind === 'dcr' && !dcrEnabled()) throw NOT_FOUND();
   return client;
 }
 
@@ -191,6 +193,8 @@ export async function decideConsent(req: Request, user: WorkspaceUser, body: Con
     await completeOnce(db, request.id);
     return { redirect_to: withQuery(request.redirectUri, { error: 'access_denied', state: request.state, iss }) };
   }
+
+  await clientRow(request.clientId);
 
   if (body.workspace_id !== user.workspace.id) {
     throw new HttpError(400, 'validation_error', 'Choose your workspace.', {

@@ -5,7 +5,7 @@ import { readCookie } from '../http';
 import { clientIp } from '../origin';
 import { consumeRateLimit } from '../rate-limit';
 import { resolveClient } from './clients';
-import { absoluteIssuerUrl, dcrSchemePolicy, grantableScope, normalizeResource, oauthIssuer, oauthResource } from './config';
+import { absoluteIssuerUrl, dcrEnabled, dcrSchemePolicy, grantableScope, normalizeResource, oauthIssuer, oauthResource } from './config';
 import {
   OAUTH_BINDING_COOKIE,
   OAUTH_BINDING_COOKIE_MAX,
@@ -114,6 +114,12 @@ export async function authorize(req: Request): Promise<Response> {
     }
     console.error('oauth.authorize client resolution failed');
     return authorizeErrorPage(502, 'We couldn’t check this app right now.');
+  }
+  // Self-registered (DCR) clients can only start new authorizations while MCP_OAUTH_DCR is on. Grants already
+  // approved, and their refresh tokens, keep working until revoked; CIMD clients are unaffected.
+  if (client.kind === 'dcr' && !dcrEnabled()) {
+    console.warn(JSON.stringify({ event: 'oauth.authorize_dcr_disabled', client: client.id }));
+    return authorizeErrorPage(400, 'This app isn’t allowed to connect to Valetto.');
   }
   const redirectUri = redirect.value;
   if (

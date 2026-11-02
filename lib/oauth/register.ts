@@ -30,7 +30,7 @@ const GRANT_TYPES = new Set(['authorization_code', 'refresh_token']);
 const APPLICATION_TYPES = new Set(['web', 'native']);
 
 /** Names a DCR client may not take: anyone can register, so it must not look like a verified app. */
-const RESERVED_NAMES = ['chatgpt', 'openai', 'claude', 'anthropic'];
+const RESERVED_NAMES = ['chatgpt', 'openai', 'claude', 'anthropic', 'valetto'];
 
 /** Homoglyph-lite: Latin look-alikes from Cyrillic and Greek, and digit or symbol swaps, folded to ASCII letters. */
 const CONFUSABLES: Record<string, string> = {
@@ -57,7 +57,7 @@ function fold(name: string, oneAs: 'l' | 'i'): string {
   return out.replace(/[^a-z]/g, '').replace(/rn/g, 'm').replace(/vv/g, 'w');
 }
 
-/** True when a self-asserted name contains ChatGPT, OpenAI, Claude or Anthropic, even disguised. */
+/** True when a self-asserted name contains ChatGPT, OpenAI, Claude, Anthropic or Valetto, even disguised. */
 export function impersonatesKnownApp(name: string): boolean {
   const variants = [fold(name, 'l'), fold(name, 'i')];
   return variants.some((folded) => RESERVED_NAMES.some((reserved) => folded.includes(reserved)));
@@ -186,6 +186,7 @@ export async function registerClient(body: unknown, ip: string): Promise<Registr
   const reg = validateRegistration(body);
   const now = oauthNow();
   const { token: clientId } = mintToken('dcrClientId');
+  const ipHash = keyedHash('oauth-dcr-ip', ip);
   const row = await getDb().transaction(async (tx) => {
     const cap = await consumeKeyedRateLimit(tx, {
       kind: 'oauthRegisterGlobal',
@@ -194,6 +195,18 @@ export async function registerClient(body: unknown, ip: string): Promise<Registr
       windowMs: 24 * 60 * 60 * 1000,
     });
     if (cap.limited) {
+      // Operator signal: the whole service hit its daily DCR budget. No PII; only an 8-hex prefix of the keyed IP hash.
+      console.warn(
+        JSON.stringify({
+          event: 'oauth.dcr_global_cap_hit',
+          level: 'warn',
+          message: `DCR global registration cap reached (${OAUTH_DCR_GLOBAL_DAILY} per 24h); new registrations are refused until the window frees up.`,
+          limit: OAUTH_DCR_GLOBAL_DAILY,
+          window_hours: 24,
+          retry_after_seconds: cap.retryAfterSeconds,
+          ip_hash_prefix: ipHash.slice(0, 8),
+        }),
+      );
       throw rateLimited(cap.retryAfterSeconds);
     }
     const [inserted] = await tx
@@ -208,7 +221,7 @@ export async function registerClient(body: unknown, ip: string): Promise<Registr
         clientSecretHash: null,
         grantTypes: reg.grantTypes,
         applicationType: reg.applicationType,
-        registeredIpHash: keyedHash('oauth-dcr-ip', ip),
+        registeredIpHash: ipHash,
         createdAt: now,
       })
       .returning();

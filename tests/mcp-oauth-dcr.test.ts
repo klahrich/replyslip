@@ -9,10 +9,22 @@ import { OAUTH_DCR_GLOBAL_DAILY } from '@/lib/oauth/constants';
 import { pruneOAuth } from '@/lib/oauth/grants';
 import { redirectKind } from '@/lib/oauth/redirect';
 import { dcrClientName, impersonatesKnownApp } from '@/lib/oauth/register';
+import { loadConsentRequest } from '@/lib/oauth/consent';
 import { setOAuthClockForTests } from '@/lib/oauth/tokens';
 import { call, signIn } from './helpers';
 import { stubCimd } from './oauth-fixtures';
-import { ISSUER, authorizeQuery, authorizeRequest, connect, postConsent, register, revoke, startConnect, token } from './oauth-flow';
+import {
+  ISSUER,
+  authorizeQuery,
+  authorizeRequest,
+  connect,
+  postConsent,
+  register,
+  revoke,
+  sessionOf,
+  startConnect,
+  token,
+} from './oauth-flow';
 
 /** DCR (RFC 7591), docs/design/mcp-oauth.md §2.4.2 and §5.2, plus EvaluatorBot's PR 3 criteria. */
 
@@ -330,9 +342,35 @@ describe('request validation and limits (criterion 3)', () => {
     await getDb()
       .insert(rateEvents)
       .values(Array.from({ length: OAUTH_DCR_GLOBAL_DAILY }, () => ({ kind: 'oauthRegisterGlobal', email: 'global', ip: null })));
-    const res = await register({ redirect_uris: [WEB] }, { ip: '192.0.2.44' });
-    expect(res.status).toBe(429);
-    expect(await getDb().select().from(oauthClients)).toHaveLength(0);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const res = await register({ client_name: 'Acme MCP', redirect_uris: [WEB] }, { ip: '192.0.2.44' });
+      expect(res.status).toBe(429);
+      expect(await getDb().select().from(oauthClients)).toHaveLength(0);
+      const lines = warn.mock.calls.map((args) => String(args[0])).filter((line) => line.includes('oauth.dcr_global_cap_hit'));
+      expect(lines).toHaveLength(1);
+      const entry = JSON.parse(lines[0]!);
+      expect(entry).toMatchObject({ event: 'oauth.dcr_global_cap_hit', level: 'warn', limit: OAUTH_DCR_GLOBAL_DAILY, window_hours: 24 });
+      expect(entry.message).toMatch(/cap reached/);
+      expect(entry.retry_after_seconds).toBeGreaterThan(0);
+      expect(entry.ip_hash_prefix).toMatch(/^[0-9a-f]{8}$/);
+      // No IP (full or partial), no client name or redirect URI.
+      expect(lines[0]).not.toContain('192.0.2');
+      expect(lines[0]).not.toContain('Acme');
+      expect(lines[0]).not.toContain('app.example.com');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('does not log the cap warning below the cap', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect((await register({ redirect_uris: [WEB] })).status).toBe(201);
+      expect(warn.mock.calls.some((args) => String(args[0]).includes('oauth.dcr_global_cap_hit'))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -359,6 +397,16 @@ describe('client_name (criterion 4)', () => {
     'ANTHROPIC',
     'Cha\u200btGPT',
     '0penAl',
+    'Valetto',
+    'valetto connector',
+    'VALETTO',
+    'Va1etto',
+    'VaIetto', // capital I
+    'Vаlеttо', // Cyrillic а, е, о
+    'V@lett0',
+    'v a l e t t o',
+    'Ｖａｌｅｔｔｏ', // fullwidth
+    'Valet\u200bto',
     'CIaude', // capital I
     'Ⅽlaude', // Roman numeral C
   ])('replaces impersonating name %j', (name) => {
@@ -419,5 +467,56 @@ describe('redirectKind (ConsentView.redirect.kind)', () => {
     ['VSCode://x/cb', 'custom_scheme', 'vscode'],
   ])('%s → %s', (uri, kind, scheme) => {
     expect(redirectKind(uri)).toEqual({ kind, scheme });
+  });
+});
+
+describe('MCP_OAUTH_DCR turned off after DCR clients exist (EvaluatorBot #147 review)', () => {
+  it('refuses new DCR authorizations, keeps approved grants and refresh working, and leaves CIMD alone', async () => {
+    const clientId = await registered();
+    const owner = await signIn();
+    const { tokens } = await connect(owner, { mode: 'new', name: 'acme' }, { client_id: clientId, redirect_uri: WEB });
+    const pending = await startConnect(owner, { client_id: clientId, redirect_uri: WEB });
+
+    vi.stubEnv('MCP_OAUTH_DCR', '');
+
+    // New authorization: an error page on valetto.tech, never a redirect to the client.
+    const refused = await authorizeRequest(authorizeQuery({ client_id: clientId, redirect_uri: WEB }));
+    expect(refused.status).toBe(400);
+    expect(refused.location).toBeNull();
+    expect(refused.binding).toBeFalsy();
+
+    // A consent request started while DCR was on can no longer be viewed or approved.
+    await expect(loadConsentRequest(pending.reqToken, await sessionOf(owner))).rejects.toMatchObject({ status: 404 });
+    const decided = await postConsent(
+      owner,
+      {
+        request_id: pending.view.request_id,
+        csrf_token: pending.view.csrf_token,
+        decision: 'allow',
+        workspace_id: pending.view.workspaces[0]!.id,
+        agent: { mode: 'new', name: 'acme2' },
+      },
+      { binding: pending.binding },
+    );
+    expect(decided.status).toBe(404);
+
+    // The grant the owner already approved keeps refreshing until revoked.
+    const refreshed = await token({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token!, client_id: clientId });
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.data.scope).toBe('agent');
+    const revoked = await revoke({ token: refreshed.data.refresh_token, client_id: clientId });
+    expect(revoked.status).toBe(200);
+    const after = await token({ grant_type: 'refresh_token', refresh_token: refreshed.data.refresh_token, client_id: clientId });
+    expect(after.data.error).toBe('invalid_grant');
+
+    // CIMD clients are unaffected.
+    const cimd = await connect(owner, { mode: 'new', name: 'chatgpt' });
+    expect(cimd.tokens.scope).toBe('agent');
+
+    // Turning DCR back on lets the same client authorize again.
+    vi.stubEnv('MCP_OAUTH_DCR', '1');
+    const again = await authorizeRequest(authorizeQuery({ client_id: clientId, redirect_uri: WEB }));
+    expect(again.status).toBe(302);
+    expect(again.location!.pathname).toBe('/oauth/consent');
   });
 });
