@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { answerVisitorMessage, SITE_INSTRUCTIONS } from '@/lib/site-assistant/answer';
 import { handoffReason } from '@/lib/site-assistant/rules';
-import { needsOwnerReply, partialHandoffReply } from '@/lib/site-assistant/replies';
+import { demoNote, isPartialHandoff, needsOwnerReply, partialHandoffReply } from '@/lib/site-assistant/replies';
 import { SITE_ANSWER_JSON_SCHEMA, siteAnswerSchema } from '@/lib/site-assistant/schema';
 import { answer, fakeModel, MAPLE_CONTEXT, TEST_LLM_CONFIG } from './site-fixtures';
 
@@ -120,5 +120,39 @@ describe('mixed questions: answer what the pages cover, hand off the rest', () =
     const result = await answerVisitorMessage({ ...base, visitorMessage: 'What areas do you serve?' }, { transport: model.transport, config: TEST_LLM_CONFIG });
     expect(result.status).toBe('answered');
     expect(JSON.parse(model.calls[0]!.body).text.format.schema.required).toContain('answered_part');
+  });
+});
+
+describe('demo note on a partial handoff', () => {
+  const LIVE_EN = "On the live site, you could leave your email or phone and they'd get back to you.";
+  const LIVE_FR = 'Sur le vrai site, vous pourriez laisser votre courriel ou votre numéro, et l’entreprise vous répondrait.';
+
+  it('says part was found, instead of "couldn\'t find this", in English and French', () => {
+    expect(demoNote('not_in_context', 'en', 'Maple', { partial: true })).toBe(
+      `I found part of this on Maple's website. For the rest, I'd pass it to them rather than guess. ${LIVE_EN}`,
+    );
+    expect(demoNote('not_in_context', 'fr', 'Maple', { partial: true })).toBe(
+      `J’ai trouvé une partie de la réponse sur le site de Maple. Pour le reste, je préfère transmettre la question plutôt que de deviner. ${LIVE_FR}`,
+    );
+    expect(demoNote('not_in_context', 'fr', 'Maple Inc.', { partial: true })).toMatch(/site de Maple Inc\. Pour le reste/);
+  });
+
+  it('leaves the full-handoff and the other notes unchanged', () => {
+    expect(demoNote('not_in_context', 'en', 'Maple')).toMatch(/^I couldn't find this on Maple's website/);
+    expect(demoNote('not_in_context', 'en', 'Maple', { partial: false })).toBe(demoNote('not_in_context', 'en', 'Maple'));
+    for (const reason of ['owner_topic', 'other_language', 'check_failed'] as const) {
+      for (const language of ['en', 'fr'] as const) {
+        expect(demoNote(reason, language, 'Maple', { partial: true })).toBe(demoNote(reason, language, 'Maple'));
+      }
+    }
+  });
+
+  it('tells a partial handoff body from a full one', () => {
+    expect(isPartialHandoff(partialHandoffReply(PART, 'en'))).toBe(true);
+    expect(isPartialHandoff(partialHandoffReply('Oui.', 'fr'))).toBe(true);
+    expect(isPartialHandoff(needsOwnerReply('en'))).toBe(false);
+    expect(isPartialHandoff(needsOwnerReply('fr'))).toBe(false);
+    expect(isPartialHandoff("For the rest, I'll check with the team and get back to you.")).toBe(false);
+    expect(isPartialHandoff('We serve Ottawa, Kanata and Orleans.')).toBe(false);
   });
 });

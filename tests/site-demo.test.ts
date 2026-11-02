@@ -339,6 +339,26 @@ describe('messages', () => {
     expect(row).toMatchObject({ decidedBy: 'keyword_visitor', ownerQuestion: 'Quote for an interlock patio.' });
   });
 
+  it('gives a partial handoff on a part not in the pages the "found part of this" note', async () => {
+    const { token } = await createSiteDemo();
+    const part = 'Yes, we build interlock patios, walkways and driveways.';
+    setSiteLlmTransportForTests(
+      fakeModel(() =>
+        answer({ status: 'needs_owner', topic: 'services', sources: ['Interlock patios, walkways and driveways'], answered_part: part }),
+      ).transport,
+    );
+    const res = await send(token, { client_message_id: randomUUID(), text: 'Do you build interlock patios? Do you also build ponds?' });
+    expect(res.data.message).toMatchObject({ status: 'needs_owner', handoff_reason: 'not_in_context' });
+    expect(res.data.message.body).toMatch(/^Yes, we build interlock patios/);
+    expect(res.data.message.demo_note).toMatch(/^I found part of this on Maple Ridge Landscaping's website\. For the rest, I'd pass it to them rather than guess\./);
+
+    // The same question with nothing answerable keeps the full-handoff note.
+    setSiteLlmTransportForTests(fakeModel(() => answer({ status: 'needs_owner', topic: 'services', sources: [], answered_part: null })).transport);
+    const full = await send(token, { client_message_id: randomUUID(), text: 'Do you build ponds?' });
+    expect(full.data.message).toMatchObject({ body: needsOwnerReply('en'), handoff_reason: 'not_in_context' });
+    expect(full.data.message.demo_note).toMatch(/^I couldn't find this on Maple Ridge Landscaping's website/);
+  });
+
   it('sends a German question to the owner with the other-language note, without a model call', async () => {
     const { token } = await createSiteDemo();
     const model = fakeModel(() => answer({ language: 'fr' }));
