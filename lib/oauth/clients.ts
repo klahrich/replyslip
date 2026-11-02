@@ -118,7 +118,13 @@ export function readClientCredentials(authorization: string | null, form: URLSea
         throw new OAuthError('invalid_client', 'Client authentication failed.');
       }
     };
-    return { clientId: decode(decoded.slice(0, colon)), clientSecret: decode(decoded.slice(colon + 1)), method: 'basic' };
+    const clientId = decode(decoded.slice(0, colon));
+    // A client_id in the body as well must name the same client (RFC 6749 §2.3: one client per request).
+    const bodyClientId = form.get('client_id');
+    if (bodyClientId !== null && bodyClientId !== clientId) {
+      throw new OAuthError('invalid_client', 'Client authentication failed.');
+    }
+    return { clientId, clientSecret: decode(decoded.slice(colon + 1)), method: 'basic' };
   }
   const clientSecret = form.get('client_secret');
   return { clientId: form.get('client_id'), clientSecret, method: clientSecret === null ? 'none' : 'post' };
@@ -134,7 +140,9 @@ export async function authenticateClient(credentials: ClientCredentials): Promis
         ? 'post'
         : 'none';
   if (expected === 'none') {
-    if (credentials.method !== 'none') throw new OAuthError('invalid_client', 'Client authentication failed.');
+    // Public client: no secret was ever issued, so one sent anyway (Basic or client_secret, as Codex and some SDKs do
+    // after asking for client_secret_*) is ignored rather than refused. It proves nothing either way: the client is
+    // identified by client_id, and the code is bound to it, its exact redirect URI and the PKCE verifier.
     return client;
   }
   if (

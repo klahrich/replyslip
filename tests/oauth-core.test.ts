@@ -133,6 +133,30 @@ describe('redirect URIs', () => {
     expect(checkRedirectUri('cursor://anysphere.cursor-retrieval/oauth', ['cursor']).ok).toBe(true);
   });
 
+  it('private_use policy accepts app schemes and never browser-internal or script ones', () => {
+    for (const ok of [
+      'cursor://anysphere.cursor-mcp/oauth/callback',
+      'vscode://vscode.github-authentication/did-authenticate',
+      'com.example.app:/oauth2redirect',
+      'com.example.app:/oauth2redirect?x=1',
+      'zed://oauth/callback',
+    ]) {
+      expect(checkRedirectUri(ok, 'private_use').ok, ok).toBe(true);
+    }
+    for (const bad of [
+      'javascript:alert(1)', 'JavaScript:alert(1)', 'data:text/html,hi', 'file:///etc/passwd', 'blob:https://a/b',
+      'about:blank', 'vbscript:x', 'view-source:https://a', 'chrome://settings', 'chrome-extension://abc/cb',
+      'moz-extension://abc/cb', 'ms-browser-extension://abc/cb', 'edge://settings', 'opera://settings',
+      'resource://gre/x', 'intent://x#Intent;end', 'ms-settings:privacy', 'chrome-untrusted://x', 'devtools://x',
+      'safari-web-extension://x/cb', 'foo-extension://x', 'ws://localhost/cb', 'ftp://x/cb', 'mailto:a@b.c',
+      'http://app.example.com/cb', 'cursor://x/cb#frag', 'cursor://user@x/cb', 'cursor://*/cb',
+    ]) {
+      expect(checkRedirectUri(bad, 'private_use').ok, bad).toBe(false);
+    }
+    // An explicit list can't re-enable a forbidden scheme either.
+    expect(checkRedirectUri('chrome-extension://abc/cb', ['chrome-extension']).ok).toBe(false);
+  });
+
   it('shows the host and appends params without dropping an existing query', () => {
     expect(redirectHost('https://chatgpt.com/connector_platform_oauth_redirect')).toBe('chatgpt.com');
     expect(redirectHost('http://localhost:5000/callback')).toBe('localhost');

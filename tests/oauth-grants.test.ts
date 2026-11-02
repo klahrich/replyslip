@@ -133,13 +133,18 @@ describe('clients', () => {
     await expectOAuthError(resolveClient(CLAUDE_CLIENT_ID), 'invalid_client');
   });
 
-  it('authenticates a public client by client_id alone and refuses a secret for it', async () => {
+  it('authenticates a public client by client_id alone and ignores a secret it sends anyway', async () => {
     await resolveClient(CLAUDE_CLIENT_ID);
     const form = new URLSearchParams({ client_id: CLAUDE_CLIENT_ID });
     const client = await authenticateClient(readClientCredentials(null, form));
     expect(client.clientId).toBe(CLAUDE_CLIENT_ID);
     form.set('client_secret', 'x');
-    await expectOAuthError(authenticateClient(readClientCredentials(null, form)), 'invalid_client');
+    expect((await authenticateClient(readClientCredentials(null, form))).clientId).toBe(CLAUDE_CLIENT_ID);
+    const basic = `Basic ${Buffer.from(`${encodeURIComponent(CLAUDE_CLIENT_ID)}:x`).toString('base64')}`;
+    expect((await authenticateClient(readClientCredentials(basic, new URLSearchParams()))).clientId).toBe(CLAUDE_CLIENT_ID);
+    // Basic and a different body client_id is two clients in one request.
+    const mixed = new URLSearchParams({ client_id: 'https://claude.ai/other.json' });
+    expect(() => readClientCredentials(basic, mixed)).toThrow();
   });
 });
 

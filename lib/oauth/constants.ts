@@ -33,6 +33,14 @@ export const OAUTH_CIMD_TIMEOUT_MS = 5_000;
 export const OAUTH_CIMD_MAX_BYTES = 8 * 1024;
 export const OAUTH_DCR_UNUSED_TTL_MS = 24 * 60 * 60 * 1000;
 export const OAUTH_DCR_IDLE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+/** DCR abuse limits (§5.2): new clients per rolling 24 h across all IPs, body size, list and field lengths. */
+export const OAUTH_DCR_GLOBAL_DAILY = 500;
+export const OAUTH_DCR_MAX_BODY_BYTES = 8 * 1024;
+export const OAUTH_DCR_MAX_REDIRECT_URIS = 5;
+export const OAUTH_DCR_MAX_URI_LENGTH = 2000;
+export const OAUTH_DCR_MAX_NAME_INPUT = 500;
+/** Shown when a DCR client sends no usable name, or one that impersonates a known app. */
+export const OAUTH_DCR_FALLBACK_NAME = 'Unnamed app';
 export const OAUTH_STATE_MAX_BYTES = 1024;
 export const OAUTH_CLIENT_NAME_MAX = 100;
 /** Pending flows one browser can hold in the __Host-valetto_oauth cookie. */
