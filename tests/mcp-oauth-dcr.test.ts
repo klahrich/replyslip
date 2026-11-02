@@ -12,7 +12,7 @@ import { dcrClientName, impersonatesKnownApp } from '@/lib/oauth/register';
 import { setOAuthClockForTests } from '@/lib/oauth/tokens';
 import { call, signIn } from './helpers';
 import { stubCimd } from './oauth-fixtures';
-import { ISSUER, authorizeQuery, authorizeRequest, connect, register, startConnect, token } from './oauth-flow';
+import { ISSUER, authorizeQuery, authorizeRequest, connect, postConsent, register, revoke, startConnect, token } from './oauth-flow';
 
 /** DCR (RFC 7591), docs/design/mcp-oauth.md §2.4.2 and §5.2, plus EvaluatorBot's PR 3 criteria. */
 
@@ -98,20 +98,59 @@ describe('public clients only (criterion 1)', () => {
     }
   });
 
-  it('a client that sends a secret anyway is refused at /token', async () => {
-    const clientId = await registered({ token_endpoint_auth_method: 'client_secret_post' });
+  it('a secret sent anyway (post or Basic) is ignored at /token and /revoke; client_id and PKCE still decide', async () => {
+    const clientId = await registered({ token_endpoint_auth_method: 'client_secret_basic' });
+    const other = await registered();
     const owner = await signIn();
-    const started = await startConnect(owner, { client_id: clientId, redirect_uri: WEB });
-    const res = await token({
-      grant_type: 'authorization_code',
-      code: 'rsoc_x',
-      code_verifier: started.verifier,
-      redirect_uri: WEB,
-      client_id: clientId,
-      client_secret: 'rsds_guess',
-    });
-    expect(res.status).toBe(401);
-    expect(res.data.error).toBe('invalid_client');
+    const basic = (id: string) => ({ authorization: `Basic ${Buffer.from(`${id}:rsds_made_up`).toString('base64')}` });
+
+    const exchangeWith = async (form: Record<string, string>, headers?: Record<string, string>) => {
+      const started = await startConnect(owner, { client_id: clientId, redirect_uri: WEB });
+      const decided = await postConsent(
+        owner,
+        {
+          request_id: started.view.request_id,
+          csrf_token: started.view.csrf_token,
+          decision: 'allow',
+          workspace_id: started.view.workspaces[0]!.id,
+          agent: { mode: 'new', name: `codex${Math.floor(Math.random() * 1e6)}` },
+        },
+        { binding: started.binding },
+      );
+      const code = new URL(decided.data.redirect_to).searchParams.get('code')!;
+      return token(
+        { grant_type: 'authorization_code', code, code_verifier: started.verifier, redirect_uri: WEB, ...form },
+        headers,
+      );
+    };
+
+    // client_secret_post with a made-up secret: accepted, it's a public client.
+    const post = await exchangeWith({ client_id: clientId, client_secret: 'rsds_made_up' });
+    expect(post.status).toBe(200);
+    // client_secret_basic with a made-up secret (Codex): accepted too, and /revoke takes the same credentials.
+    const viaBasic = await exchangeWith({}, basic(clientId));
+    expect(viaBasic.status).toBe(200);
+    const revoked = await revoke({ token: viaBasic.data.refresh_token }, basic(clientId));
+    expect(revoked.status).toBe(200);
+    const afterRevoke = await token({ grant_type: 'refresh_token', refresh_token: viaBasic.data.refresh_token }, basic(clientId));
+    expect(afterRevoke.data.error).toBe('invalid_grant');
+
+    // The code is bound to its client: another client's id (with any secret) can't redeem it.
+    const wrongClient = await exchangeWith({ client_id: other, client_secret: 'x' });
+    expect(wrongClient.status).toBe(400);
+    expect(wrongClient.data.error).toBe('invalid_grant');
+    const wrongBasic = await exchangeWith({}, basic(other));
+    expect(wrongBasic.data.error).toBe('invalid_grant');
+    // Basic naming one client and a body client_id naming another is refused.
+    const mixed = await exchangeWith({ client_id: other }, basic(clientId));
+    expect(mixed.status).toBe(401);
+    expect(mixed.data.error).toBe('invalid_client');
+    // PKCE still has to pass.
+    const badPkce = await exchangeWith({ client_id: clientId, client_secret: 'x', code_verifier: 'a'.repeat(64) });
+    expect(badPkce.data.error).toBe('invalid_grant');
+    // An unknown client_id is still unknown.
+    const unknown = await token({ grant_type: 'refresh_token', refresh_token: 'rsor_x', client_id: 'rsdc_nope', client_secret: 'x' });
+    expect(unknown.data.error).toBe('invalid_client');
   });
 
   it('PKCE S256 is required for DCR clients', async () => {
@@ -134,7 +173,20 @@ describe('redirect URIs (criterion 2)', () => {
     ['userinfo', 'https://user@app.example.com/cb'],
     ['javascript', 'javascript:alert(1)'],
     ['data', 'data:text/html,hi'],
-    ['custom scheme, not allowed', 'cursor://anysphere.cursor-mcp/oauth/callback'],
+    ['file', 'file:///tmp/cb'],
+    ['blob', 'blob:https://app.example.com/x'],
+    ['about', 'about:blank'],
+    ['view-source', 'view-source:https://app.example.com/cb'],
+    ['chrome', 'chrome://settings'],
+    ['chrome-extension', 'chrome-extension://abcdef/cb'],
+    ['moz-extension', 'moz-extension://abcdef/cb'],
+    ['ms-browser-extension', 'ms-browser-extension://abcdef/cb'],
+    ['edge', 'edge://settings'],
+    ['opera', 'opera://settings'],
+    ['resource', 'resource://gre/cb'],
+    ['intent', 'intent://cb'],
+    ['vbscript', 'vbscript:msgbox(1)'],
+    ['custom scheme with fragment', 'cursor://anysphere.cursor-mcp/cb#x'],
     ['relative', '/callback'],
     ['too long', `https://app.example.com/${'a'.repeat(2001)}`],
   ])('rejects %s', async (_label, uri) => {
@@ -171,10 +223,14 @@ describe('redirect URIs (criterion 2)', () => {
     expect(row!.applicationType).toBe('native');
   });
 
-  it('custom schemes only from MCP_OAUTH_DCR_SCHEMES; the view flags them (custom_scheme)', async () => {
+  it('accepts private-use app schemes by default, matched exactly; the view flags them (custom_scheme)', async () => {
     const cursor = 'cursor://anysphere.cursor-mcp/oauth/callback';
-    vi.stubEnv('MCP_OAUTH_DCR_SCHEMES', 'cursor');
-    const clientId = await registered({ client_name: 'Cursor', redirect_uris: [cursor] });
+    const clientId = await registered({
+      client_name: 'Cursor',
+      redirect_uris: [cursor, 'vscode://vscode.mcp/callback', 'com.example.app:/oauth2redirect'],
+    });
+    const [row] = await getDb().select().from(oauthClients).where(eq(oauthClients.clientId, clientId));
+    expect(row!.applicationType).toBe('native');
     const owner = await signIn();
     const started = await startConnect(owner, { client_id: clientId, redirect_uri: cursor });
     expect(started.view.redirect).toEqual({
@@ -184,8 +240,29 @@ describe('redirect URIs (criterion 2)', () => {
       scheme: 'cursor',
     });
     expect(started.view.client).toMatchObject({ kind: 'dcr', verified: false, display_name: 'Cursor' });
-    // Turning the scheme off again blocks the already-registered client at /authorize.
-    vi.stubEnv('MCP_OAUTH_DCR_SCHEMES', '');
+    const reverse = await startConnect(owner, { client_id: clientId, redirect_uri: 'com.example.app:/oauth2redirect' });
+    expect(reverse.view.redirect).toMatchObject({ kind: 'custom_scheme', scheme: 'com.example.app' });
+    for (const near of ['cursor://anysphere.cursor-mcp/oauth/callback/', 'CURSOR://anysphere.cursor-mcp/oauth/callback', 'cursor://anysphere.cursor-mcp/oauth/callback?x=1']) {
+      const bad = await authorizeRequest(authorizeQuery({ client_id: clientId, redirect_uri: near }));
+      expect(bad.status, near).toBe(400);
+    }
+  });
+
+  it('MCP_OAUTH_DCR_SCHEMES, when set, is the only list accepted; `none` turns custom schemes off', async () => {
+    vi.stubEnv('MCP_OAUTH_DCR_SCHEMES', 'cursor');
+    expect((await register({ redirect_uris: ['cursor://x/cb'] })).status).toBe(201);
+    expect((await register({ redirect_uris: ['vscode://x/cb'] })).data!.error).toBe('invalid_redirect_uri');
+    vi.stubEnv('MCP_OAUTH_DCR_SCHEMES', 'cursor,javascript,chrome-extension');
+    expect((await register({ redirect_uris: ['chrome-extension://x/cb'] })).data!.error).toBe('invalid_redirect_uri');
+    vi.stubEnv('MCP_OAUTH_DCR_SCHEMES', 'none');
+    expect((await register({ redirect_uris: ['cursor://x/cb'] })).data!.error).toBe('invalid_redirect_uri');
+    expect((await register({ redirect_uris: [WEB] })).status).toBe(201);
+  });
+
+  it('narrowing MCP_OAUTH_DCR_SCHEMES later blocks an already-registered custom-scheme client at /authorize', async () => {
+    const cursor = 'cursor://anysphere.cursor-mcp/oauth/callback';
+    const clientId = await registered({ redirect_uris: [cursor] });
+    vi.stubEnv('MCP_OAUTH_DCR_SCHEMES', 'vscode');
     const blocked = await authorizeRequest(authorizeQuery({ client_id: clientId, redirect_uri: cursor }));
     expect(blocked.status).toBe(400);
   });

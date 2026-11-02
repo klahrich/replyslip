@@ -5,7 +5,33 @@
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const LOOPBACK_URI = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::(\d{1,5}))?(\/[^#]*)?$/;
-const FORBIDDEN_SCHEMES = new Set(['javascript', 'data', 'file', 'vbscript', 'blob', 'about']);
+/**
+ * Schemes never accepted as a redirect, whatever MCP_OAUTH_DCR_SCHEMES says: script and inline-content schemes,
+ * local files, browser-internal and extension schemes, OS intent/handler schemes, and network schemes that aren't
+ * an app callback. Prefix rules catch the families (chrome-*, edge-*, moz-*, ms-*, opera-*, *-extension).
+ */
+const FORBIDDEN_SCHEMES = new Set([
+  'javascript', 'vbscript', 'livescript', 'data', 'blob', 'file', 'filesystem', 'about', 'view-source',
+  'chrome', 'chromium', 'chrome-extension', 'chrome-search', 'chrome-untrusted', 'devtools', 'edge', 'brave',
+  'opera', 'vivaldi', 'yandex', 'moz-extension', 'resource', 'jar', 'ms-browser-extension', 'safari-extension',
+  'safari-web-extension', 'webkit', 'intent', 'android-app', 'content', 'res', 'shell', 'ws', 'wss', 'ftp',
+  'mailto', 'tel', 'sms', 'urn', 'wyciwyg',
+]);
+const FORBIDDEN_SCHEME_PREFIXES = ['chrome-', 'edge-', 'moz-', 'ms-', 'opera-', 'brave-', 'safari-', 'webkit-'];
+
+/** Is this scheme on the never-allowed list? */
+export function isForbiddenScheme(scheme: string): boolean {
+  const s = scheme.toLowerCase();
+  return (
+    FORBIDDEN_SCHEMES.has(s) || s.endsWith('-extension') || FORBIDDEN_SCHEME_PREFIXES.some((prefix) => s.startsWith(prefix))
+  );
+}
+
+/**
+ * Which non-http(s) schemes a client may use. `'private_use'`: any private-use scheme (RFC 8252 §7.1, e.g.
+ * cursor://, vscode://, com.example.app:/) that is not forbidden. A list: only those schemes (still minus forbidden).
+ */
+export type SchemePolicy = 'private_use' | readonly string[];
 
 export type RedirectCheck = { ok: true } | { ok: false; reason: string };
 
@@ -23,9 +49,10 @@ export function isLoopbackRedirect(uri: string): boolean {
 
 /**
  * May this URI be registered or requested at all? https with no fragment, userinfo or `*`; an http loopback URI; or
- * a custom scheme from `customSchemes` (DCR only, MCP_OAUTH_DCR_SCHEMES).
+ * a custom scheme allowed by `schemes` (DCR only, see dcrSchemePolicy). CIMD clients pass the default: no custom
+ * schemes. Matching is always exact (redirectUriMatches), so a custom scheme URI never matches a variant.
  */
-export function checkRedirectUri(uri: unknown, customSchemes: string[] = []): RedirectCheck {
+export function checkRedirectUri(uri: unknown, schemes: SchemePolicy = []): RedirectCheck {
   if (typeof uri !== 'string' || uri.length === 0 || uri.length > 2000) return { ok: false, reason: 'not a URI' };
   if (/[\s\u0000-\u001f\u007f]/.test(uri)) return { ok: false, reason: 'contains whitespace or control characters' };
   if (uri.includes('*')) return { ok: false, reason: 'wildcards are not allowed' };
@@ -34,7 +61,7 @@ export function checkRedirectUri(uri: unknown, customSchemes: string[] = []): Re
   const url = parse(uri);
   if (!url) return { ok: false, reason: 'not an absolute URI' };
   const scheme = url.protocol.replace(/:$/, '').toLowerCase();
-  if (FORBIDDEN_SCHEMES.has(scheme)) return { ok: false, reason: `${scheme}: URIs are not allowed` };
+  if (isForbiddenScheme(scheme)) return { ok: false, reason: `${scheme}: URIs are not allowed` };
   if (url.username || url.password || /^[a-z][a-z0-9+.-]*:\/\/[^/]*@/i.test(uri)) {
     return { ok: false, reason: 'userinfo is not allowed' };
   }
@@ -45,7 +72,7 @@ export function checkRedirectUri(uri: unknown, customSchemes: string[] = []): Re
   if (scheme === 'http') {
     return isLoopbackRedirect(uri) ? { ok: true } : { ok: false, reason: 'http is only allowed for loopback' };
   }
-  if (customSchemes.includes(scheme)) return { ok: true };
+  if (schemes === 'private_use' || schemes.includes(scheme)) return { ok: true };
   return { ok: false, reason: `the ${scheme}: scheme is not allowed` };
 }
 

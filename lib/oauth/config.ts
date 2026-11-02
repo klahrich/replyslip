@@ -1,4 +1,5 @@
 import { isProductionDeployment } from '../origin';
+import { isForbiddenScheme, type SchemePolicy } from './redirect';
 
 /**
  * MCP OAuth configuration (docs/design/mcp-oauth.md §2). Every value is read on each call, so tests and deploys can
@@ -93,12 +94,18 @@ export function cimdHosts(): string[] {
     .filter((host) => host.length > 0);
 }
 
-/** Custom redirect schemes DCR clients may register (MCP_OAUTH_DCR_SCHEMES, comma-separated; default none). */
-export function dcrSchemes(): string[] {
-  return (process.env.MCP_OAUTH_DCR_SCHEMES ?? '')
+/**
+ * Custom redirect schemes DCR clients may register. Unset or blank: any private-use scheme (cursor://, vscode://,
+ * com.example.app:/), minus the forbidden list in redirect.ts. Set (MCP_OAUTH_DCR_SCHEMES, comma-separated): only
+ * those schemes; a value with no valid scheme, e.g. `none`, turns custom schemes off.
+ */
+export function dcrSchemePolicy(): SchemePolicy {
+  const raw = process.env.MCP_OAUTH_DCR_SCHEMES;
+  if (raw === undefined || raw.trim() === '') return 'private_use';
+  return raw
     .split(',')
     .map((scheme) => scheme.trim().toLowerCase().replace(/:$/, ''))
-    .filter((scheme) => /^[a-z][a-z0-9+.-]*$/.test(scheme));
+    .filter((scheme) => /^[a-z][a-z0-9+.-]*$/.test(scheme) && scheme !== 'none' && !isForbiddenScheme(scheme));
 }
 
 /**

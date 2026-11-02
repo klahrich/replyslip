@@ -99,7 +99,8 @@ export async function postForm(
 
 export const token = (form: Record<string, string>, headers?: Record<string, string>) =>
   postForm(tokenRoute, '/api/oauth/token', form, headers);
-export const revoke = (form: Record<string, string>) => postForm(revokeRoute, '/api/oauth/revoke', form);
+export const revoke = (form: Record<string, string>, headers?: Record<string, string>) =>
+  postForm(revokeRoute, '/api/oauth/revoke', form, headers);
 
 /** POST /api/oauth/register (RFC 7591) with a JSON body, from `ip`. A string body is sent as-is. */
 export async function register(

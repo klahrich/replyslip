@@ -3,7 +3,7 @@ import { oauthClients } from '@/db/schema';
 import { keyedHash } from '../crypto';
 import { consumeKeyedRateLimit } from '../rate-limit';
 import { sanitizeClientName } from './cimd';
-import { dcrRedirectHosts, dcrSchemes, OAUTH_SCOPE } from './config';
+import { dcrRedirectHosts, dcrSchemePolicy, OAUTH_SCOPE } from './config';
 import {
   OAUTH_DCR_FALLBACK_NAME,
   OAUTH_DCR_GLOBAL_DAILY,
@@ -81,14 +81,15 @@ function checkRedirectUris(value: unknown): string[] {
     fail('invalid_redirect_uri', `At most ${OAUTH_DCR_MAX_REDIRECT_URIS} redirect_uris are allowed.`);
   }
   const hosts = dcrRedirectHosts();
-  const schemes = dcrSchemes();
+  const schemes = dcrSchemePolicy();
   for (const uri of value) {
     if (typeof uri !== 'string' || uri.length > OAUTH_DCR_MAX_URI_LENGTH) {
       fail('invalid_redirect_uri', 'Each redirect URI must be a string of at most 2000 characters.');
     }
-    // https (no fragment, userinfo or wildcard), http loopback (RFC 8252), or a scheme in MCP_OAUTH_DCR_SCHEMES.
+    // https (no fragment, userinfo or wildcard), http loopback (RFC 8252), or a private-use scheme (RFC 8252 §7.1) that
+    // isn't forbidden; MCP_OAUTH_DCR_SCHEMES, when set, narrows that to its list.
     if (!checkRedirectUri(uri, schemes).ok) {
-      fail('invalid_redirect_uri', 'Redirect URIs must be https, http loopback, or an allowed custom scheme.');
+      fail('invalid_redirect_uri', 'Redirect URIs must be https, http loopback, or an app (private-use) scheme.');
     }
     if (hosts && uri.toLowerCase().startsWith('https:') && !hosts.includes(new URL(uri).hostname.toLowerCase())) {
       fail('invalid_redirect_uri', 'This redirect host is not allowed.');

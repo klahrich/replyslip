@@ -5,7 +5,7 @@ import { readCookie } from '../http';
 import { clientIp } from '../origin';
 import { consumeRateLimit } from '../rate-limit';
 import { resolveClient } from './clients';
-import { absoluteIssuerUrl, dcrSchemes, grantableScope, normalizeResource, oauthIssuer, oauthResource } from './config';
+import { absoluteIssuerUrl, dcrSchemePolicy, grantableScope, normalizeResource, oauthIssuer, oauthResource } from './config';
 import {
   OAUTH_BINDING_COOKIE,
   OAUTH_BINDING_COOKIE_MAX,
@@ -118,7 +118,7 @@ export async function authorize(req: Request): Promise<Response> {
   const redirectUri = redirect.value;
   if (
     !redirectUri ||
-    !checkRedirectUri(redirectUri, client.kind === 'dcr' ? dcrSchemes() : []).ok ||
+    !checkRedirectUri(redirectUri, client.kind === 'dcr' ? dcrSchemePolicy() : []).ok ||
     !redirectUriMatches(client.redirectUris, redirectUri)
   ) {
     return authorizeErrorPage(400, 'The app asked to return to an address it didn’t register.');
