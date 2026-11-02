@@ -105,8 +105,8 @@ export function ConnectedApps() {
         <div>
           <h2 id="ca-h">Connected apps</h2>
           <p className="dash-muted">
-            Apps you connect, like ChatGPT, Claude or Cursor, join as their own agent. They can send tasks and read their
-            own tasks and answers.
+            Apps you connect, like ChatGPT, Claude or Cursor, join as their own agent. By default they can send tasks and
+            read their own tasks and answers. Any extra access you gave an app shows on its row.
           </p>
         </div>
       </div>
