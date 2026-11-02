@@ -1,4 +1,4 @@
-import { detectVisitorLanguage } from "./keywords";
+import { detectVisitorLanguage } from './keywords';
 
 /**
  * Import-time rules for RedBot's suggested questions. Deterministic, no model calls.
@@ -17,55 +17,48 @@ import { detectVisitorLanguage } from "./keywords";
  * none.
  */
 export type QuestionRule =
-  | "heading_or_cta"
-  | "policy_or_privacy"
-  | "login_or_account"
-  | "wrong_language"
-  | "no_answer_in_context";
+  'heading_or_cta' | 'policy_or_privacy' | 'login_or_account' | 'wrong_language' | 'no_answer_in_context';
 
 export type DroppedQuestion = { question: string; rule: QuestionRule };
 
 const NAMED_ENTITIES: Record<string, string> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
+  amp: '&',
+  lt: '<',
+  gt: '>',
   quot: '"',
   apos: "'",
-  nbsp: " ",
-  rsquo: "’",
-  lsquo: "‘",
-  ldquo: "“",
-  rdquo: "”",
-  ndash: "–",
-  mdash: "—",
-  hellip: "…",
-  laquo: "«",
-  raquo: "»",
-  eacute: "é",
-  egrave: "è",
-  ecirc: "ê",
-  euml: "ë",
-  agrave: "à",
-  acirc: "â",
-  ccedil: "ç",
-  icirc: "î",
-  iuml: "ï",
-  ocirc: "ô",
-  ucirc: "û",
-  ugrave: "ù",
-  uuml: "ü",
-  Eacute: "É",
-  Egrave: "È",
-  Agrave: "À",
-  Ccedil: "Ç",
-  oelig: "œ",
+  nbsp: ' ',
+  rsquo: '’',
+  lsquo: '‘',
+  ldquo: '“',
+  rdquo: '”',
+  ndash: '–',
+  mdash: '—',
+  hellip: '…',
+  laquo: '«',
+  raquo: '»',
+  eacute: 'é',
+  egrave: 'è',
+  ecirc: 'ê',
+  euml: 'ë',
+  agrave: 'à',
+  acirc: 'â',
+  ccedil: 'ç',
+  icirc: 'î',
+  iuml: 'ï',
+  ocirc: 'ô',
+  ucirc: 'û',
+  ugrave: 'ù',
+  uuml: 'ü',
+  Eacute: 'É',
+  Egrave: 'È',
+  Agrave: 'À',
+  Ccedil: 'Ç',
+  oelig: 'œ',
 };
 
 function codePoint(n: number, fallback: string): string {
-  return Number.isInteger(n) &&
-    n > 0 &&
-    n <= 0x10ffff &&
-    !(n >= 0xd800 && n <= 0xdfff)
+  return Number.isInteger(n) && n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff)
     ? String.fromCodePoint(n)
     : fallback;
 }
@@ -76,60 +69,48 @@ export function decodeEscapes(text: string): string {
     .replace(/(?:\\u[0-9a-fA-F]{4})+/g, (run) =>
       String.fromCharCode(
         ...run
-          .split("\\u")
+          .split('\\u')
           .filter(Boolean)
           .map((hex) => parseInt(hex, 16)),
       ),
     )
-    .replace(/\\\//g, "/")
+    .replace(/\\\//g, '/')
     .replace(/&#(\d{1,7});/g, (m, d: string) => codePoint(Number(d), m))
-    .replace(/&#x([0-9a-f]{1,6});/gi, (m, h: string) =>
-      codePoint(parseInt(h, 16), m),
-    )
-    .replace(
-      /&([a-zA-Z]+);/g,
-      (m, name: string) =>
-        NAMED_ENTITIES[name] ?? NAMED_ENTITIES[name.toLowerCase()] ?? m,
-    )
-    .replace(/\u00a0/g, " ");
+    .replace(/&#x([0-9a-f]{1,6});/gi, (m, h: string) => codePoint(parseInt(h, 16), m))
+    .replace(/&([a-zA-Z]+);/g, (m, name: string) => NAMED_ENTITIES[name] ?? NAMED_ENTITIES[name.toLowerCase()] ?? m)
+    .replace(/\u00a0/g, ' ');
 }
 
 /** Removes HTML comments: whole ones, lines that are only a comment (or its start), and an unclosed `<!-- url`. */
 function stripComments(text: string): string {
   return text
-    .replace(/^[ \t]*(?:[-*+][ \t]+)?<!--.*(?:\n|$)/gm, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<!--\s*\S*/g, "");
+    .replace(/^[ \t]*(?:[-*+][ \t]+)?<!--.*(?:\n|$)/gm, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!--\s*\S*/g, '');
 }
 
 /** The context as stored: escapes decoded and HTML comments removed. */
 export function cleanContextText(markdown: string): string {
   return stripComments(decodeEscapes(markdown))
-    .replace(/[ \t]+$/gm, "")
-    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
 /** One suggested question as a visitor would type it. */
-export function cleanQuestionText(
-  question: string,
-  language: "en" | "fr",
-): string {
+export function cleanQuestionText(question: string, language: 'en' | 'fr'): string {
   let q = stripComments(decodeEscapes(question));
   // Markdown escapes ("1\.", "\-"), then leading bullets and numbering ("1.", "2)", "Q1:", "Q.", "▸").
-  q = q.replace(/\\([\\`*_{}[\]()#+\-.!?])/g, "$1");
-  q = q.replace(
-    /^\s*(?:[-*+•▸►▪·]\s*|\d{1,2}\s*[.)]\s+|\d{1,2}\s*[.)](?=\S)|Q\d{0,2}\s*[.:)]\s*)+/i,
-    "",
-  );
+  q = q.replace(/\\([\\`*_{}[\]()#+\-.!?])/g, '$1');
+  q = q.replace(/^\s*(?:[-*+•▸►▪·]\s*|\d{1,2}\s*[.)]\s+|\d{1,2}\s*[.)](?=\S)|Q\d{0,2}\s*[.:)]\s*)+/i, '');
   // Emphasis: ** and __ runs become a space (a missing space between words is common), single _ or * at a word edge go.
   q = q
-    .replace(/\*{2,}|_{2,}/g, " ")
-    .replace(/(^|\s)[_*]+(?=\S)/g, "$1")
-    .replace(/(?<=\S)[_*]+(?=\s|$|[?!.,])/g, "");
-  q = q.replace(/\s+/g, " ").trim();
+    .replace(/\*{2,}|_{2,}/g, ' ')
+    .replace(/(^|\s)[_*]+(?=\S)/g, '$1')
+    .replace(/(?<=\S)[_*]+(?=\s|$|[?!.,])/g, '');
+  q = q.replace(/\s+/g, ' ').trim();
   // French puts a space before ? and !; English doesn't.
-  if (language === "en") q = q.replace(/\s+([?!.,:;])/g, "$1");
+  if (language === 'en') q = q.replace(/\s+([?!.,:;])/g, '$1');
   return q;
 }
 
@@ -144,22 +125,17 @@ const WHY_NAME =
 /** A page heading in the business's own voice ("What services do we offer?"), not a visitor's question. */
 const BUSINESS_VOICE =
   /^(?:what|which|where|how)\b.*\b(?:do|does|can) we (?:offer|serve|provide|do)\b|\bwe complete\b|\b(?:offrons|desservons|proposons)-nous\b/;
-const WEB_ADDRESS =
-  /https?:\/\/|www\.|\/\/|\b[\w-]+\.(?:com|ca|net|org|info|biz)\b/i;
+const WEB_ADDRESS = /https?:\/\/|www\.|\/\/|\b[\w-]+\.(?:com|ca|net|org|info|biz)\b/i;
 const POLICY =
   /\b(?:personal (?:information|data)|privacy|cookies?|terms (?:of|and) (?:use|service|conditions)|gdpr|casl)\b|renseignements personnels|données personnelles|confidentialité|conditions d'utilisation|politique de confidentialité/;
 const ACCOUNT =
   /\b(?:accounts?|log ?in|log ?out|sign ?(?:in|up|out)|password|username|my profile|forgot)\b|\b(?:votre|un|mon|ton|créer un) compte\b|connexion|se connecter|mot de passe|identifiant|s'inscrire/;
 
 function isHeadingOrCta(question: string, lower: string): boolean {
-  if (!question.includes("?")) return true;
+  if (!question.includes('?')) return true;
   if (question.length > MAX_QUESTION_CHARS) return true;
   if (WEB_ADDRESS.test(question)) return true;
-  if (
-    CTA_START.test(lower) ||
-    /^why\b(?! should i\b).*\bchoos(?:e|ing)\b/.test(lower)
-  )
-    return true;
+  if (CTA_START.test(lower) || /^why\b(?! should i\b).*\bchoos(?:e|ing)\b/.test(lower)) return true;
   if (WHY_NAME.test(question)) return true;
   if (BUSINESS_VOICE.test(lower)) return true;
   const letters = question.match(/\p{L}/gu) ?? [];
@@ -187,56 +163,51 @@ const has = (re: RegExp) => (_lines: string[], text: string) => re.test(text);
 
 const TOPICS: Topic[] = [
   {
-    name: "area",
+    name: 'area',
     asks: /\b(?:serve|service areas?|my area|what areas|which areas|travel to|come to)\b|desserv|mon secteur|quels secteurs|quelles régions|territoire|vous déplacez/,
     answered: has(
-      /\b(?:serv(?:e|es|ed|ing|icing)|service areas?|surrounding|throughout|areas? we)\b|desserv|environs|\brégions?\b|rive-(?:nord|sud)|\bgta\b/,
+      /\b(?:serv(?:e|es|ed|ing|icing)|service areas?|surrounding|areas? we)\b|desserv|environs|\brégions?\b|rive-(?:nord|sud)|\bgta\b/,
     ),
   },
   {
-    name: "years",
+    name: 'years',
     asks: /how long have you been|how many years|years in business|depuis combien de temps|depuis quand|combien d'années/,
     answered: has(
       /\bsince (?:19|20)\d\d\b|\b\d+\+? years?\b|depuis (?:19|20)\d\d|\bdepuis plus de\b|\b\d+ ans\b|\bfounded\b|\bfondée?\b/,
     ),
   },
   {
-    name: "duration",
+    name: 'duration',
     asks: /\bhow long (?!have you been)|combien de temps (?!êtes)|\bdurée\b|\bdure\b|\btimeline\b|\bdélais?\b/,
     answered: (lines) =>
       lines
         .flatMap((line) => line.split(/(?<=[.!?;])\s+/))
         .some(
-          (sentence) =>
-            DURATION_AMOUNT.test(sentence) &&
-            DURATION_VERB.test(sentence) &&
-            !REPLY_TIME.test(sentence),
+          (sentence) => DURATION_AMOUNT.test(sentence) && DURATION_VERB.test(sentence) && !REPLY_TIME.test(sentence),
         ),
   },
   {
-    name: "insured",
+    name: 'insured',
     asks: /\binsur|\bassur(?:é|e|ance)/,
-    answered: has(
-      /\binsur(?:ed|ance)\b|\bliability\b|\bassur(?:é|ée|és|ées|ance|ances)\b/,
-    ),
+    answered: has(/\binsur(?:ed|ance)\b|\bliability\b|\bassur(?:é|ée|és|ées|ance|ances)\b/),
   },
   {
-    name: "warranty",
+    name: 'warranty',
     asks: /warrant|guarant|garanti/,
     answered: has(/warrant|guarant|garanti/),
   },
   {
-    name: "licensed",
+    name: 'licensed',
     asks: /\blicen[cs]|\brbq\b|\bcertified\b|licenci|certifi/,
     answered: has(/\blicen[cs]|\brbq\b|certifi|licenci/),
   },
   {
-    name: "price",
+    name: 'price',
     asks: /\bcosts?\b|\bprices?\b|\bpricing\b|\bhow much\b|\brates?\b|\bfees?\b|\bcharge\b|\btarifs?\b|\bprix\b|\bcoût|\bcoûte|\bcombien (?:co[uû]t|ça co[uû]t|est-ce que ça co[uû]t|pour |demandez|chargez|facturez)/,
     answered: has(/[$€]\s?\d|\d\s?(?:[$€]|dollars?\b)/),
   },
   {
-    name: "hours",
+    name: 'hours',
     asks: /\bhours\b(?! does| do| will| would)|\bopen\b|heures d'ouverture|\bouverts?\b|\bhoraires?\b/,
     answered: has(
       /\b(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b[^\n]{0,40}\d|\b24\/7\b|\b24 hours\b|\d(?::\d\d)?\s?(?:am|pm)\b|\b\d{1,2}\s?h\s?\d{0,2}\s?(?:à|-|–)/,
@@ -245,18 +216,23 @@ const TOPICS: Topic[] = [
 ];
 
 /** Sections that describe RedBot's scrape, not the business. Their lines never count as an answer. */
-const NOT_EVIDENCE_HEADING =
-  /^#{1,6}\s*(?:gaps|pages scraped|language|langue)\b/i;
+const NOT_EVIDENCE_HEADING = /^#{1,6}\s*(?:gaps|pages scraped|language|langue)\b/i;
 const PLACEHOLDER =
   /\bnot (?:stated|listed|published|found|mentioned|given)\b|\bnon (?:indiqu|précis|mentionn)|\bno faq\b|\(none\)/i;
 
-function evidenceLines(contextMd: string): string[] {
+/**
+ * The context's lines that can answer a question, lower-cased: RedBot's scrape notes, placeholders and headings
+ * ("## Service areas" is not a service area) don't count. `withHeadings` keeps headings, to find a question the
+ * page itself asks.
+ */
+function evidenceLines(contextMd: string, withHeadings = false): string[] {
   const lines: string[] = [];
   let skipping = false;
-  for (const line of contextMd.split("\n")) {
-    if (/^#{1,6}\s/.test(line)) skipping = NOT_EVIDENCE_HEADING.test(line);
-    if (!skipping && line.trim() && !PLACEHOLDER.test(line))
-      lines.push(line.toLowerCase().replace(/’/g, "'"));
+  for (const line of contextMd.split('\n')) {
+    const heading = /^#{1,6}\s/.test(line);
+    if (heading) skipping = NOT_EVIDENCE_HEADING.test(line);
+    if (skipping || !line.trim() || PLACEHOLDER.test(line) || (heading && !withHeadings)) continue;
+    lines.push(line.toLowerCase().replace(/’/g, "'"));
   }
   return lines;
 }
@@ -265,7 +241,7 @@ const normalized = (text: string) =>
   text
     .toLowerCase()
     .replace(/’/g, "'")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 
 /**
@@ -274,11 +250,11 @@ const normalized = (text: string) =>
  */
 export function applyQuestionRules(
   questions: readonly string[],
-  business: { contextMd: string; language: "en" | "fr"; displayName?: string },
+  business: { contextMd: string; language: 'en' | 'fr'; displayName?: string },
 ): { kept: string[]; dropped: DroppedQuestion[] } {
   const lines = evidenceLines(business.contextMd);
-  const text = lines.join("\n");
-  const flatContext = ` ${normalized(lines.join(" "))} `;
+  const text = lines.join('\n');
+  const flatContext = ` ${normalized(evidenceLines(business.contextMd, true).join(' '))} `;
   const names = business.displayName ? [business.displayName] : [];
   const kept: string[] = [];
   const dropped: DroppedQuestion[] = [];
@@ -290,23 +266,18 @@ export function applyQuestionRules(
     seen.add(key);
     const lower = question.toLowerCase().replace(/’/g, "'");
     let rule: QuestionRule | null = null;
-    if (isHeadingOrCta(question, lower)) rule = "heading_or_cta";
-    else if (POLICY.test(lower)) rule = "policy_or_privacy";
-    else if (ACCOUNT.test(lower)) rule = "login_or_account";
+    if (isHeadingOrCta(question, lower)) rule = 'heading_or_cta';
+    else if (POLICY.test(lower)) rule = 'policy_or_privacy';
+    else if (ACCOUNT.test(lower)) rule = 'login_or_account';
     else {
       const language = detectVisitorLanguage(question, { names });
-      if (language !== null && language !== business.language)
-        rule = "wrong_language";
+      if (language !== null && language !== business.language) rule = 'wrong_language';
     }
     if (!rule) {
       const topics = TOPICS.filter((topic) => topic.asks.test(lower));
       const onPage = flatContext.includes(` ${key} `);
-      if (
-        topics.length > 0 &&
-        !onPage &&
-        !topics.every((topic) => topic.answered(lines, text))
-      )
-        rule = "no_answer_in_context";
+      if (topics.length > 0 && !onPage && !topics.every((topic) => topic.answered(lines, text)))
+        rule = 'no_answer_in_context';
     }
     if (rule) dropped.push({ question, rule });
     else kept.push(question);
