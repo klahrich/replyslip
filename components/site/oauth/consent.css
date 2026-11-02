@@ -35,6 +35,21 @@
 .oc-list.is-no li{color:var(--oc-muted)}
 .oc-list.is-no li::before{content:"✕";background:color-mix(in srgb,var(--paper-ink) 7%,transparent);color:var(--oc-muted);font-size:.6875rem}
 
+/* optional extra permissions behind one unticked checkbox (§5.10) */
+.oc-extra{margin-top:24px}
+.oc-extra h2{margin:0;font-family:var(--vt-mono);font-size:.75rem;font-weight:500;letter-spacing:-.01em;color:var(--oc-muted)}
+.oc-extra .oc-warn{margin-top:10px}
+.oc-extra-scope .oc-list{margin-left:28px}
+.oc-check span{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+.oc-extra-asked{display:inline-flex;padding:2px 9px;border-radius:999px;background:var(--oc-soft);color:var(--oc-sage);font:500 .6875rem/1.5 var(--vt-mono);letter-spacing:-.01em}
+.oc-list.is-extra{gap:6px}
+.oc-list.is-extra li{font-size:var(--s-small)}
+.oc-list.is-extra li::before{content:"+";background:color-mix(in srgb,var(--paper-ink) 7%,transparent);color:var(--oc-ink)}
+.oc-warn-strong{padding:12px 14px;border:1px solid #b45309;border-left-width:5px;background:#fdecd0;color:#4a2a00;font-weight:600}
+.oc-check{display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-weight:600;line-height:1.4}
+.oc-check input{flex:none;width:18px;height:18px;margin:1px 0 0;accent-color:var(--oc-sage)}
+.oc-check input:focus-visible{outline:2px solid var(--oc-sage);outline-offset:2px}
+
 /* agent choice */
 .oc-agent{margin:24px 0 0;padding:0;border:0;min-width:0}
 .oc-agent legend{padding:0;font-family:var(--vt-mono);font-size:.75rem;font-weight:500;color:var(--oc-muted)}
@@ -84,5 +99,5 @@
 @media (max-width:480px){
   .oc-page{padding:12px 10px 20px}
   .oc-card{border-radius:14px}
-  .oc-hint,.oc-name{margin-left:0}
+  .oc-hint,.oc-name,.oc-extra-scope .oc-list{margin-left:0}
 }
