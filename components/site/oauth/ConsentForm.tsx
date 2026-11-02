@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 import { ConsentProblemView } from './ConsentFrame';
+import { ExtraScopes } from './ExtraScopes';
 import {
   appLabel,
   canAllow,
   decisionBody,
+  extraScopesOffer,
   initialSelection,
   nameProblem,
   OPENS_APP_FALLBACK,
@@ -50,6 +52,8 @@ export function ConsentForm({ view }: { view: ConsentView }) {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [error, setError] = useState('');
   const [problem, setProblem] = useState<ConsentProblem | null>(null);
+  // The optional extra permissions the user ticked: none to start.
+  const [ticked, setTicked] = useState<string[]>([]);
 
   // The request ends at expires_at; show that instead of letting a late Allow fail.
   useEffect(() => {
@@ -83,7 +87,7 @@ export function ConsentForm({ view }: { view: ConsentView }) {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(decisionBody(view, decision, selection, name, workspace?.id ?? '')),
+        body: JSON.stringify(decisionBody(view, decision, selection, name, workspace?.id ?? '', ticked)),
       });
       status = res.status;
       data = await res.json().catch(() => null);
@@ -112,6 +116,7 @@ export function ConsentForm({ view }: { view: ConsentView }) {
 
   const toApp = opensApp(view.redirect);
   const warning = redirectWarning(view.redirect);
+  const extra = extraScopesOffer(view);
 
   if (phase.kind === 'returning') {
     return (
@@ -214,6 +219,10 @@ export function ConsentForm({ view }: { view: ConsentView }) {
           dashboard.
         </p>
       </div>
+
+      {extra ? (
+        <ExtraScopes offer={extra} ticked={ticked} onChange={setTicked} disabled={busy} id={`${ids}-extra`} />
+      ) : null}
 
       <fieldset className="oc-agent" disabled={busy}>
         <legend>Connect as</legend>

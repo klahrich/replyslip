@@ -37,12 +37,24 @@ export function canAllow(view: ConsentView, selection: Selection, name: string):
   return !view.plan.at_agent_limit && nameProblem(name, view.agent.name_pattern) === null;
 }
 
+/**
+ * The extra-permission field of the Allow POST (`extra_scopes.opt_in_field`, §5.10), from the boxes the user
+ * ticked, in the server's order. The one place that knows the field. Nothing ticked, or nothing offered, adds nothing,
+ * so the app gets the normal access only.
+ */
+export function extraScopeFields(view: ConsentView, ticked: readonly string[]): Pick<AllowBody, 'grant_scopes'> {
+  const granted = (extraScopesOffer(view)?.items ?? []).map((i) => i.name).filter((name) => ticked.includes(name));
+  return granted.length ? { grant_scopes: granted } : {};
+}
+
+/** The POST body. `ticked` lists the extra scopes whose box is ticked; Cancel never sends them. */
 export function decisionBody(
   view: ConsentView,
   decision: 'allow' | 'deny',
   selection: Selection,
   name: string,
   workspaceId: string,
+  ticked: readonly string[] = [],
 ): ConsentDecisionBody {
   const base = { request_id: view.request_id, csrf_token: view.csrf_token, workspace_id: workspaceId };
   if (decision === 'deny') return { ...base, decision: 'deny' };
@@ -50,7 +62,57 @@ export function decisionBody(
     selection.mode === 'reconnect'
       ? { mode: 'reconnect' as const, agent_id: selection.agentId }
       : { mode: 'new' as const, name: name.trim() };
-  return { ...base, decision: 'allow', agent };
+  return { ...base, decision: 'allow', agent, ...extraScopeFields(view, ticked) };
+}
+
+type AllowBody = Extract<ConsentDecisionBody, { decision: 'allow' }>;
+type ExtraScopeName = NonNullable<AllowBody['grant_scopes']>[number];
+/** `extra_scopes` as the page reads it: tolerant of an older server that sends less, or no field at all. */
+type ExtraScopesWire = Partial<ConsentView['extra_scopes']>;
+
+export type ExtraScopesOffer = {
+  /** One unticked checkbox each, in the server's order, with what the scope allows. */
+  items: Array<{ name: ExtraScopeName; title: string; allows: string[]; requestedByClient: boolean }>;
+  /** How long the connection lasts with any box ticked, or null when the server sent no days. */
+  daysNote: string | null;
+  /** The server's warning (e.g. for an unverified app), or null. */
+  warning: string | null;
+  /** Show `warning` prominently: the app is unverified. */
+  urgent: boolean;
+  /** The server's warning for ticking every box at once, or null. Shown only while all of them are ticked. */
+  combinedWarning: string | null;
+};
+
+/** Shown next to a scope the app asked for itself. */
+export const REQUESTED_BY_APP = 'Requested by the app';
+
+export function extraScopesDaysNote(days: number | null): string | null {
+  if (!days) return null;
+  // Copy from #153: "With either one, this connection ends after {connection_days} days."
+  return `With either one, this connection ends after ${days === 1 ? '1 day' : `${days} days`}.`;
+}
+
+/**
+ * The optional extra permissions, one unticked checkbox each, or null when the server offers none
+ * (MCP_OAUTH_OWNER_SCOPE off, or an older server without `extra_scopes`). Then the page shows nothing new.
+ */
+export function extraScopesOffer(view: ConsentView): ExtraScopesOffer | null {
+  const extra = (view as { extra_scopes?: ExtraScopesWire }).extra_scopes;
+  const offered = extra?.offered ?? [];
+  if (!extra || offered.length === 0) return null;
+  const days = typeof extra.connection_days === 'number' && extra.connection_days > 0 ? extra.connection_days : null;
+  return {
+    items: offered.map((o) => ({ name: o.name, title: o.title, allows: o.allows, requestedByClient: o.requested_by_client === true })),
+    daysNote: extraScopesDaysNote(days),
+    warning: extra.warning || null,
+    urgent: extra.unverified_client === true,
+    combinedWarning: offered.length > 1 ? extra.combined_warning || null : null,
+  };
+}
+
+/** The combined warning applies only while every offered box is ticked (and more than one is offered). */
+export function showCombinedWarning(offer: ExtraScopesOffer, ticked: readonly string[]): boolean {
+  return !!offer.combinedWarning && offer.items.every((i) => ticked.includes(i.name));
 }
 
 export type AppLabel = {

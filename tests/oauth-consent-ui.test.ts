@@ -1,8 +1,14 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { ConsentForm } from '@/components/site/oauth/ConsentForm';
+import { ExtraScopes } from '@/components/site/oauth/ExtraScopes';
 import {
   appLabel,
   canAllow,
   decisionBody,
+  extraScopeFields,
+  extraScopesOffer,
   initialSelection,
   isFollowableRedirect,
   nameProblem,
@@ -11,6 +17,7 @@ import {
   problemFromCode,
   redirectWarning,
   returningText,
+  showCombinedWarning,
 } from '@/components/site/oauth/consent-logic';
 import type { ConsentView } from '@/components/site/oauth/consent-types';
 import { safeNextPath } from '@/components/site/oauth/next-path';
@@ -36,6 +43,7 @@ function view(over: Partial<ConsentView> = {}): ConsentView {
     workspaces: [{ id: 'ws1', name: 'Valetto', handle: 'valetto' }],
     agent: { suggested_name: 'chatgpt', name_pattern: PATTERN, reconnect_options: [] },
     scope: { name: 'agent', allows: ['Send tasks'], denies: ['Invite guests'] },
+    extra_scopes: { offered: [], opt_in_field: 'grant_scopes', unverified_client: false, warning: null, combined_warning: null, connection_days: null },
     plan: { at_agent_limit: false, agent_limit: 10 },
     ...over,
   };
@@ -194,5 +202,156 @@ describe('sign-in next path', () => {
       expect(returningText(view({ redirect: cursor }))).toBe('Opening ChatGPT…');
       expect(appLabel(dcrApp)).toMatchObject({ name: '“Cursor”', verified: false });
     });
+  });
+});
+
+// The copy the server serves while MCP_OAUTH_OWNER_SCOPE=1 (lib/oauth/consent.ts ELEVATED_SCOPE_COPY, PR #153).
+type Offered = ConsentView['extra_scopes']['offered'];
+const RESPOND: Offered[number] = {
+  name: 'agent:respond',
+  title: 'Work on tasks sent to it',
+  allows: ['Finish tasks other agents send to it, with an answer', 'Turn down tasks sent to it, with a reason'],
+  requested_by_client: false,
+};
+const OWNER: Offered[number] = {
+  name: 'agent:owner',
+  title: 'Manage your workspace settings and guests',
+  allows: ['Change your workspace handle', 'Invite guests, remove them, and see who has access'],
+  requested_by_client: false,
+};
+const UNVERIFIED_WARNING = "Valetto can't confirm who made this app. Only give it these extra permissions if you trust it.";
+// The page shows whatever combined_warning the server sends; this is #153's copy.
+const COMBINED = 'With both, anyone who sends this app a task could try to get it to change your sharing or guests.';
+
+function offering(over: Record<string, unknown> = {}): ConsentView {
+  return view({
+    extra_scopes: {
+      offered: [RESPOND, OWNER],
+      opt_in_field: 'grant_scopes',
+      unverified_client: false,
+      warning: null,
+      connection_days: 30,
+      combined_warning: COMBINED,
+      ...over,
+    } as ConsentView['extra_scopes'],
+  });
+}
+
+const render = (v: ConsentView) => renderToStaticMarkup(createElement(ConsentForm, { view: v }));
+const decode = (html: string) => html.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+const boxes = (html: string) => html.match(/<input type="checkbox"[^>]*>/g) ?? [];
+
+describe('extra permissions on the Allow page (§5.10)', () => {
+  it('shows nothing new when nothing is offered or the field is missing', () => {
+    expect(extraScopesOffer(view())).toBeNull();
+    const { extra_scopes: _omit, ...older } = view();
+    void _omit;
+    expect(extraScopesOffer(older as ConsentView)).toBeNull();
+    const plain = render(view());
+    expect(plain).not.toMatch(/extra permission/i);
+    expect(boxes(plain)).toHaveLength(0);
+    expect(render(older as ConsentView)).toBe(plain);
+  });
+
+  it('renders one unticked checkbox per offered scope, with what each allows and the days note', () => {
+    const html = decode(render(offering()));
+    const inputs = boxes(html);
+    expect(inputs).toHaveLength(2);
+    for (const input of inputs) expect(input).not.toMatch(/checked/);
+    expect(inputs[0]).toContain('value="agent:respond"');
+    expect(inputs[1]).toContain('value="agent:owner"');
+    for (const item of [RESPOND, OWNER]) {
+      expect(html).toContain(item.title);
+      for (const line of item.allows) expect(html).toContain(line);
+    }
+    expect(html).toContain('With either one, this connection ends after 30 days.');
+    expect(html).not.toContain('oc-warn-strong');
+    expect(html).not.toContain(COMBINED); // nothing ticked yet
+    expect(html).not.toContain('Requested by the app');
+    expect(html.indexOf(RESPOND.title)).toBeLessThan(html.indexOf('Connect as'));
+    expect(html).toMatch(/<button type="submit" class="oc-btn oc-btn-go">Allow<\/button>/);
+  });
+
+  it('handles a single offered scope', () => {
+    const html = decode(render(offering({ offered: [RESPOND] })));
+    expect(boxes(html)).toHaveLength(1);
+    expect(html).not.toContain(OWNER.title);
+    const offer = extraScopesOffer(offering({ offered: [RESPOND] }))!;
+    expect(offer.combinedWarning).toBeNull();
+    expect(showCombinedWarning(offer, ['agent:respond'])).toBe(false);
+  });
+
+  it('shows the combined warning only while every box is ticked', () => {
+    const offer = extraScopesOffer(offering())!;
+    expect(showCombinedWarning(offer, [])).toBe(false);
+    expect(showCombinedWarning(offer, ['agent:respond'])).toBe(false);
+    expect(showCombinedWarning(offer, ['agent:owner'])).toBe(false);
+    expect(showCombinedWarning(offer, ['agent:respond', 'agent:owner'])).toBe(true);
+    expect(showCombinedWarning(extraScopesOffer(offering({ combined_warning: null }))!, ['agent:respond', 'agent:owner'])).toBe(false);
+  });
+
+  it('renders the ticked boxes, and the combined warning only with both ticked', () => {
+    const section = (v: ConsentView, ticked: string[]) =>
+      decode(
+        renderToStaticMarkup(
+          createElement(ExtraScopes, { offer: extraScopesOffer(v)!, ticked, onChange: () => {}, disabled: false, id: 'x' }),
+        ),
+      );
+    const none = section(offering(), []);
+    expect(boxes(none).filter((b) => /checked/.test(b))).toHaveLength(0);
+    expect(none).not.toContain(COMBINED);
+
+    const one = section(offering(), ['agent:owner']);
+    const oneBoxes = boxes(one);
+    expect(oneBoxes[0]).not.toMatch(/checked/);
+    expect(oneBoxes[1]).toMatch(/checked/);
+    expect(one).not.toContain(COMBINED);
+
+    const both = section(offering(), ['agent:respond', 'agent:owner']);
+    expect(boxes(both).filter((b) => /checked/.test(b))).toHaveLength(2);
+    expect(both).toContain(`<p class="oc-warn oc-warn-strong" role="alert">${COMBINED}</p>`);
+
+    const bothNoWarning = section(offering({ combined_warning: null }), ['agent:respond', 'agent:owner']);
+    expect(bothNoWarning).not.toContain('role="alert"');
+    expect(bothNoWarning).not.toContain(COMBINED);
+  });
+
+  it('shows the warning prominently for an unverified app, and badges a scope the app asked for', () => {
+    const html = decode(
+      render(offering({ unverified_client: true, warning: UNVERIFIED_WARNING, offered: [{ ...RESPOND, requested_by_client: true }, OWNER] })),
+    );
+    expect(html).toContain(`<p class="oc-warn oc-warn-strong">${UNVERIFIED_WARNING}</p>`);
+    expect(html.match(/Requested by the app/g)).toHaveLength(1);
+  });
+
+  it('keeps the custom-scheme warning next to the offer', () => {
+    const cursor = { host: 'anysphere.cursor-retrieval', loopback: false, kind: 'custom_scheme' as const, scheme: 'cursor' };
+    const html = decode(render({ ...offering(), redirect: cursor }));
+    expect(html).toContain('This app will receive access through cursor:// on your computer.');
+    expect(html).toContain(RESPOND.title);
+  });
+
+  it('builds the days note from connection_days', () => {
+    expect(extraScopesOffer(offering({ connection_days: 1 }))?.daysNote).toBe('With either one, this connection ends after 1 day.');
+    expect(extraScopesOffer(offering({ connection_days: null }))?.daysNote).toBeNull();
+  });
+
+  it('sends only the ticked scopes, and nothing extra when none is ticked', () => {
+    const v = offering();
+    const both = decisionBody(v, 'allow', { mode: 'new' }, 'chatgpt', 'ws1', ['agent:owner', 'agent:respond']);
+    expect(both).toMatchObject({ decision: 'allow', grant_scopes: ['agent:respond', 'agent:owner'] });
+    expect(JSON.parse(JSON.stringify(both)).grant_scopes).toEqual(['agent:respond', 'agent:owner']);
+    expect(decisionBody(v, 'allow', { mode: 'new' }, 'chatgpt', 'ws1', ['agent:owner'])).toMatchObject({ grant_scopes: ['agent:owner'] });
+    expect(extraScopeFields(v, ['agent:respond'])).toEqual({ grant_scopes: ['agent:respond'] });
+    for (const body of [
+      decisionBody(v, 'allow', { mode: 'new' }, 'chatgpt', 'ws1', []),
+      decisionBody(v, 'allow', { mode: 'new' }, 'chatgpt', 'ws1'),
+      decisionBody(v, 'deny', { mode: 'new' }, 'chatgpt', 'ws1', ['agent:respond']),
+      decisionBody(view(), 'allow', { mode: 'new' }, 'chatgpt', 'ws1', ['agent:respond']),
+      decisionBody(offering({ offered: [RESPOND] }), 'allow', { mode: 'new' }, 'chatgpt', 'ws1', ['agent:owner']),
+    ]) {
+      expect(body).not.toHaveProperty('grant_scopes');
+      expect(body).not.toHaveProperty('grant_owner');
+    }
   });
 });
