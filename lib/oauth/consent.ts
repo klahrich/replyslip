@@ -10,12 +10,12 @@ import { planLimitMessage, workspacePlanUsage } from '../plans';
 import { bindingMatches } from './authorize';
 import { clientDisplay, type ClientDisplay } from './clients';
 import {
+  ELEVATED_SCOPES,
   OAUTH_SCOPE,
   SCOPE_OWNER,
   SCOPE_RESPOND,
   dcrEnabled,
   effectiveScopes,
-  isElevatedScope,
   oauthIssuer,
   ownerGrantMaxDays,
   ownerScopeEnabled,
@@ -51,19 +51,21 @@ export type ConsentView = {
   };
   scope: { name: 'agent'; allows: string[]; denies: string[] };
   /**
-   * §5.10: higher scopes the app asked for, on top of `agent`. `requested` is empty when it asked for none or while
-   * MCP_OAUTH_OWNER_SCOPE is off; then show nothing extra. Otherwise show each one with its `allows` list behind one
-   * unchecked opt-in. The POST grants them only with `grant_owner: true`; without it the app gets `agent` only.
+   * §5.10: higher scopes offered on top of `agent`. While MCP_OAUTH_OWNER_SCOPE is on, `offered` always lists both
+   * (agent:respond, agent:owner), whether or not the app asked for them: the user's opt-in is the authority. While
+   * the flag is off it is empty; then show nothing extra. Show each one with its `allows` list behind one unchecked
+   * opt-in. The POST grants all of them only with `grant_owner: true`; without it the app gets `agent` only.
    */
   extra_scopes: {
-    requested: Array<{ name: ElevatedScope; title: string; allows: string[] }>;
-    /** The consent POST field that grants every scope in `requested`. */
+    /** `requested_by_client`: the app asked for this scope itself (most apps ask only for `agent` or nothing). */
+    offered: Array<{ name: ElevatedScope; title: string; allows: string[]; requested_by_client: boolean }>;
+    /** The consent POST field that grants every scope in `offered`. */
     opt_in_field: 'grant_owner';
-    /** True when `requested` is non-empty and the app is not verified (client.verified false). Show `warning`. */
+    /** True when `offered` is non-empty and the app is not verified (client.verified false). Show `warning`. */
     unverified_client: boolean;
-    /** Plain-language warning for an unverified app asking for more; null otherwise. */
+    /** Plain-language warning for an unverified app; null otherwise. */
     warning: string | null;
-    /** With the opt-in, the connection ends after this many days and must be approved again; null if none requested. */
+    /** With the opt-in, the connection ends after this many days and must be approved again; null if nothing offered. */
     connection_days: number | null;
   };
   plan: { at_agent_limit: boolean; agent_limit: number | null };
@@ -87,7 +89,7 @@ export const AGENT_SCOPE_COPY = {
   ],
 };
 
-/** Plain-language copy for each higher scope (§5.10). Shown only when the app asks for it. */
+/** Plain-language copy for each higher scope (§5.10). Offered on every consent page while the flag is on. */
 export const ELEVATED_SCOPE_COPY: Record<ElevatedScope, { title: string; allows: string[] }> = {
   [SCOPE_RESPOND]: {
     title: 'Work on tasks sent to it',
@@ -196,33 +198,36 @@ export async function loadConsentRequest(req: string, user: SessionUser): Promis
   };
 }
 
-/** The higher scopes stored on the request that can still be granted (the flag is read again here). */
-function requestedExtras(requestScope: string): ElevatedScope[] {
-  return effectiveScopes(requestScope).filter(isElevatedScope);
+/** The higher scopes offered on the consent page: all of them while the flag is on, none while it is off. */
+function offeredExtras(): readonly ElevatedScope[] {
+  return ownerScopeEnabled() ? ELEVATED_SCOPES : [];
 }
 
 function extraScopesView(requestScope: string, verified: boolean): ConsentView['extra_scopes'] {
-  const requested = requestedExtras(requestScope).map((name) => ({
+  const asked = new Set(effectiveScopes(requestScope));
+  const offered = offeredExtras().map((name) => ({
     name,
     title: ELEVATED_SCOPE_COPY[name].title,
     allows: [...ELEVATED_SCOPE_COPY[name].allows],
+    requested_by_client: asked.has(name),
   }));
-  const unverified = requested.length > 0 && !verified;
+  const unverified = offered.length > 0 && !verified;
   return {
-    requested,
+    offered,
     opt_in_field: 'grant_owner',
     unverified_client: unverified,
     warning: unverified ? UNVERIFIED_ELEVATED_WARNING : null,
-    connection_days: requested.length > 0 ? ownerGrantMaxDays() : null,
+    connection_days: offered.length > 0 ? ownerGrantMaxDays() : null,
   };
 }
 
 /**
- * §5.10: the scope the user actually grants. Always `agent`; the higher scopes the request carries are added only on
- * an explicit opt-in, while the flag is on, and never for a disabled client. Never more than was requested.
+ * §5.10: the scope the user actually grants. Always `agent`; every offered higher scope is added on an explicit
+ * opt-in, while the flag is on, and never for a disabled client, whether or not the app asked for it. RFC 6749
+ * §3.3 lets the issued scope differ from the requested one; the token response's `scope` then says what was granted.
  */
-export function grantedScope(requestScope: string, optIn: boolean, client: Pick<OAuthClientRow, 'disabledAt'>): string {
-  const extras = optIn && ownerScopeEnabled() && !client.disabledAt ? requestedExtras(requestScope) : [];
+export function grantedScope(optIn: boolean, client: Pick<OAuthClientRow, 'disabledAt'>): string {
+  const extras = optIn && !client.disabledAt ? offeredExtras() : [];
   return [OAUTH_SCOPE, ...extras].join(' ');
 }
 
@@ -237,7 +242,7 @@ export const consentBodySchema = z.discriminatedUnion('decision', [
         z.object({ mode: z.literal('new'), name: z.string().min(1).max(200) }).strict(),
         z.object({ mode: z.literal('reconnect'), agent_id: z.string().uuid() }).strict(),
       ]),
-      /** §5.10: true grants the higher scopes in extra_scopes.requested. Absent or false: `agent` only. */
+      /** §5.10: true grants the higher scopes in extra_scopes.offered. Absent or false: `agent` only. */
       grant_owner: z.boolean().optional(),
     })
     .strict(),
@@ -281,7 +286,7 @@ export async function decideConsent(req: Request, user: WorkspaceUser, body: Con
   }
 
   const client = await clientRow(request.clientId);
-  const scope = grantedScope(request.scope, body.grant_owner === true, client);
+  const scope = grantedScope(body.grant_owner === true, client);
 
   if (body.workspace_id !== user.workspace.id) {
     throw new HttpError(400, 'validation_error', 'Choose your workspace.', {

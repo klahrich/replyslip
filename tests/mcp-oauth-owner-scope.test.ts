@@ -6,6 +6,7 @@ import { getDb } from '@/db';
 import { agents, oauthClients, oauthGrants } from '@/db/schema';
 import { setCimdFetcherForTests } from '@/lib/oauth/cimd';
 import { disableClient } from '@/lib/oauth/clients';
+import { mcpAuthHandler } from '@/lib/mcp-server';
 import { RSK_SCOPES } from '@/lib/oauth/config';
 import { ELEVATED_SCOPE_COPY, UNVERIFIED_ELEVATED_WARNING, grantedScope } from '@/lib/oauth/consent';
 import { protectedResourceMetadata } from '@/lib/oauth/metadata';
@@ -69,37 +70,47 @@ describe('metadata', () => {
   });
 });
 
-describe('consent view', () => {
-  it('lists each requested higher scope with plain-language copy, and nothing when only agent is asked', async () => {
-    const owner = await signIn();
-    const plain = await startConnect(owner, { scope: 'agent' });
-    expect(plain.view.extra_scopes).toEqual({
-      requested: [],
-      opt_in_field: 'grant_owner',
-      unverified_client: false,
-      warning: null,
-      connection_days: null,
-    });
-    const none = await startConnect(owner, { scope: null });
-    expect(none.view.extra_scopes.requested).toEqual([]);
+describe('401 challenge', () => {
+  it('still says scope="agent" while the flag is on', async () => {
+    const res = await mcpAuthHandler(
+      new Request(`${ISSUER}/api/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+      }),
+    );
+    expect(res.status).toBe(401);
+    const header = res.headers.get('www-authenticate') ?? '';
+    expect(header).toContain('scope="agent"');
+    expect(header).not.toContain('agent:');
+  });
+});
 
-    const asked = await startConnect(owner, { scope: `${ALL} offline_access` });
-    expect(asked.view.client.verified).toBe(true);
-    expect(asked.view.extra_scopes).toEqual({
-      requested: [
-        { name: 'agent:respond', ...ELEVATED_SCOPE_COPY['agent:respond'] },
-        { name: 'agent:owner', ...ELEVATED_SCOPE_COPY['agent:owner'] },
-      ],
+describe('consent view', () => {
+  it('always offers both higher scopes while the flag is on, marking which ones the app asked for', async () => {
+    const owner = await signIn();
+    const offered = (asked: string[]) => [
+      { name: 'agent:respond', ...ELEVATED_SCOPE_COPY['agent:respond'], requested_by_client: asked.includes('agent:respond') },
+      { name: 'agent:owner', ...ELEVATED_SCOPE_COPY['agent:owner'], requested_by_client: asked.includes('agent:owner') },
+    ];
+    const plain = await startConnect(owner, { scope: 'agent' });
+    expect(plain.view.client.verified).toBe(true);
+    expect(plain.view.extra_scopes).toEqual({
+      offered: offered([]),
       opt_in_field: 'grant_owner',
       unverified_client: false,
       warning: null,
       connection_days: 30,
     });
+    const none = await startConnect(owner, { scope: null });
+    expect(none.view.extra_scopes.offered).toEqual(offered([]));
+    const asked = await startConnect(owner, { scope: `${ALL} offline_access` });
+    expect(asked.view.extra_scopes.offered).toEqual(offered(['agent:respond', 'agent:owner']));
     const one = await startConnect(owner, { scope: 'agent:owner' });
-    expect(one.view.extra_scopes.requested.map((s) => s.name)).toEqual(['agent:owner']);
+    expect(one.view.extra_scopes.offered).toEqual(offered(['agent:owner']));
   });
 
-  it('flags an unverified (DCR) app that asks for a higher scope', async () => {
+  it('flags an unverified (DCR) app, whatever it asked for', async () => {
     vi.stubEnv('MCP_OAUTH_DCR', '1');
     const res = await register({ client_name: 'Acme MCP', redirect_uris: [WEB] });
     expect(res.status).toBe(201);
@@ -108,13 +119,15 @@ describe('consent view', () => {
     const asked = await startConnect(owner, { client_id: clientId, redirect_uri: WEB, scope: ALL });
     expect(asked.view.client.verified).toBe(false);
     expect(asked.view.extra_scopes).toMatchObject({ unverified_client: true, warning: UNVERIFIED_ELEVATED_WARNING });
+    // Also when the app asked for nothing extra: the offer is always there, so the warning is too.
     const plain = await startConnect(owner, { client_id: clientId, redirect_uri: WEB, scope: 'agent' });
-    expect(plain.view.extra_scopes).toMatchObject({ requested: [], unverified_client: false, warning: null });
+    expect(plain.view.extra_scopes).toMatchObject({ unverified_client: true, warning: UNVERIFIED_ELEVATED_WARNING });
+    expect(plain.view.extra_scopes.offered.every((s) => !s.requested_by_client)).toBe(true);
   });
 });
 
 describe('consent POST', () => {
-  it('grants the higher scopes only with grant_owner: true, and lists tools per scope', async () => {
+  it('grants the higher scopes only with grant_owner: true, whether or not the app asked, and lists tools per scope', async () => {
     const owner = await signIn();
     const without = await connectWith(owner, ALL, undefined, 'plain');
     expect(without.tokens.scope).toBe('agent');
@@ -127,20 +140,23 @@ describe('consent POST', () => {
     expect(full.tokens.scope).toBe(ALL);
     expect(await names(full.tokens.access_token)).toEqual(Object.keys(TOOL_SCOPES).sort());
 
-    const respond = await connectWith(owner, 'agent agent:respond', true, 'respond');
-    expect(respond.tokens.scope).toBe('agent agent:respond');
-    expect(await names(respond.tokens.access_token)).toEqual([...AGENT_TOOLS, ...RESPOND_TOOLS].sort());
-
-    const ownerOnly = await connectWith(owner, 'agent:owner', true, 'owner-only');
-    expect(ownerOnly.tokens.scope).toBe('agent agent:owner');
-    expect(await names(ownerOnly.tokens.access_token)).toEqual([...AGENT_TOOLS, ...OWNER_TOOLS].sort());
+    // The common case: the app follows the 401 challenge (agent) or asks for nothing. The opt-in still grants all,
+    // and the token response's scope says what was granted (RFC 6749 §3.3).
+    for (const [scope, name] of [['agent', 'claude'], [null, 'cursor'], ['agent:respond', 'partial']] as const) {
+      const app = await connectWith(owner, scope as string, true, name);
+      expect(app.tokens.scope).toBe(ALL);
+      expect((await grantRow(app.tokens.access_token)).scope).toBe(ALL);
+      expect(await names(app.tokens.access_token)).toEqual(Object.keys(TOOL_SCOPES).sort());
+    }
   });
 
-  it('never grants more than was requested', async () => {
+  it('lists tools per scope for a grant holding only one higher scope', async () => {
     const owner = await signIn();
-    const app = await connectWith(owner, 'agent', true);
-    expect(app.tokens.scope).toBe('agent');
-    expect((await grantRow(app.tokens.access_token)).scope).toBe('agent');
+    for (const [extra, tools] of [['agent:respond', RESPOND_TOOLS], ['agent:owner', OWNER_TOOLS]] as const) {
+      const app = await connectWith(owner, 'agent', false, extra.replace(':', '-'));
+      await getDb().update(oauthGrants).set({ scope: `agent ${extra}` }).where(eq(oauthGrants.id, (await grantRow(app.tokens.access_token)).id));
+      expect(await names(app.tokens.access_token)).toEqual([...AGENT_TOOLS, ...tools].sort());
+    }
   });
 
   it('an opted-in token can call the higher tools; an agent-only one still gets insufficient_scope', async () => {
@@ -189,9 +205,9 @@ describe('consent POST', () => {
   });
 
   it('a disabled client never gets the higher scope', async () => {
-    expect(grantedScope(ALL, true, { disabledAt: new Date() })).toBe('agent');
-    expect(grantedScope(ALL, true, { disabledAt: null })).toBe(ALL);
-    expect(grantedScope(ALL, false, { disabledAt: null })).toBe('agent');
+    expect(grantedScope(true, { disabledAt: new Date() })).toBe('agent');
+    expect(grantedScope(true, { disabledAt: null })).toBe(ALL);
+    expect(grantedScope(false, { disabledAt: null })).toBe('agent');
 
     const owner = await signIn();
     const started = await startConnect(owner, { scope: ALL });
@@ -232,9 +248,10 @@ describe('refresh', () => {
     expect(await names(same.data.access_token)).toEqual(AGENT_TOOLS);
   });
 
-  it('an opted-in grant refreshes to the same scope, not more', async () => {
+  it('a one-higher-scope grant refreshes to the same scope, not more', async () => {
     const owner = await signIn();
-    const respond = await connectWith(owner, 'agent agent:respond', true);
+    const respond = await connectWith(owner, 'agent', false);
+    await getDb().update(oauthGrants).set({ scope: 'agent agent:respond' }).where(eq(oauthGrants.id, (await grantRow(respond.tokens.access_token)).id));
     const asked = await token({
       grant_type: 'refresh_token',
       refresh_token: respond.tokens.refresh_token!,
@@ -249,11 +266,11 @@ describe('refresh', () => {
 });
 
 describe('MCP_OAUTH_OWNER_SCOPE off', () => {
-  it('asks for a higher scope fall back to agent without failing, even with the opt-in', async () => {
+  it('offers nothing extra, and asks for a higher scope fall back to agent without failing, even with the opt-in', async () => {
     vi.stubEnv('MCP_OAUTH_OWNER_SCOPE', '');
     const owner = await signIn();
     const started = await startConnect(owner, { scope: ALL });
-    expect(started.view.extra_scopes).toMatchObject({ requested: [], unverified_client: false, connection_days: null });
+    expect(started.view.extra_scopes).toMatchObject({ offered: [], unverified_client: false, warning: null, connection_days: null });
     const app = await connectWith(owner, ALL, true);
     expect(app.tokens.scope).toBe('agent');
     const grant = await grantRow(app.tokens.access_token);

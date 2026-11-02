@@ -11,8 +11,8 @@ export const DEFAULT_ISSUER = 'https://valetto.tech';
 export const DEFAULT_CIMD_HOSTS = ['chatgpt.com', 'claude.ai'];
 export const OAUTH_SCOPE = 'agent';
 /**
- * The higher scopes (§5.10). An rsk_ key always holds them. An OAuth app gets them only while MCP_OAUTH_OWNER_SCOPE=1,
- * only when it asks, and only when the user opts in on the consent page.
+ * The higher scopes (§5.10). An rsk_ key always holds them. An OAuth app gets them only while MCP_OAUTH_OWNER_SCOPE=1
+ * and only when the user opts in on the consent page, which offers them whether or not the app asked.
  */
 export const SCOPE_RESPOND = 'agent:respond';
 export const SCOPE_OWNER = 'agent:owner';
