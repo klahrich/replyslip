@@ -21,6 +21,8 @@ export type RedbotBusiness = {
   tileColor: string | null;
   desktopShotPath: string | null;
   mobileShotPath: string | null;
+  /** Shots that index.json's `screenshots` object sets to null (RedBot couldn't take them). The import refuses these. */
+  missingShots: ('desktop' | 'mobile')[];
 };
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,62}$/;
@@ -53,6 +55,15 @@ function shotPath(shotsDir: string, contextDir: string, slug: string, kind: 'des
     explicit ? resolve(dirname(contextDir), explicit) : null,
     ...(kind === 'desktop' ? IMAGE_EXTS.map((ext) => join(contextDir, `${slug}.${ext}`)) : []),
   ]);
+}
+
+/** True when index.json's `screenshots` object has the key for this kind and sets it to null. */
+function markedMissing(meta: Record<string, unknown>, keys: string[]): boolean {
+  const value = meta.screenshots;
+  if (!value || typeof value !== 'object') return false;
+  const shots = value as Record<string, unknown>;
+  const present = keys.filter((key) => key in shots);
+  return present.length > 0 && present.every((key) => shots[key] === null);
 }
 
 function nested(meta: Record<string, unknown>, key: string, inner: string[]): string | null {
@@ -107,6 +118,8 @@ export function loadRedbotBusinesses(contextDir: string, shotsDir: string = join
     const metaQuestions = Array.isArray(meta.suggested_questions)
       ? (meta.suggested_questions as unknown[]).filter((q): q is string => typeof q === 'string' && q.trim() !== '')
       : [];
+    const desktopMissing = markedMissing(meta, ['desktop_1440', 'desktop']);
+    const mobileMissing = markedMissing(meta, ['mobile_390', 'mobile']);
     return {
       slug,
       displayName: (pick(meta, ['display_name', 'name', 'business_name', 'business']) ?? parsed.title ?? slug).slice(0, 120),
@@ -116,8 +129,14 @@ export function loadRedbotBusinesses(contextDir: string, shotsDir: string = join
       suggestedQuestions: (metaQuestions.length > 0 ? metaQuestions.map((q) => q.trim()) : parsed.suggestedQuestions).slice(0, 10),
       tileColor: ((c) => (c && /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : null))(pick(meta, ['tile_color', 'brand_color', 'color'])),
       language,
-      desktopShotPath: shotPath(shotsDir, dir, slug, 'desktop', pick(meta, ['desktop', 'desktop_shot']) ?? nested(meta, 'screenshots', ['desktop_1440', 'desktop'])),
-      mobileShotPath: shotPath(shotsDir, dir, slug, 'mobile', pick(meta, ['mobile', 'mobile_shot']) ?? nested(meta, 'screenshots', ['mobile_390', 'mobile'])),
+      // A shot index.json sets to null is missing: never fall back to an older <slug>-<kind> file by name.
+      desktopShotPath: desktopMissing
+        ? null
+        : shotPath(shotsDir, dir, slug, 'desktop', pick(meta, ['desktop', 'desktop_shot']) ?? nested(meta, 'screenshots', ['desktop_1440', 'desktop'])),
+      mobileShotPath: mobileMissing
+        ? null
+        : shotPath(shotsDir, dir, slug, 'mobile', pick(meta, ['mobile', 'mobile_shot']) ?? nested(meta, 'screenshots', ['mobile_390', 'mobile'])),
+      missingShots: [...(desktopMissing ? (['desktop'] as const) : []), ...(mobileMissing ? (['mobile'] as const) : [])],
     };
   });
 }
@@ -167,6 +186,14 @@ export function writeLinkFile(path: string, line: string): void {
  * has no live one. No model calls: suggested questions are answered live when a visitor taps them.
  */
 export async function importRedbotBusinesses(db: Db, businesses: RedbotBusiness[], options: ImportOptions) {
+  // Checked before any write, so a batch with a missing shot imports nothing and names the business.
+  const missing = businesses.filter((entry) => entry.missingShots.length > 0);
+  if (missing.length > 0) {
+    throw new Error(
+      `index.json marks a screenshot as missing (null) for ${missing.map((e) => `${e.slug} (${e.missingShots.join(', ')})`).join('; ')}. ` +
+        'Reshoot it, or leave the business out with --only.',
+    );
+  }
   const summary: { slug: string; created: boolean; link: boolean }[] = [];
   for (const entry of businesses) {
     const desktop = entry.desktopShotPath ? await prepareShot(entry.desktopShotPath, 'desktop', options.rawShots) : null;
