@@ -191,7 +191,7 @@ export async function importRedbotBusinesses(db: Db, businesses: RedbotBusiness[
   if (missing.length > 0) {
     throw new Error(
       `index.json marks a screenshot as missing (null) for ${missing.map((e) => `${e.slug} (${e.missingShots.join(', ')})`).join('; ')}. ` +
-        'Reshoot it, or leave the business out with --only.',
+        'Reshoot it, or rerun with --only listing the other slugs.',
     );
   }
   const summary: { slug: string; created: boolean; link: boolean }[] = [];
