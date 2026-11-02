@@ -9,7 +9,11 @@ import {
   decisionBody,
   initialSelection,
   nameProblem,
+  OPENS_APP_FALLBACK,
+  OPENS_APP_NOTE,
+  opensApp,
   outcomeFromResponse,
+  redirectWarning,
   returningText,
   type Selection,
 } from './consent-logic';
@@ -29,7 +33,7 @@ function LocalDate({ iso }: { iso: string }) {
   );
 }
 
-type Phase = { kind: 'idle' } | { kind: 'sending'; decision: 'allow' | 'deny' } | { kind: 'returning' };
+type Phase = { kind: 'idle' } | { kind: 'sending'; decision: 'allow' | 'deny' } | { kind: 'returning'; url: string };
 
 /**
  * "Allow access?" for one authorization request. What the app may and may not do, its name and host, and the
@@ -88,9 +92,9 @@ export function ConsentForm({ view }: { view: ConsentView }) {
       setError('Couldn’t reach Valetto. Check your connection and try again.');
       return;
     }
-    const outcome = outcomeFromResponse(status, data);
+    const outcome = outcomeFromResponse(status, data, view.redirect);
     if (outcome.kind === 'redirect') {
-      setPhase({ kind: 'returning' });
+      setPhase({ kind: 'returning', url: outcome.url });
       window.location.assign(outcome.url);
       return;
     }
@@ -106,11 +110,23 @@ export function ConsentForm({ view }: { view: ConsentView }) {
     setError(outcome.message);
   }
 
+  const toApp = opensApp(view.redirect);
+  const warning = redirectWarning(view.redirect);
+
   if (phase.kind === 'returning') {
     return (
-      <div className="oc-returning" role="status">
-        <span className="oc-spinner" aria-hidden="true" />
-        <p>{returningText(view)}</p>
+      <div className="oc-returning-wrap">
+        <div className="oc-returning" role="status">
+          <span className="oc-spinner" aria-hidden="true" />
+          <p>{returningText(view)}</p>
+        </div>
+        {toApp ? (
+          <p className="oc-note">
+            {OPENS_APP_FALLBACK.before}
+            <a href={phase.url}>{OPENS_APP_FALLBACK.link}</a>
+            {OPENS_APP_FALLBACK.after}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -153,11 +169,8 @@ export function ConsentForm({ view }: { view: ConsentView }) {
       {app.verified ? null : (
         <p className="oc-warn">Valetto can’t confirm who made this app. Only allow it if you added it yourself.</p>
       )}
-      {view.redirect.loopback ? (
-        <p className="oc-warn">
-          This app will receive access on your own computer (localhost). Only continue if you just started this from a
-          program you trust.
-        </p>
+      {warning ? (
+        <p className="oc-warn">{warning}</p>
       ) : app.returnsTo ? (
         <p className="oc-note">You’ll go back to {app.returnsTo}.</p>
       ) : null}
@@ -282,6 +295,8 @@ export function ConsentForm({ view }: { view: ConsentView }) {
       <p className="oc-error" role="alert">
         {error}
       </p>
+
+      {toApp ? <p className="oc-note oc-opens">{OPENS_APP_NOTE}</p> : null}
 
       <div className="oc-actions">
         <button type="button" className="oc-btn" onClick={() => void decide('deny')} disabled={busy}>

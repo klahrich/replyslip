@@ -4,9 +4,12 @@ import {
   canAllow,
   decisionBody,
   initialSelection,
+  isFollowableRedirect,
   nameProblem,
+  OPENS_APP_NOTE,
   outcomeFromResponse,
   problemFromCode,
+  redirectWarning,
   returningText,
 } from '@/components/site/oauth/consent-logic';
 import type { ConsentView } from '@/components/site/oauth/consent-types';
@@ -143,5 +146,53 @@ describe('sign-in next path', () => {
     ]) {
       expect(safeNextPath(bad)).toBe('/dashboard');
     }
+  });
+
+  describe('desktop app redirects (cursor://, vscode://, com.example.app:/)', () => {
+    const cursor = { host: 'anysphere.cursor-retrieval', loopback: false, kind: 'custom_scheme' as const, scheme: 'cursor' };
+    const reverse = { host: 'com.example.app', loopback: false, kind: 'custom_scheme' as const, scheme: 'com.example.app' };
+    const web = { host: 'chatgpt.com', loopback: false, kind: 'https' as const, scheme: null };
+    const dcrApp = view({
+      client: { display_name: 'Cursor', client_name: 'Cursor', verified: false, kind: 'dcr', client_uri_host: null, logo_url: null },
+      redirect: cursor,
+    });
+
+    it('follows the app scheme after Allow and after Cancel', () => {
+      const code = 'cursor://anysphere.cursor-retrieval/oauth/callback?code=abc&state=s1&iss=https%3A%2F%2Fvaletto.tech';
+      const denied = 'cursor://anysphere.cursor-retrieval/oauth/callback?error=access_denied&state=s1&iss=https%3A%2F%2Fvaletto.tech';
+      expect(outcomeFromResponse(200, { redirect_to: code }, cursor)).toEqual({ kind: 'redirect', url: code });
+      expect(outcomeFromResponse(200, { redirect_to: denied }, cursor)).toEqual({ kind: 'redirect', url: denied });
+      expect(isFollowableRedirect('com.example.app:/cb?code=abc', reverse)).toBe(true);
+      expect(isFollowableRedirect('https://chatgpt.com/cb?code=abc', web)).toBe(true);
+      expect(isFollowableRedirect('http://127.0.0.1:54321/cb?code=abc', { host: '127.0.0.1', loopback: true, kind: 'loopback', scheme: null })).toBe(true);
+    });
+
+    it('refuses a scheme the view did not name, and never follows script, file or browser schemes', () => {
+      expect(outcomeFromResponse(200, { redirect_to: 'cursor://x/cb?code=abc' })).toMatchObject({ kind: 'error', code: 'bad_response' });
+      expect(isFollowableRedirect('cursor://x/cb?code=abc', web)).toBe(false);
+      expect(isFollowableRedirect('vscode://x/cb?code=abc', cursor)).toBe(false);
+      for (const scheme of ['javascript', 'data', 'file', 'blob', 'about', 'vbscript', 'chrome', 'chrome-extension', 'edge', 'moz-extension', 'view-source']) {
+        const url = `${scheme}:alert(1)`;
+        expect(isFollowableRedirect(url, { ...cursor, scheme })).toBe(false);
+        expect(outcomeFromResponse(200, { redirect_to: url }, { ...cursor, scheme }).kind).toBe('error');
+      }
+      expect(isFollowableRedirect('JavaScript:alert(1)', { ...cursor, scheme: 'javascript' })).toBe(false);
+      expect(isFollowableRedirect('cursor://x/cb?code=a\nb', cursor)).toBe(false);
+      expect(isFollowableRedirect('cursor://x/cb', { ...cursor, scheme: null })).toBe(false);
+    });
+
+    it('warns that access goes to an app on this computer, naming the scheme', () => {
+      expect(redirectWarning(cursor)).toBe(
+        'This app will receive access through cursor:// on your computer. Only continue if you just started this from an app you trust.',
+      );
+      expect(redirectWarning(reverse)).toMatch(/through com\.example\.app:\/ on your computer/);
+      expect(redirectWarning({ host: 'localhost', loopback: true, kind: 'loopback', scheme: null })).toMatch(/localhost/);
+      expect(redirectWarning({ host: 'localhost', loopback: true })).toMatch(/localhost/);
+      expect(redirectWarning(web)).toBeNull();
+      expect(OPENS_APP_NOTE).toMatch(/opens the app/);
+      expect(returningText(dcrApp)).toBe('Opening the app…');
+      expect(returningText(view({ redirect: cursor }))).toBe('Opening ChatGPT…');
+      expect(appLabel(dcrApp)).toMatchObject({ name: '“Cursor”', verified: false });
+    });
   });
 });

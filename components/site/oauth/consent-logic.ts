@@ -1,3 +1,4 @@
+import { isForbiddenScheme } from '@/lib/oauth/redirect';
 import type { ConsentDecisionBody, ConsentProblem, ConsentView } from './consent-types';
 
 /** The fallback when the server's pattern can't be compiled: AGENT_NAME_PATTERN in lib/constants.ts. */
@@ -72,9 +73,70 @@ export function appLabel(view: ConsentView): AppLabel {
   return { name, host, verified: client.verified, returnsTo: redirect.host !== host ? redirect.host : null, initial };
 }
 
-/** "Returning to ChatGPT…", or a neutral line for an app we can't confirm. */
+type Redirect = ConsentView['redirect'];
+
+/** Does the browser go back to an app on this device (cursor://, vscode://, com.example.app:/) rather than a website? */
+export function opensApp(redirect: Redirect): boolean {
+  return redirect.kind === 'custom_scheme';
+}
+
+/** How the page names an app scheme: cursor:// for a URI with a host, com.example.app:/ for a reverse-domain one. */
+export function schemeLabel(redirect: Redirect): string | null {
+  if (!opensApp(redirect) || !redirect.scheme) return null;
+  return redirect.host === redirect.scheme ? `${redirect.scheme}:/` : `${redirect.scheme}://`;
+}
+
+/** The warning under the app name for a redirect that stays on this computer, or null for a website. */
+export function redirectWarning(redirect: Redirect): string | null {
+  const label = schemeLabel(redirect);
+  if (label) {
+    return `This app will receive access through ${label} on your computer. Only continue if you just started this from an app you trust.`;
+  }
+  if (redirect.loopback) {
+    return 'This app will receive access on your own computer (localhost). Only continue if you just started this from a program you trust.';
+  }
+  return null;
+}
+
+/** Said near the buttons when Allow hands off to a desktop app. */
+export const OPENS_APP_NOTE = 'Pressing Allow opens the app on your computer. Your browser may ask first whether to open it.';
+
+/** "Returning to ChatGPT…", "Opening the app…", or a neutral line for an app we can't confirm. */
 export function returningText(view: ConsentView): string {
-  return view.client.verified ? `Returning to ${view.client.client_name}…` : 'Returning to the app…';
+  const name = view.client.verified ? view.client.client_name : 'the app';
+  return opensApp(view.redirect) ? `Opening ${name}…` : `Returning to ${name}…`;
+}
+
+/** Shown under "Opening the app…" in case the browser blocked or missed the hand-off. */
+export const OPENS_APP_FALLBACK = {
+  before: 'Nothing happened? ',
+  link: 'Open the app again',
+  after: ', or go back to it and connect from there.',
+} as const;
+
+/**
+ * Schemes the page never navigates to, whatever the server answers: script and inline content, local files, and
+ * browser-internal or extension pages. The server's list (lib/oauth/redirect.ts) plus a local floor, so this check
+ * stands on its own.
+ */
+const NEVER_FOLLOW = new Set(['javascript', 'vbscript', 'data', 'file', 'blob', 'about', 'view-source', 'filesystem']);
+
+function schemeOf(url: string): string | null {
+  return /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1]?.toLowerCase() ?? null;
+}
+
+/**
+ * Is `url` a place the page may send the browser after Allow or Cancel? A website (http or https), or, when the
+ * consent view said the app lives on this computer, a URL in exactly that app scheme. Never a script, file or
+ * browser-internal scheme.
+ */
+export function isFollowableRedirect(url: string, redirect?: Redirect): boolean {
+  const scheme = schemeOf(url);
+  if (!scheme) return false;
+  if (scheme === 'https' || scheme === 'http') return /^https?:\/\/[^/?#\s]/i.test(url);
+  if (NEVER_FOLLOW.has(scheme) || isForbiddenScheme(scheme)) return false;
+  if (!redirect || !opensApp(redirect) || !redirect.scheme) return false;
+  return scheme === redirect.scheme.toLowerCase() && !/[\s\u0000-\u001f\u007f]/.test(url);
 }
 
 export type PostOutcome =
@@ -88,11 +150,11 @@ export function problemFromCode(code: string): ConsentProblem | null {
   return (PROBLEM_CODES as string[]).includes(code) ? (code as ConsentProblem) : null;
 }
 
-/** Turns the POST /api/oauth/consent answer into what the page does next. */
-export function outcomeFromResponse(status: number, data: unknown): PostOutcome {
+/** Turns the POST /api/oauth/consent answer into what the page does next. Pass the view's redirect so an app scheme is followed. */
+export function outcomeFromResponse(status: number, data: unknown, redirect?: Redirect): PostOutcome {
   if (status === 200) {
     const url = (data as { redirect_to?: unknown } | null)?.redirect_to;
-    if (typeof url === 'string' && /^https?:\/\//i.test(url)) return { kind: 'redirect', url };
+    if (typeof url === 'string' && isFollowableRedirect(url, redirect)) return { kind: 'redirect', url };
     return { kind: 'error', code: 'bad_response', message: 'Something went wrong. Try again.' };
   }
   const err = (data as { error?: { code?: unknown; details?: unknown } } | null)?.error;
