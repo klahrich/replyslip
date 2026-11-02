@@ -11,7 +11,7 @@ import { bindingMatches } from './authorize';
 import { clientDisplay, type ClientDisplay } from './clients';
 import { oauthIssuer } from './config';
 import { agentNameBase, createAuthorizationCode, firstFreeAgentName, isReconnectTarget, reconnectOptions } from './grants';
-import { isLoopbackHost, redirectHost, withQuery } from './redirect';
+import { isLoopbackHost, redirectHost, redirectKind, withQuery, type RedirectKind } from './redirect';
 import { REQUEST_TOKEN_PATTERN, oauthNow } from './tokens';
 
 /**
@@ -24,7 +24,13 @@ export type ConsentView = {
   csrf_token: string;
   expires_at: string;
   client: ClientDisplay;
-  redirect: { host: string; loopback: boolean };
+  /**
+   * Where the code goes. `host` and `loopback` are the original §6.1 fields. `kind` and `scheme` were added with DCR
+   * (PR 3) and are always set by the server; they are optional in the type so older fixtures still compile.
+   * kind: 'https' (a web callback), 'loopback' (http://localhost, 127.0.0.1 or [::1]: same as loopback: true), or
+   * 'custom_scheme' (an app on this computer, e.g. cursor://; `scheme` is "cursor", without "://").
+   */
+  redirect: { host: string; loopback: boolean; kind?: RedirectKind; scheme?: string | null };
   user: { email: string };
   workspaces: Array<{ id: string; name: string; handle: string | null }>;
   agent: {
@@ -121,7 +127,7 @@ export async function loadConsentRequest(req: string, user: SessionUser): Promis
     csrf_token: consentCsrfToken(request.id, user.id),
     expires_at: request.expiresAt.toISOString(),
     client: clientDisplay(client),
-    redirect: { host, loopback: isLoopbackHost(host) },
+    redirect: { host, loopback: isLoopbackHost(host), ...redirectKind(request.redirectUri) },
     user: { email: user.email },
     workspaces: [{ id: workspace.id, name: workspace.name, handle: workspace.handle }],
     agent: {

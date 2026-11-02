@@ -13,12 +13,13 @@ export function protectedResourceMetadata() {
 }
 
 /**
- * RFC 8414 authorization server metadata (§2.3). DCR is not built yet (rollout PR 3), so registration_endpoint and
- * the client_secret_* methods are listed only once MCP_OAUTH_DCR=1 and the register route exist.
+ * RFC 8414 authorization server metadata (§2.3). registration_endpoint is listed only while MCP_OAUTH_DCR=1. Every
+ * client is public (CIMD and DCR alike), so the only token endpoint auth method is `none`: that is also what Claude
+ * and ChatGPT need to pick CIMD, and what a DCR client gets back whatever method it asked for.
  */
 export function authorizationServerMetadata() {
   const dcr = dcrEnabled();
-  const authMethods = dcr ? ['none', 'client_secret_post', 'client_secret_basic'] : ['none'];
+  const authMethods = ['none'];
   return {
     issuer: oauthIssuer(),
     authorization_endpoint: absoluteIssuerUrl('/api/oauth/authorize'),

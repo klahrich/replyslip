@@ -71,6 +71,16 @@ export function redirectHost(uri: string): string {
   return url.hostname || url.protocol.replace(/:$/, '');
 }
 
+export type RedirectKind = 'https' | 'loopback' | 'custom_scheme';
+
+/** For the consent page's warnings (ConsentView.redirect.kind / scheme). */
+export function redirectKind(uri: string): { kind: RedirectKind; scheme: string | null } {
+  if (isLoopbackRedirect(uri)) return { kind: 'loopback', scheme: null };
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(uri)?.[1]?.toLowerCase() ?? '';
+  if (scheme === 'https') return { kind: 'https', scheme: null };
+  return { kind: 'custom_scheme', scheme };
+}
+
 export function isLoopbackHost(host: string): boolean {
   return LOOPBACK_HOSTS.has(host);
 }

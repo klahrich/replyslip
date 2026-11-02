@@ -1,4 +1,4 @@
-/** RFC 6749 §5.2 / RFC 8707 error codes the token, authorize and revoke endpoints return. */
+/** RFC 6749 §5.2 / RFC 8707 / RFC 7591 error codes the token, authorize, revoke and register endpoints return. */
 export type OAuthErrorCode =
   | 'invalid_request'
   | 'invalid_client'
@@ -9,7 +9,10 @@ export type OAuthErrorCode =
   | 'invalid_scope'
   | 'invalid_target'
   | 'access_denied'
-  | 'server_error';
+  | 'server_error'
+  /** RFC 7591 §3.2.2, registration only. */
+  | 'invalid_redirect_uri'
+  | 'invalid_client_metadata';
 
 /**
  * An OAuth protocol error. `description` is fixed server copy: it never echoes request input (§5.5) and never carries

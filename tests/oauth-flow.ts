@@ -1,5 +1,6 @@
 import { GET as authorizeRoute } from '@/app/api/oauth/authorize/route';
 import { POST as consentRoute } from '@/app/api/oauth/consent/route';
+import { POST as registerRoute } from '@/app/api/oauth/register/route';
 import { POST as revokeRoute } from '@/app/api/oauth/revoke/route';
 import { POST as tokenRoute } from '@/app/api/oauth/token/route';
 import { requireUser } from '@/lib/auth';
@@ -99,6 +100,28 @@ export async function postForm(
 export const token = (form: Record<string, string>, headers?: Record<string, string>) =>
   postForm(tokenRoute, '/api/oauth/token', form, headers);
 export const revoke = (form: Record<string, string>) => postForm(revokeRoute, '/api/oauth/revoke', form);
+
+/** POST /api/oauth/register (RFC 7591) with a JSON body, from `ip`. A string body is sent as-is. */
+export async function register(
+  body: unknown,
+  options: { ip?: string; contentType?: string } = {},
+) {
+  const res = await registerRoute(
+    new Request(`${ISSUER}/api/oauth/register`, {
+      method: 'POST',
+      headers: { 'content-type': options.contentType ?? 'application/json', 'x-forwarded-for': options.ip ?? '203.0.113.7' },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    }),
+  );
+  const text = await res.text();
+  let data: Record<string, unknown> | null = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  return { status: res.status, res, text, data: data as Record<string, any> | null };
+}
 
 /** The whole public-client flow: authorize, Allow, code exchange. */
 export async function connect(

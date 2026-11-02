@@ -101,6 +101,18 @@ export function dcrSchemes(): string[] {
     .filter((scheme) => /^[a-z][a-z0-9+.-]*$/.test(scheme));
 }
 
+/**
+ * Optional https host allowlist for DCR redirect URIs (MCP_OAUTH_DCR_REDIRECT_HOSTS, comma-separated). Unset or empty
+ * means any https host: DCR is open self-registration for any standard MCP client. Loopback is never affected.
+ */
+export function dcrRedirectHosts(): string[] | null {
+  const hosts = (process.env.MCP_OAUTH_DCR_REDIRECT_HOSTS ?? '')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter((host) => host.length > 0);
+  return hosts.length > 0 ? hosts : null;
+}
+
 /** Called at server start: throws when the flag is on and the issuer is missing (production) or malformed. */
 export function validateOAuthConfig(): void {
   if (!oauthEnabled()) return;

@@ -12,7 +12,7 @@ import { setOAuthClockForTests } from '@/lib/oauth/tokens';
 import { mcpAuthHandler } from '@/lib/mcp-server';
 import { call, createAgent, createKey, mcpTool, signIn } from './helpers';
 import { CLAUDE_CLIENT_ID, stubCimd } from './oauth-fixtures';
-import { CLAUDE_REDIRECT, ISSUER, RESOURCE, connect, postConsent, startConnect, token } from './oauth-flow';
+import { CLAUDE_REDIRECT, ISSUER, RESOURCE, connect, postConsent, register, startConnect, token } from './oauth-flow';
 
 /** docs/design/mcp-oauth.md §7: a fake MCP client (Claude, via CIMD) end to end through the real route handlers. */
 
@@ -234,3 +234,78 @@ async function agentId(workspaceId: string, name: string): Promise<string> {
     .where(and(eq(agents.workspaceId, workspaceId), eq(agents.name, name)));
   return row!.id;
 }
+
+describe('MCP OAuth end to end (fake generic client via DCR)', () => {
+  it('registers with RFC 7591, then authorizes, consents, exchanges and calls whoami', async () => {
+    vi.stubEnv('MCP_OAUTH_DCR', '1');
+    const redirectUri = 'https://app.example.com/oauth/callback';
+
+    // 1–2. Discovery: the AS now advertises a registration endpoint; every client is public.
+    const unauth = await mcpPost(null, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    expect(unauth.status).toBe(401);
+    const as = await call(asMetadataRoute, `${ISSUER}/.well-known/oauth-authorization-server`);
+    expect(as.data.registration_endpoint).toBe(`${ISSUER}/api/oauth/register`);
+    expect(as.data.token_endpoint_auth_methods_supported).toEqual(['none']);
+    expect(as.data.client_id_metadata_document_supported).toBe(true);
+
+    // 3. DCR: the client asks for a secret (as many SDKs do); it is registered as a public client instead.
+    const reg = await register({
+      client_name: 'Acme MCP',
+      redirect_uris: [redirectUri],
+      token_endpoint_auth_method: 'client_secret_post',
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      scope: 'agent agent:owner',
+    });
+    expect(reg.status).toBe(201);
+    expect(reg.res.headers.get('cache-control')).toBe('no-store');
+    expect(reg.res.headers.get('x-robots-tag')).toBe('noindex, nofollow');
+    expect(reg.data).toMatchObject({ token_endpoint_auth_method: 'none', scope: 'agent', redirect_uris: [redirectUri] });
+    expect(reg.data!.client_secret).toBeUndefined();
+    const clientId = reg.data!.client_id as string;
+    expect(clientId).toMatch(/^rsdc_/);
+
+    // 4–5. Authorize + consent: labelled unverified with the redirect host.
+    const owner = await signIn();
+    const started = await startConnect(owner, { client_id: clientId, redirect_uri: redirectUri });
+    expect(started.view.client).toMatchObject({ kind: 'dcr', verified: false, display_name: 'Acme MCP' });
+    expect(started.view.redirect).toEqual({ host: 'app.example.com', loopback: false, kind: 'https', scheme: null });
+    const decided = await postConsent(
+      owner,
+      {
+        request_id: started.view.request_id,
+        csrf_token: started.view.csrf_token,
+        decision: 'allow',
+        workspace_id: started.view.workspaces[0]!.id,
+        agent: { mode: 'new', name: 'acme' },
+      },
+      { binding: started.binding },
+    );
+    expect(decided.status).toBe(200);
+    const back = new URL(decided.data.redirect_to);
+    expect(`${back.origin}${back.pathname}`).toBe(redirectUri);
+    expect(back.searchParams.get('iss')).toBe(ISSUER);
+
+    // 6. Token exchange as a public client (no secret), then whoami over MCP.
+    const exchange = await token({
+      grant_type: 'authorization_code',
+      code: back.searchParams.get('code')!,
+      code_verifier: started.verifier,
+      redirect_uri: redirectUri,
+      client_id: clientId,
+      resource: RESOURCE,
+    });
+    expect(exchange.status).toBe(200);
+    expect(exchange.data.scope).toBe('agent');
+    const who = await mcpTool(exchange.data.access_token, 'whoami');
+    expect(who.isError).toBe(false);
+    expect(who.payload.name).toBe('acme');
+
+    // 7. Refresh rotates; the narrow scope still refuses owner tools.
+    const refreshed = await token({ grant_type: 'refresh_token', refresh_token: exchange.data.refresh_token, client_id: clientId });
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.data.refresh_token).not.toBe(exchange.data.refresh_token);
+    const owned = await mcpTool(refreshed.data.access_token, 'set_workspace_handle', { handle: 'takeover' });
+    expect(owned.payload).toMatchObject({ error: 'insufficient_scope' });
+  });
+});
