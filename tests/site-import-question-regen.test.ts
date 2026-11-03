@@ -35,10 +35,30 @@ describe('rule 4: regeneration from the site', () => {
       ['2- Which styles do you teach?', 'We teach classical, jazz and pop styles on piano and guitar.'],
       ['Where do lessons take place?', 'Lessons take place in our Verdun studio or online.'],
     ]);
+    // The lesson price is in its own answer, so it stays (rule 3 v4).
     expect(regen(ctx)).toEqual([
       'Do you teach beginners?',
+      'How much does a lesson cost?',
       'Which styles do you teach?',
-      'Where do lessons take place?',
+    ]);
+  });
+
+  it('adds a FAQ price question only when its own answer gives the price (rule 3 v4)', () => {
+    const ctx =
+      faq([
+        ['How much does a deck cost?', 'Every deck is different, contact us for a quote.'],
+        ['What are your rates?', 'We offer affordable pricing and free quotes.'],
+        ['How much is a fence?', ''],
+        ['What does a gutter cleaning cost?', 'Gutter cleaning runs $150–$250 for most homes.'],
+        ['Do you charge for travel?', 'No, travel within the city is free.'],
+      ]) +
+      // A price elsewhere on the page doesn't answer a FAQ whose own answer has none.
+      '## Pricing\n- Decks from $40 per square foot.\n';
+    // "Affordable pricing and free quotes" doesn't price anything, but it does answer the free-estimate generic.
+    expect(regen(ctx)).toEqual([
+      'What does a gutter cleaning cost?',
+      'Do you charge for travel?',
+      'Do you offer free estimates?',
     ]);
   });
 
@@ -69,9 +89,11 @@ describe('rule 4: regeneration from the site', () => {
     const ctx =
       faq([
         ['Combien coûte un ramonage ?', 'Un ramonage coûte 150 $ taxes incluses pour une cheminée.'],
+        ['Quels sont vos tarifs ?', 'Nos tarifs sont compétitifs, contactez-nous pour une soumission gratuite.'],
         ['Offrez-vous des cours pour débutants ?', 'Oui, les cours pour débutants commencent chaque mois.'],
       ]) + '## Heures\n- Lundi au vendredi 7 h à 17 h\n';
     expect(regen(ctx, [], 'fr')).toEqual([
+      'Combien coûte un ramonage ?',
       'Offrez-vous des cours pour débutants ?',
       "Quelles sont vos heures d'ouverture ?",
     ]);

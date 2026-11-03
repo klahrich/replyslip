@@ -7,9 +7,9 @@ import { applyQuestionRules } from './question-rules';
  *      ipsum or about something else is skipped);
  *   2. "Do you offer <service>?" for short service names in the Services section (English only);
  *   3. single-topic generic questions (hours, area, years, free estimates, insurance, licence, warranty).
- * Every candidate goes through the same rules as RedBot's list (applyQuestionRules), so price questions, headings and
- * questions the context doesn't answer never survive. Deterministic: no model calls. Businesses that already have
- * MIN_SUGGESTED or more are untouched.
+ * Every candidate goes through the same rules as RedBot's list (applyQuestionRules), so headings and questions the
+ * context doesn't answer never survive, and a price question survives only when its answer gives the price (rule 3).
+ * Deterministic: no model calls. Businesses that already have MIN_SUGGESTED or more are untouched.
  */
 export const MIN_SUGGESTED = 3;
 
