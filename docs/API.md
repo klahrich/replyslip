@@ -708,7 +708,7 @@ The agent Muse connects as starts with delivery mode `none`, so Valetto pushes n
    - `404` is permanent (the link was revoked or rotated, or the agent was revoked). Stop polling.
    - `429` means too many polls. Wait for the number of seconds in `Retry-After`.
 3. The first poll only records the current `id` as a baseline, so turning polling on does not wake Muse for old activity.
-4. When `id` changes, Muse calls `list_tasks` with `updated_since` set to the highest `updated_at` it has seen minus about a minute (not the time of its last check), then `get_task` for each returned task. `updated_at` is stamped by the app's clock before the change commits, so a late commit can land with an earlier time; the overlap catches it. `updated_since` is inclusive, and a task whose `updated_at` Muse already handled can be skipped. Each call returns at most 100 tasks; when `next_cursor` is not null, call again with `cursor` set to it.
+4. When `id` changes, Muse calls `list_tasks`, then `get_task` for each returned task. The first call leaves out `updated_since`. After that, Muse sets it to the newest `updated_at` it has seen, minus about a minute (not the time of its last check). `updated_at` is stamped by the app's clock before the change commits, so a late commit can land with an earlier time; the overlap catches it. `updated_since` is inclusive, and a task whose `updated_at` Muse already handled can be skipped. Each call returns at most 100 tasks; when `next_cursor` is not null, call again with `cursor` set to it.
 
 See "Wake URL for external agents" above for the full endpoint.
 
