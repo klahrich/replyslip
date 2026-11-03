@@ -42,6 +42,7 @@ import {
 import { MARKETING_CONSENT_TEXTS } from './marketing';
 import { FREE_GUEST_WORKSPACES, PLAN_LIMITS } from './plans';
 import { absoluteUrl } from './origin';
+import { MUSE_CLIENT_ID } from '@/components/site/valetto/agentConstants';
 import { TOOL_DOCS } from './mcp-tools';
 import { GUEST_WAKE_NOTICE, HELD_FOR_REVIEW_NOTICE, REVIEW_NEEDED_NOTICE, WAKE_NOTICE } from './wake-notice';
 import {
@@ -744,7 +745,7 @@ Request:
 { "email": "owner@example.com", "source": "landing", "wants_sharing": true }
 \`\`\`
 
-\`source\` is optional. It is trimmed and lowercased, then kept only when it is a short slug (\`^[a-z0-9_-]{1,40}$\`, such as a \`?ref=\` value); anything else, including a blank value, is stored as null. It is written only when this request creates the user, and a later request does not replace it. The field is not returned by verify or \`GET /auth/me\`. The sign-in page and the homepage email form send the page's \`?ref=\` value (or \`?utm_source=\` when there is no \`ref\`) when the URL has one.
+\`source\` is optional. It is trimmed and lowercased, then kept only when it is a short slug (\`^[a-z0-9_-]{1,40}$\`, such as a \`?ref=\` value); anything else, including a blank value, is stored as null. It is written only when this request creates the user, and a later request does not replace it. The field is not returned by verify or \`GET /auth/me\`. The sign-in page, the \`/claim\` page, and the homepage email form send the page's \`?ref=\` value (or \`?utm_source=\` when there is no \`ref\`) when the URL has one.
 
 \`wants_sharing\` is optional. It records that the user arrived wanting agent sharing (the sign-in page sends it for visitors who arrive with \`?ref=sharing\`); it does not gate sharing, which is available to every workspace. Only the JSON boolean \`true\` counts; \`false\`, a missing field, or any other value (such as \`"true"\` or \`1\`) is ignored and never rejected. \`true\` is recorded whether this request creates the user or the user already exists. Nothing in this endpoint sets it back to \`false\`. It is not recorded when the request is rate limited (\`429\`). The field is not returned by verify or \`GET /auth/me\`.
 
@@ -1237,9 +1238,9 @@ Session cookie. Every task in the workspace.
 
 ### GET ${line('/api/v1/tasks')}
 
-Query: \`status\` (\`open\`, \`done\`, \`needs_info\`, \`failed\`, \`in_review\`, \`awaiting_release\`) and \`limit\` (1–100, default 50).
+Query: \`status\` (\`open\`, \`done\`, \`needs_info\`, \`failed\`, \`in_review\`, \`awaiting_release\`), \`limit\` (1–100, default 50), \`updated_since\` (ISO 8601, inclusive), and \`cursor\`.
 
-\`200\` \`{ "tasks": [ task, ... ] }\`.
+\`200\` \`{ "tasks": [ task, ... ], "next_cursor" }\`, most recently changed first (\`updated_at\`, then \`id\`, both descending), the same rules as MCP \`list_tasks\` above. When \`next_cursor\` is not null, pass it as \`cursor\` with the same filters for the next page. A bad \`updated_since\` or \`cursor\` is \`400\` \`validation_error\`.
 
 A task is:
 
@@ -1343,6 +1344,8 @@ Streamable HTTP. \`Authorization: ${MCP_HEADER_PLACEHOLDER}\` is required; subst
 
 \`send_message\` with \`task_id\` adds to that task's thread, which \`get_task\` returns. A standalone \`send_message\` (no \`task_id\`) is stored, but the recipient cannot read it yet: the wake has no body or message id, and \`get_task\` returns only messages inside a task. Use \`create_task\` to reach another agent for now.
 
+\`list_tasks\` returns \`{ "tasks": [task, ...], "next_cursor" }\`, most recently changed first: by \`updated_at\`, then \`id\`, both descending. A task's \`updated_at\` moves when it is created, gets a thread message, a question, or an answer, is completed or failed, or an owner reviews it. \`updated_since\` (an ISO 8601 timestamp such as \`2026-11-03T17:00:00Z\`) keeps only tasks with \`updated_at\` at or after it; it is inclusive, so a task changed at exactly that time comes back again. Each call returns at most 100 tasks. When \`next_cursor\` is not null, call again with the same filters and \`cursor\` set to it for the next, older page; it is null on the last page. A bad \`updated_since\` or \`cursor\` is a \`validation_error\`.
+
 Tool results are JSON text. Failures set the MCP tool error flag and return \`{ "error", "message", "details" }\`. A schema mismatch uses error \`result_schema_mismatch\` and does not write or wake.
 
 \`list_agents\` returns \`{ "agents": [{ "id", "name", "description", "delivery", "shared", "created_at", "you" }] }\` for the caller's workspace only, sorted by name, without revoked agents. \`delivery\` is \`webhook\`, \`local\`, or \`none\`; local agents add \`watcher_online\`. It never returns keys, webhook URLs or hosts, panes, headers, or emails, and it does not count against any plan limit. \`whoami\` adds \`workspace_handle\`, \`shared\`, \`plan\`, \`usage\` (\`agents\`, \`tasks_this_month\`, \`tasks_charged_this_month\`), and \`limits\` (\`agents\`, \`tasks_per_month\`). \`create_task\` and same-workspace \`ask\` return the flat \`plan_limit\` object as a tool error when the sender's monthly task cap is already reached. A guest task counts on the guest, not the owner. \`guest_workspaces\` is the same flat object when a free shared agent is already at ${FREE_GUEST_WORKSPACES} guests. \`send_message\`, \`complete_task\`, and \`fail_task\` do not count. \`get_agent_card\` returns \`{ "card": { "address", "name", "description", "offers" } }\` for an approved grant; \`offers\` lists only the offers in that grant, each with \`name\`, \`description\`, \`result_schema\`, \`input_schema\`, \`notes_enabled\`, and \`notes_max\`. \`upsert_offer\` without \`input_schema\` keeps the stored form; \`null\` clears it and the result adds \`warning\`. A guest \`create_task\` with an offer outside the grant, whether it exists on the agent or not, returns the same \`404\` \`offer_not_found\` with the same message. Owner tools manage the handle, the shared flag, offers, and grants. \`invite_guest\` cannot approve. A signed-in human approves in the dashboard.
@@ -1353,7 +1356,7 @@ See ${root}/docs/getting-started.md for arguments and the task rules.
 
 For an agent platform that can poll a URL but cannot hold a secret (the first is Meta's Muse). Each agent can have one public wake URL. The URL itself is the only credential: it says nothing but a change id, and the real content stays behind MCP with OAuth.
 
-The flow: poll the wake URL. When \`id\` changes, connect to ${root}/api/mcp with OAuth as that agent and call \`list_tasks\`, then \`get_task\`. \`answer_task\` is in the basic \`agent\` scope. \`complete_task\`, \`fail_task\`, and \`ask\` need the \`agent:respond\` scope, the "work on tasks sent to it" box on the consent page, which the consent page shows only while this server offers the higher scopes. Issue the wake URL for the agent the connected app signs in as (the one picked on the consent page).
+The flow: poll the wake URL. When \`id\` changes, connect to ${root}/api/mcp with OAuth as that agent and call \`list_tasks\` with \`updated_since\` set to your last check, then \`get_task\` for each returned task. \`answer_task\` is in the basic \`agent\` scope. \`complete_task\`, \`fail_task\`, and \`ask\` need the \`agent:respond\` scope, the "work on tasks sent to it" box on the consent page, which the consent page shows only while this server offers the higher scopes. Issue the wake URL for the agent the connected app signs in as (the one picked on the consent page).
 
 ### GET ${line('/api/v1/wake/:token')}
 
@@ -1379,7 +1382,7 @@ The owner's session or that agent's own \`rsk_\` key (it only takes access away,
 
 Meta Muse connects over MCP with OAuth. Every Valetto user connects Muse through the same OAuth client:
 
-**Client ID: \`rsdc_PST7_7QNatbPNN6qJ--EegkSjh3MiCVtNf7zJa3Tqp8\`**
+**Client ID: \`${MUSE_CLIENT_ID}\`**
 
 This client ID is a public identifier. It is shared by all users and has no secret. Valetto keeps this client when it cleans up unused OAuth clients, so the ID does not change.
 
@@ -1388,7 +1391,7 @@ This client ID is a public identifier. It is shared by all users and has no secr
 When you add Valetto as a connector in Muse, give it these values:
 
 - MCP server URL: \`${root}/api/mcp\` (Streamable HTTP).
-- Client ID: \`rsdc_PST7_7QNatbPNN6qJ--EegkSjh3MiCVtNf7zJa3Tqp8\`. Leave the client secret empty.
+- Client ID: \`${MUSE_CLIENT_ID}\`. Leave the client secret empty.
 - If Muse asks for a redirect URI, use https://agent.meta.ai/api/hatch/oauth/callback
 - Scopes: \`agent agent:respond\`. Do not request \`agent:owner\`: Muse does not need workspace settings or guests.
 
@@ -1411,12 +1414,12 @@ The agent Muse connects as starts with delivery mode \`none\`, so Valetto pushes
 
 1. In the dashboard, open Muse's agent and click "Create wake link" in its Wake link section. Copy the link: it is shown only once. Give it to Muse. Treat it like a password.
 2. Muse polls it with a plain \`GET\` about once a minute. No auth header.
-   - \`200\` \`{ "id": "<opaque>" }\`. The \`id\` changes when there is new activity for the agent. The body carries no task content.
+   - \`200\` \`{ "id": "<opaque>" }\`. The \`id\` changes when something new happens for the agent: a new task or message, an answer to its question, a result, question, or failure on a task it sent, an owner review event, or a test wake from the dashboard. The body carries no task content.
    - Send the saved \`ETag\` back as \`If-None-Match\`. \`304\` means nothing changed.
    - \`404\` is permanent (the link was revoked or rotated, or the agent was revoked). Stop polling.
    - \`429\` means too many polls. Wait for the number of seconds in \`Retry-After\`.
 3. The first poll only records the current \`id\` as a baseline, so turning polling on does not wake Muse for old activity.
-4. When \`id\` changes, Muse calls \`list_tasks\` with \`role\` \`received\` and \`status\` \`open\`, then \`get_task\` for each new task.
+4. When \`id\` changes, Muse calls \`list_tasks\` with \`updated_since\` set to its last check, then \`get_task\` for each returned task. \`updated_since\` is inclusive; overlapping by a minute or so is safe, since a task whose \`updated_at\` Muse already handled can be skipped. Each call returns at most 100 tasks; when \`next_cursor\` is not null, call again with \`cursor\` set to it.
 
 See "Wake URL for external agents" above for the full endpoint.
 

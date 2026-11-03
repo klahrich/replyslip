@@ -225,6 +225,8 @@ export async function sendMessage(
         throw new HttpError(400, 'invalid_recipient', 'A task-thread message can only go to the other participant.');
       }
       taskId = task.id;
+      // A thread message is a change to the task: list_tasks updated_since and its sort key off updated_at.
+      await tx.update(tasks).set({ updatedAt: new Date() }).where(eq(tasks.id, task.id));
     }
     const [message] = await tx
       .insert(messages)
@@ -517,9 +519,80 @@ export async function answerTask(caller: AgentPrincipal, taskId: string, answer:
   return written.payload;
 }
 
+/** Most tasks one list call returns. Past it, `next_cursor` fetches the next page. */
+export const TASK_LIST_MAX = 100;
+
+/** Where a list page starts: tasks changed at or after `updatedSince`, strictly after `cursor` in the sort. */
+export type TaskPage = { updatedSince?: Date; cursor?: TaskCursor };
+type TaskCursor = { updatedAt: string; id: string };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The cursor's timestamp keeps the database's microseconds, which a JS Date would round away. */
+const CURSOR_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+/** ISO 8601 with a date and time and an explicit zone (Z or ±hh:mm), e.g. 2026-11-03T17:00:00Z. */
+const ISO_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})$/i;
+
+export function parseUpdatedSince(value: string | null | undefined): Date | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const date = ISO_TS_RE.test(value) ? new Date(value) : new Date(Number.NaN);
+  if (Number.isNaN(date.getTime())) {
+    throw new HttpError(400, 'validation_error', 'updated_since must be an ISO 8601 timestamp, e.g. 2026-11-03T17:00:00Z.', {
+      fields: { updated_since: 'Invalid timestamp.' },
+    });
+  }
+  return date;
+}
+
+export function parseTaskCursor(value: string | null | undefined): TaskCursor | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const invalid = () =>
+    new HttpError(400, 'validation_error', 'cursor is not valid. Pass next_cursor from the previous page as is.', {
+      fields: { cursor: 'Invalid cursor.' },
+    });
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+  } catch {
+    throw invalid();
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== 2 ||
+    typeof parsed[0] !== 'string' ||
+    typeof parsed[1] !== 'string' ||
+    !CURSOR_TS_RE.test(parsed[0]) ||
+    !UUID_RE.test(parsed[1])
+  ) {
+    throw invalid();
+  }
+  return { updatedAt: parsed[0], id: parsed[1] };
+}
+
+function encodeTaskCursor(cursor: TaskCursor): string {
+  return Buffer.from(JSON.stringify([cursor.updatedAt, cursor.id]), 'utf8').toString('base64url');
+}
+
+const cursorTs = sql<string>`to_char(${tasks.updatedAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+/** Filters and sort shared by the agent and workspace lists: updated_at desc, then id desc, keyset paged. */
+function pageConditions(page: TaskPage) {
+  const conditions = [];
+  if (page.updatedSince) conditions.push(sql`${tasks.updatedAt} >= ${page.updatedSince.toISOString()}::timestamptz`);
+  if (page.cursor) {
+    conditions.push(sql`(${tasks.updatedAt}, ${tasks.id}) < (${page.cursor.updatedAt}::timestamptz, ${page.cursor.id}::uuid)`);
+  }
+  return conditions;
+}
+
+function nextCursor<T extends { task: TaskRow; cursorTs: string }>(rows: T[], limit: number): string | null {
+  if (rows.length <= limit) return null;
+  const last = rows[limit - 1]!;
+  return encodeTaskCursor({ updatedAt: last.cursorTs, id: last.task.id });
+}
+
 export async function listTasks(
   caller: AgentPrincipal,
-  filter: { status?: string; role?: 'sent' | 'received' | 'any' },
+  filter: { status?: string; role?: 'sent' | 'received' | 'any' } & TaskPage,
 ) {
   const role = filter.role ?? 'any';
   const fromAgent = alias(agents, 'from_agent');
@@ -535,23 +608,29 @@ export async function listTasks(
   if (filter.status) conditions.push(eq(tasks.status, filter.status));
   // A request in review is invisible to its target bot until the owner approves it.
   conditions.push(sql`not (${tasks.toAgentId} = ${caller.agentId} and ${tasks.status} = 'in_review')`);
-  const rows = await getDb()
+  conditions.push(...pageConditions(filter));
+  const fetched = await getDb()
     .select({
       task: tasks,
       fromName: fromAgent.name,
       toName: toAgent.name,
+      cursorTs,
     })
     .from(tasks)
     .innerJoin(fromAgent, eq(fromAgent.id, tasks.fromAgentId))
     .innerJoin(toAgent, eq(toAgent.id, tasks.toAgentId))
     .where(and(...conditions))
-    .orderBy(desc(tasks.createdAt))
-    .limit(100);
+    .orderBy(desc(tasks.updatedAt), desc(tasks.id))
+    .limit(TASK_LIST_MAX + 1);
+  const rows = fetched.slice(0, TASK_LIST_MAX);
   const labels = await labelsFor(
     getDb(),
     rows.map((row) => row.task),
   );
-  return rows.map((row) => serializeTask(row.task, row.fromName, row.toName, caller.workspaceId, labels.get(row.task.id)));
+  return {
+    tasks: rows.map((row) => serializeTask(row.task, row.fromName, row.toName, caller.workspaceId, labels.get(row.task.id))),
+    next_cursor: nextCursor(fetched, TASK_LIST_MAX),
+  };
 }
 
 async function closeOrQuestion(
@@ -676,24 +755,32 @@ export async function failTask(caller: AgentPrincipal, taskId: string, reason: s
   }));
 }
 
-export async function listWorkspaceTasks(workspaceId: string, status: string | undefined, limit: number) {
+export async function listWorkspaceTasks(
+  workspaceId: string,
+  status: string | undefined,
+  limit: number,
+  page: TaskPage = {},
+) {
   const fromAgent = alias(agents, 'from_agent');
   const toAgent = alias(agents, 'to_agent');
   const visible = or(eq(tasks.workspaceId, workspaceId), eq(tasks.fromWorkspaceId, workspaceId));
   const conditions = visible ? [visible] : [];
   if (status) conditions.push(eq(tasks.status, status));
-  const rows = await getDb()
+  conditions.push(...pageConditions(page));
+  const fetched = await getDb()
     .select({
       task: tasks,
       fromName: fromAgent.name,
       toName: toAgent.name,
+      cursorTs,
     })
     .from(tasks)
     .innerJoin(fromAgent, eq(fromAgent.id, tasks.fromAgentId))
     .innerJoin(toAgent, eq(toAgent.id, tasks.toAgentId))
     .where(and(...conditions))
-    .orderBy(desc(tasks.createdAt))
-    .limit(limit);
+    .orderBy(desc(tasks.updatedAt), desc(tasks.id))
+    .limit(limit + 1);
+  const rows = fetched.slice(0, limit);
   const labels = await labelsFor(
     getDb(),
     rows.map((row) => row.task),
@@ -703,10 +790,13 @@ export async function listWorkspaceTasks(workspaceId: string, status: string | u
     rows.map((row) => row.task),
     workspaceId,
   );
-  return rows.map((row) => ({
-    ...serializeTask(row.task, row.fromName, row.toName, workspaceId, labels.get(row.task.id)),
-    sender: senders.get(row.task.id) ?? null,
-  }));
+  return {
+    tasks: rows.map((row) => ({
+      ...serializeTask(row.task, row.fromName, row.toName, workspaceId, labels.get(row.task.id)),
+      sender: senders.get(row.task.id) ?? null,
+    })),
+    next_cursor: nextCursor(fetched, limit),
+  };
 }
 
 export async function getWorkspaceTask(workspaceId: string, taskId: string) {

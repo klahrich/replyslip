@@ -151,7 +151,8 @@ export const TOOL_DOCS: ToolDoc[] = [
   {
     name: 'list_tasks',
     title: 'List tasks',
-    description: 'List tasks you sent or received. Filter by status or by sent versus received.',
+    description:
+      'List tasks you sent or received, most recently changed first (updated_at, then id). A task changes when it is created, gets a thread message, a question or an answer, is completed, failed, or reviewed. Filter by status, by sent versus received, or by updated_since. Returns { tasks, next_cursor }: at most 100 tasks per call; when next_cursor is not null, pass it as cursor to get the next, older page.',
     args: [
       {
         name: 'status',
@@ -164,6 +165,19 @@ export const TOOL_DOCS: ToolDoc[] = [
         required: false,
         type: '"sent" | "received" | "any"',
         description: 'sent: tasks you created. received: tasks addressed to you. any (default): both.',
+      },
+      {
+        name: 'updated_since',
+        required: false,
+        type: 'string (ISO 8601 timestamp)',
+        description:
+          'Only tasks whose updated_at is at or after this time, e.g. 2026-11-03T17:00:00Z. Inclusive, so a task you already saw at that exact time comes back.',
+      },
+      {
+        name: 'cursor',
+        required: false,
+        type: 'string',
+        description: 'next_cursor from the previous call, unchanged, with the same filters.',
       },
     ],
   },
@@ -339,6 +353,12 @@ export const toolInputs = {
       .optional()
       .describe('Only tasks in this status. Your own in_review tasks are hidden until your owner approves them.'),
     role: z.enum(['sent', 'received', 'any']).optional().describe('sent, received, or any (default).'),
+    updated_since: z
+      .string()
+      .max(64)
+      .optional()
+      .describe('ISO 8601 timestamp. Only tasks with updated_at at or after it (inclusive).'),
+    cursor: z.string().max(200).optional().describe('next_cursor from the previous call, to get the next page.'),
   }),
   list_agents: z.object({}),
   get_agent_card: z.object({
