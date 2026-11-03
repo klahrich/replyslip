@@ -3,12 +3,13 @@ import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { getDb } from '@/db';
-import { rateEvents, wakeUrls, wakes } from '@/db/schema';
+import { agents, rateEvents, wakeUrls, wakes } from '@/db/schema';
 import { GET as pollRoute } from '@/app/api/v1/wake/[token]/route';
 import { GET as listRoute, POST as issueRoute } from '@/app/api/v1/agents/[id]/wake-urls/route';
 import { POST as rotateRoute } from '@/app/api/v1/agents/[id]/wake-urls/[wakeUrlId]/rotate/route';
 import { POST as revokeRoute } from '@/app/api/v1/agents/[id]/wake-urls/[wakeUrlId]/revoke/route';
 import { GET as listAgentsRoute } from '@/app/api/v1/agents/route';
+import { PUT as putReviewModeRoute } from '@/app/api/v1/agents/[id]/review-mode/route';
 import { keyedHash, sha256 } from '@/lib/crypto';
 import { enqueueWake } from '@/lib/wakes';
 import {
@@ -20,6 +21,7 @@ import {
   rotateWakeUrl,
   type WakeSubject,
 } from '@/lib/wake-urls';
+import { approvedCustomer, directRequest, ORIGIN, owner } from './customer-fixtures';
 import { call, createAgent, createKey, mcpTool, signIn } from './helpers';
 
 const schema = { type: 'object', additionalProperties: false, required: ['score'], properties: { score: { type: 'number' } } };
@@ -121,6 +123,38 @@ describe('wake URLs', () => {
     expect(sent.isError).toBe(false);
     const afterMessage = (await poll(token)).data.id;
     expect(afterMessage).not.toBe(afterTask.data.id);
+  });
+
+  it('changes the id for a review-first request while list_tasks for the agent still returns nothing', async () => {
+    const o = await owner();
+    const mode = await call(putReviewModeRoute, `http://localhost/api/v1/agents/${o.agentId}/review-mode`, {
+      method: 'PUT',
+      cookie: o.cookie,
+      params: { id: o.agentId },
+      body: { review_mode: 'review_first' },
+      headers: ORIGIN,
+    });
+    expect(mode.status, mode.text).toBe(200);
+    const [agent] = await getDb().select().from(agents).where(eq(agents.id, o.agentId));
+    const issued = await issueWakeUrl({ kind: 'agent', workspaceId: agent!.workspaceId, agentId: o.agentId }, 'https://valetto.example');
+    const token = tokenOf(issued.url);
+    const customer = await approvedCustomer(o);
+    const before = (await poll(token)).data.id;
+
+    const task = await directRequest(o, customer, 'CANARY-review-wake');
+    expect(task.status).toBe('in_review');
+    const rows = await getDb().select().from(wakes).where(and(eq(wakes.agentId, o.agentId), eq(wakes.taskId, task.id)));
+    expect(rows.map((row) => row.reason)).toEqual(['review_needed']);
+
+    const after = await poll(token);
+    expect(after.data.id).not.toBe(before);
+    expect(after.text).not.toContain('CANARY');
+    // The held request stays hidden from the agent: the first call (no updated_since) and a later one both come back empty.
+    for (const args of [{}, { updated_since: new Date(Date.now() - 60_000).toISOString() }]) {
+      const listed = await mcpTool(o.agentKey, 'list_tasks', args);
+      expect(listed.isError, listed.text).toBe(false);
+      expect(listed.payload).toEqual({ tasks: [], next_cursor: null });
+    }
   });
 
   it("does not change on other agents' tasks, in the same workspace or another one", async () => {
