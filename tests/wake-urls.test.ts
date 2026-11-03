@@ -147,6 +147,7 @@ describe('wake URLs', () => {
     expect(rows.map((row) => row.reason)).toEqual(['review_needed']);
 
     const after = await poll(token);
+    expect(Object.keys(after.data)).toEqual(['id']);
     expect(after.data.id).not.toBe(before);
     expect(after.text).not.toContain('CANARY');
     // The held request stays hidden from the agent: the first call (no updated_since) and a later one both come back empty.

@@ -171,7 +171,7 @@ export const TOOL_DOCS: ToolDoc[] = [
         required: false,
         type: 'string (ISO 8601 timestamp or date)',
         description:
-          'Only tasks whose updated_at is at or after this time, e.g. 2026-11-03T17:00:00Z, or 2026-11-03 for the start of that day in UTC. Inclusive. Pass the highest updated_at you have seen minus about a minute, not the time of your last check: updated_at is stamped before commit, so a late commit can land earlier.',
+          'Only tasks whose updated_at is at or after this time, e.g. 2026-11-03T17:00:00Z, or 2026-11-03 for the start of that day in UTC. Inclusive. Leave it out on the first call. After that, pass the newest updated_at you have seen, minus about a minute, not the time of your last check: updated_at is stamped before commit, so a late commit can land earlier.',
       },
       {
         name: 'cursor',
@@ -358,7 +358,7 @@ export const toolInputs = {
       .max(64)
       .optional()
       .describe(
-        'ISO 8601 timestamp or date (UTC start of day). Only tasks with updated_at at or after it (inclusive). Use the highest updated_at seen minus about a minute.',
+        'ISO 8601 timestamp or date (UTC start of day). Only tasks with updated_at at or after it (inclusive). Omit on the first call; then use the newest updated_at seen, minus about a minute.',
       ),
     cursor: z.string().max(200).optional().describe('next_cursor from the previous call, to get the next page.'),
   }),
