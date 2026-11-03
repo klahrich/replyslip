@@ -38,6 +38,8 @@
   .vt-hero-stage{margin-top:44px;justify-self:center}
 }
 @media (max-width:420px){.vt .top nav li:not(:last-child){display:none}}
+/* the homepage keeps Sign in beside Early access on phones, so owners can reach their dashboard */
+@media (max-width:420px){.vt .top nav li.vt-nav-in{display:list-item}.vt .top nav ul:has(.vt-nav-in){gap:16px}}
 
 /* the phone: the customer's page, styled like a plain shadcn/ui form (white, neutral borders, rounded-lg inputs, one
    full-width primary button). The page is a template: the owner's main colour (logo tile, name, buttons, their request

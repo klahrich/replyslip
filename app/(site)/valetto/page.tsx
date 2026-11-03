@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Fragment, type CSSProperties, type ReactNode } from 'react';
 import Link from 'next/link';
 import { MarkIcon } from '@/components/site/Mark';
+import { SignInLink } from '@/components/site/SignInLink';
 import { PhoneChat } from '@/components/site/valetto/PhoneChat';
 import { ValettoEffects } from '@/components/site/valetto/ValettoEffects';
 import { AGENT_TO_AGENT, EARLY_ACCESS, ValettoFoot } from '@/components/site/valetto/ValettoChrome';
@@ -209,6 +210,9 @@ export default function ValettoPage() {
             </li>
             <li>
               <Link href={AGENT_TO_AGENT}>Valetto for agents</Link>
+            </li>
+            <li className="vt-nav-in">
+              <SignInLink>Sign in</SignInLink>
             </li>
             <li>
               <Link className="go" href={EARLY_ACCESS}>
