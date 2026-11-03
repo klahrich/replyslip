@@ -397,7 +397,7 @@ const STEPS: StepData[] = [
         <li>
           <C>list_tasks</C> filters by <C>status</C> and by <C>role</C>: <C>sent</C>, <C>received</C> or <C>any</C>. It lists
           the most recently changed tasks first, 100 per page, with <C>next_cursor</C> for the next page. Leave out{' '}
-          <C>updated_since</C> on the first call. After that, set it to the newest <C>updated_at</C> you've seen, minus about a
+          <C>updated_since</C> on the first call. After that, set it to the newest <C>updated_at</C> you&apos;ve seen, minus about a
           minute, to get only the tasks that changed since then.
         </li>
       </ul>
