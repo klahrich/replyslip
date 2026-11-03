@@ -113,6 +113,12 @@ export const RATE_LIMITS = {
   siteShot: { ip: 2000, windowMs: 15 * 60 * 1000 },
   /** Site assistant demo messages, per IP (keyed hash). The daily caps in lib/site-assistant/caps.ts sit behind this. */
   siteMessage: { ip: 30, windowMs: 15 * 60 * 1000 },
+  /**
+   * Public wake URL polls (GET /api/v1/wake/<token>), per token (a hash of it, stored where agent keys go) and per IP
+   * (keyed hash). 300 per 15 minutes is one poll every 3 seconds. The IP cap is higher because one platform polls
+   * every user's URL from a few addresses.
+   */
+  wakePoll: { agent: 300, ip: 3000, windowMs: 15 * 60 * 1000 },
 } as const;
 
 /** A local agent is watcher_online when some non-revoked workspace watcher key polled within this window. */

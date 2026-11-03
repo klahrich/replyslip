@@ -37,7 +37,13 @@ var RATE_LIMITS = {
   /** Site assistant demo screenshots, per IP (keyed hash). Their own generous bucket so images never eat siteEntry. */
   siteShot: { ip: 2e3, windowMs: 15 * 60 * 1e3 },
   /** Site assistant demo messages, per IP (keyed hash). The daily caps in lib/site-assistant/caps.ts sit behind this. */
-  siteMessage: { ip: 30, windowMs: 15 * 60 * 1e3 }
+  siteMessage: { ip: 30, windowMs: 15 * 60 * 1e3 },
+  /**
+   * Public wake URL polls (GET /api/v1/wake/<token>), per token (a hash of it, stored where agent keys go) and per IP
+   * (keyed hash). 300 per 15 minutes is one poll every 3 seconds. The IP cap is higher because one platform polls
+   * every user's URL from a few addresses.
+   */
+  wakePoll: { agent: 300, ip: 3e3, windowMs: 15 * 60 * 1e3 }
 };
 
 // packages/cli/src/register.ts
