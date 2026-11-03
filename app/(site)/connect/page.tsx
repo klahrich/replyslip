@@ -7,6 +7,7 @@ import { PLAN_LIMITS } from '@/lib/plans';
 import { GlowBg } from '../GlowBg';
 import { CopyBlock } from '../how-it-works/CopyBlock';
 import { AppTabs, type AppTab } from './AppTabs';
+import { ConnectedAppsShot, Dot, MCP_URL, Mini, Shot } from './GuideParts';
 import '@/components/site/landing.css';
 import '../landing-width.css';
 import '../landing-bg.css';
@@ -15,7 +16,7 @@ import '../how-it-works/sharing.css';
 import './connect.css';
 
 const PATH = '/connect';
-const MCP_URL = 'https://valetto.tech/api/mcp';
+const MUSE = '/connect/meta-muse';
 const AGENT_LIMIT = PLAN_LIMITS.free.agents;
 
 export const metadata: Metadata = valettoMeta(
@@ -30,18 +31,6 @@ export const metadata: Metadata = valettoMeta(
  * Re-check them when an app changes its settings.
  */
 const CURSOR_JSON = `{"mcpServers":{"valetto":{"url":"${MCP_URL}"}}}`;
-
-function Mini({ items }: { items: ReactNode[] }) {
-  return (
-    <ol className="cx-mini">
-      {items.map((it, i) => (
-        <li key={i}>
-          <span>{it}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
 
 const TABS: AppTab[] = [
   {
@@ -112,6 +101,18 @@ const TABS: AppTab[] = [
     ),
   },
   {
+    key: 'muse',
+    label: 'Meta Muse',
+    body: (
+      <p>
+        Muse asks for a client ID before it connects, so it has its own short guide with the ID to copy.{' '}
+        <Link className="link" href={MUSE}>
+          Connect Meta Muse
+        </Link>
+      </p>
+    ),
+  },
+  {
     key: 'other',
     label: 'Other apps (Cursor, VS Code…)',
     body: (
@@ -130,7 +131,11 @@ const TABS: AppTab[] = [
           </li>
           <li>
             <b>Any other app:</b> look for <b>Add MCP server</b> or <b>custom connector</b> and paste the link. Leave
-            the key, header and client ID fields empty.
+            the key, header and client ID fields empty. Meta Muse is the one exception: see the{' '}
+            <Link className="link" href={MUSE}>
+              Meta Muse guide
+            </Link>
+            .
           </li>
         </ul>
         <p className="cx-fine">
@@ -189,40 +194,6 @@ const PROMPTS = [
 
 type Step = { id: string; h: string; body: ReactNode; pic: ReactNode };
 
-function Shot({
-  src,
-  alt,
-  w,
-  h,
-  children,
-  wide,
-}: {
-  src: string;
-  alt: string;
-  w: number;
-  h: number;
-  children?: ReactNode;
-  wide?: boolean;
-}) {
-  return (
-    <figure className={wide ? 'cx-shot cx-shot-wide' : 'cx-shot'}>
-      <div className="cx-frame">
-        {/* eslint-disable-next-line @next/next/no-img-element -- small static screenshots, served as-is */}
-        <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" />
-        {children}
-      </div>
-    </figure>
-  );
-}
-
-function Dot({ n, x, y }: { n: number; x: number; y: number }) {
-  return (
-    <span className="cx-dot" style={{ left: `${x}%`, top: `${y}%` }} aria-hidden="true">
-      {n}
-    </span>
-  );
-}
-
 const STEPS: Step[] = [
   {
     id: 'copy',
@@ -242,6 +213,13 @@ const STEPS: Step[] = [
       <>
         <p>Add it as a custom connector or MCP server. Pick your app for the exact steps.</p>
         <AppTabs tabs={TABS} />
+        <p id="muse" className="cx-fine">
+          Using Meta Muse? It needs a client ID and a wake link.{' '}
+          <Link className="link" href={MUSE}>
+            Follow the Meta Muse guide
+          </Link>
+          .
+        </p>
       </>
     ),
     pic: (
@@ -350,37 +328,7 @@ const STEPS: Step[] = [
         </p>
       </>
     ),
-    pic: (
-      <figure className="cx-shot cx-shot-wide cx-apps-shot">
-        <div className="cx-frame">
-          <picture>
-            <source
-              media="(max-width: 560px)"
-              srcSet="/connect/step6-connected-apps-mobile.webp"
-              width={700}
-              height={1060}
-            />
-            <img
-              src="/connect/step6-connected-apps.webp"
-              width={1560}
-              height={554}
-              loading="lazy"
-              decoding="async"
-              alt="The Connected apps list in the Valetto dashboard with three sample rows: Cursor, marked Unverified, ChatGPT and Claude. Each row shows its agent, when it connected, when it was last used, when it expires, and a Revoke link."
-            />
-          </picture>
-          <span className="cx-dot cx-dot-revoke" aria-hidden="true">
-            1
-          </span>
-        </div>
-        <figcaption>
-          <span className="cx-dot cx-dot-inline" aria-hidden="true">
-            1
-          </span>{' '}
-          Revoke cuts an app off. You can connect it again any time.
-        </figcaption>
-      </figure>
-    ),
+    pic: <ConnectedAppsShot />,
   },
 ];
 
@@ -489,8 +437,8 @@ export default function ConnectPage() {
         <aside className="cx-how" aria-labelledby="how-h">
           <h2 id="how-h">How it works</h2>
           <p>
-            Valetto’s MCP server uses standard OAuth sign-in. Apps register themselves, so there’s no client ID to set
-            up. Each connection is its own agent with narrow permissions, and you can revoke it any time. Coding agents
+            Valetto’s MCP server uses standard OAuth sign-in. Most apps register themselves, so there’s no client ID to
+            set up. Meta Muse is the exception, and its client ID is on its own page. Each connection is its own agent with narrow permissions, and you can revoke it any time. Coding agents
             and scripts can still use an API key. See{' '}
             <Link className="link" href="/agent-to-agent#connect">
               agent-to-agent setup

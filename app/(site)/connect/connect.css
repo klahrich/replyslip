@@ -414,3 +414,19 @@
     padding: 16px;
   }
 }
+
+/* Meta Muse guide: a second copy box under the first */
+.cx .cx-copy .cx-copy-next {
+  margin-top: 18px;
+}
+.cx .cx-copy .hw-cp-t.hw-cp-pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--s-small);
+}
+/* The client ID is long: let it wrap instead of running out of its box on phones */
+.cx .cx-copy .cx-copy-wrap .hw-cp-t {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
