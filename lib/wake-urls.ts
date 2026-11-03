@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { rateEvents, wakeUrls } from '@/db/schema';
 import { authenticateAgentKey, getAgent } from './agents';
@@ -114,17 +114,19 @@ export function wakeChangeId(wakeUrlId: string, subject: WakeSubject, marker: st
 type PollHit = { id: string; workspace_id: string; agent_id: string; counted: boolean; retry_after: number };
 
 /**
- * Finds an active URL whose agent is not revoked and counts the poll against it, in one statement whose only write
- * is a single-row UPDATE. The UPDATE skips a token already at its limit, so a refused poll writes nothing
- * (`counted` false). Null for unknown and revoked tokens alike, with no write. last_used_at moves at most once a
- * minute.
+ * The poll-counting statement: finds an active URL whose agent is not revoked and counts the poll against it. Its
+ * only write is a single-row UPDATE. Whether the window is fresh is decided inside that UPDATE, against the row it
+ * has locked (`w`), never against the CTE's snapshot: under concurrent polls Postgres re-checks the UPDATE's WHERE
+ * and recomputes its SET on the newest row version, so a window is reset once and at most `perToken` polls count
+ * per window. The UPDATE skips a token already at its limit, so a refused poll writes nothing (`counted` false).
+ * No row for unknown and revoked tokens alike, with no write. last_used_at moves at most once a minute.
  */
-async function countPoll(token: string): Promise<PollHit | null> {
+export function countPollStatement(token: string): SQL {
   const window = sql`make_interval(secs => ${WAKE_POLL_LIMITS.windowSeconds})`;
-  const rows = await getDb().execute<PollHit>(sql`
+  const fresh = sql`(w.poll_window_started_at is null or w.poll_window_started_at <= now() - ${window})`;
+  return sql`
     with hit as (
-      select u.id, u.workspace_id, u.agent_id, u.poll_window_started_at,
-        (u.poll_window_started_at is null or u.poll_window_started_at <= now() - ${window}) as fresh
+      select u.id, u.workspace_id, u.agent_id, u.poll_window_started_at
       from wake_urls u
       join agents a on a.id = u.agent_id
       where u.token_hash = ${sha256(token)}
@@ -133,14 +135,14 @@ async function countPoll(token: string): Promise<PollHit | null> {
     ),
     counted as (
       update wake_urls w set
-        poll_count = case when hit.fresh then 1 else w.poll_count + 1 end,
-        poll_window_started_at = case when hit.fresh then now() else w.poll_window_started_at end,
+        poll_count = case when ${fresh} then 1 else w.poll_count + 1 end,
+        poll_window_started_at = case when ${fresh} then now() else w.poll_window_started_at end,
         last_used_at = case
           when w.last_used_at is null or w.last_used_at <= now() - make_interval(secs => ${LAST_USED_GRANULARITY_SECONDS})
           then now() else w.last_used_at end
       from hit
       where w.id = hit.id
-        and (hit.fresh or w.poll_count < ${WAKE_POLL_LIMITS.perToken})
+        and (${fresh} or w.poll_count < ${WAKE_POLL_LIMITS.perToken})
       returning w.id
     )
     select hit.id, hit.workspace_id, hit.agent_id,
@@ -148,7 +150,11 @@ async function countPoll(token: string): Promise<PollHit | null> {
       greatest(1, ceil(extract(epoch from
         coalesce(hit.poll_window_started_at, now()) + ${window} - now())))::int as retry_after
     from hit
-  `);
+  `;
+}
+
+async function countPoll(token: string): Promise<PollHit | null> {
+  const rows = await getDb().execute<PollHit>(countPollStatement(token));
   return rows[0] ?? null;
 }
 

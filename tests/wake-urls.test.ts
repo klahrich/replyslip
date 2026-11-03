@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { and, eq, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
 import { getDb } from '@/db';
 import { rateEvents, wakeUrls, wakes } from '@/db/schema';
 import { GET as pollRoute } from '@/app/api/v1/wake/[token]/route';
@@ -11,6 +13,7 @@ import { keyedHash, sha256 } from '@/lib/crypto';
 import { enqueueWake } from '@/lib/wakes';
 import {
   WAKE_POLL_LIMITS,
+  countPollStatement,
   issueWakeUrl,
   resetWakeMissCapCache,
   revokeWakeUrl,
@@ -432,5 +435,48 @@ describe('wake URLs', () => {
     await revokeWakeUrl(subject, issued.row.id);
     const after = new Map(((await list()).data.agents as { id: string; wake_url: unknown }[]).map((agent) => [agent.id, agent.wake_url]));
     expect(after.get(target.id)).toBeNull();
+  });
+
+  describe('per-token limit under concurrent polls', () => {
+    // The suite's own client has one connection, which would serialize these. This pool has 20, so the polls really
+    // race on the row lock in Postgres.
+    const CONCURRENT = 400;
+    const cases = [
+      { name: 'an expired window', startedAgoSeconds: WAKE_POLL_LIMITS.windowSeconds + 60, count: WAKE_POLL_LIMITS.perToken },
+      { name: 'the first window', startedAgoSeconds: null, count: 0 },
+      { name: 'mid-window', startedAgoSeconds: 60, count: 0 },
+    ];
+    for (const testCase of cases) {
+      it(`allows exactly ${WAKE_POLL_LIMITS.perToken} of ${CONCURRENT} concurrent polls in ${testCase.name}`, async () => {
+        const { token, issued } = await setup();
+        await getDb()
+          .update(wakeUrls)
+          .set({
+            pollCount: testCase.count,
+            pollWindowStartedAt:
+              testCase.startedAgoSeconds === null ? null : new Date(Date.now() - testCase.startedAgoSeconds * 1000),
+          })
+          .where(eq(wakeUrls.id, issued.row.id));
+        const client = postgres(process.env.DATABASE_URL!, { max: 20, onnotice: () => undefined });
+        try {
+          const pool = drizzle(client);
+          // Open all 20 connections first so the polls start together.
+          await Promise.all(Array.from({ length: 20 }, () => pool.execute(sql`select 1`)));
+          const results = await Promise.all(
+            Array.from({ length: CONCURRENT }, () =>
+              pool.execute<{ counted: boolean }>(countPollStatement(token)).then((rows) => rows[0]?.counted === true),
+            ),
+          );
+          const allowed = results.filter(Boolean).length;
+          const [row] = await getDb().select().from(wakeUrls).where(eq(wakeUrls.id, issued.row.id));
+          expect({ allowed, pollCount: row?.pollCount }).toEqual({
+            allowed: WAKE_POLL_LIMITS.perToken,
+            pollCount: WAKE_POLL_LIMITS.perToken,
+          });
+        } finally {
+          await client.end();
+        }
+      });
+    }
   });
 });
