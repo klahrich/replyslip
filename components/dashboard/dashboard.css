@@ -321,6 +321,11 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-wake .dash-secret{margin:4px 0}
 .dash-wake-meta{overflow-wrap:anywhere}
 .dash-wake-actions{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center;justify-content:flex-start}
+.dash-wake-howto{display:grid;gap:6px;min-width:0;margin-top:4px}
+.dash-wake-howto h5{font-size:var(--s-small);font-weight:600}
+.dash-wake-howto-text{display:block;width:100%;min-width:0;padding:10px 12px;font:var(--s-small)/1.5 var(--mono,ui-monospace,monospace);color:var(--input-ink);background:#f7f8f9;border:1px solid var(--input-border);border-radius:4px;resize:vertical;white-space:pre-wrap;overflow-wrap:anywhere;field-sizing:content}
+.dash-wake-howto-text:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.dash-wake-howto .dash-secret-row{margin-top:2px}
 .dash-wake-notice{margin:0;font-size:var(--s-small)}
 .dash-wake-notice:empty{display:none}
 @media (max-width:640px){.dash-wake .dash-textbtn{min-height:44px}}

@@ -3,12 +3,54 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, errorText } from './api';
 import { LocalTime } from './LocalTime';
-import { OnceSecret } from './CopyButton';
+import { CopyButton, OnceSecret } from './CopyButton';
 import type { WakeUrl } from './types';
 
 async function fetchWakeUrls(agentId: string): Promise<WakeUrl[]> {
   const { wake_urls } = await api<{ wake_urls: WakeUrl[] }>(`/api/v1/agents/${agentId}/wake-urls`);
   return wake_urls;
+}
+
+const MCP_URL = 'https://valetto.tech/api/mcp';
+
+/**
+ * What the owner pastes into the app that polls the link. The full link is known only right after create or rotate,
+ * so otherwise the text points at "the wake link I gave you" instead.
+ */
+export function wakeInstructions(url: string | null): string {
+  const first = url
+    ? `Check this wake link with a GET about once a minute: ${url}`
+    : 'Check the wake link I gave you with a GET about once a minute.';
+  return [
+    first,
+    `- 200 returns {"id":"..."}. If the id is different from the last one you saw, call list_tasks on ${MCP_URL}, then get_task to read each new task.`,
+    '- Send the last ETag back as If-None-Match. A 304 means nothing changed.',
+    '- 404 means the link was revoked or replaced. Stop and ask me for a new one.',
+    '- 429 means too many checks. Wait the seconds in Retry-After.',
+  ].join('\n');
+}
+
+function WakeInstructions({ agentId, url }: { agentId: string; url: string | null }) {
+  const text = wakeInstructions(url);
+  return (
+    <div className="dash-wake-howto" role="region" aria-labelledby={`wake-howto-h-${agentId}`}>
+      <h5 id={`wake-howto-h-${agentId}`}>Instructions for your app</h5>
+      <p className="dash-muted">Paste this into the app that checks the link, like Muse.</p>
+      <textarea
+        className="dash-wake-howto-text"
+        aria-labelledby={`wake-howto-h-${agentId}`}
+        readOnly
+        rows={7}
+        value={text}
+        translate="no"
+        spellCheck={false}
+        onFocus={(e) => e.currentTarget.select()}
+      />
+      <div className="dash-secret-row">
+        <CopyButton value={text} label="Copy instructions" />
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -117,6 +159,7 @@ export function WakeUrlPanel({ agentId, agentName }: { agentId: string; agentNam
             <code translate="no">{active.prefix}…</code> · Created <LocalTime iso={active.created_at} /> · Last checked{' '}
             {active.last_used_at ? <LocalTime iso={active.last_used_at} /> : 'not yet'}
           </p>
+          <WakeInstructions agentId={agentId} url={shown} />
           {confirming === 'rotate' ? (
             <div className="dash-confirm" role="group" aria-label={`Get a new wake link for ${agentName}`}>
               <p>Get a new link? The current one stops working right away, so paste the new one into Muse.</p>
