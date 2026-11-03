@@ -132,13 +132,24 @@ function stripPlaceholderPhones(text: string): string {
         new RegExp(String.raw`^[ \t]*(?:[-*+][ \t]+)?${PHONE_LABEL}${PLACEHOLDER_PHONE}[ \t]*(?:\n|$)`, 'gim'),
         '',
       )
-      .replace(new RegExp(String.raw`\b${PHONE_LABEL}${PLACEHOLDER_PHONE}(?:${SEPARATOR})?`, 'gi'), '')
+      // "Phone: 000-0000, 514-555-1234" keeps the label for the real number; "Phone: 000-0000 ·" loses both.
       .replace(
         new RegExp(
-          String.raw`\b(call|text|appelez|téléphonez)(?: us| nous|-nous)?(?: at| au)?[ \t]+${PLACEHOLDER_PHONE}(?:[ \t]+(?:or|ou)[ \t]+(\p{L}))?`,
+          String.raw`\b(${PHONE_LABEL})${PLACEHOLDER_PHONE}(?:(${SEPARATOR}|[ \t]+(?:or|ou)[ \t]+)(?=[\d(+]))?(?:${SEPARATOR})?`,
+          'gi',
+        ),
+        (_m, label: string, beforeNumber?: string) => (beforeNumber ? label : ''),
+      )
+      // "Call 000-0000 or email" becomes "Email"; "Call 000-0000, 514-555-1234" becomes "Call 514-555-1234".
+      .replace(
+        new RegExp(
+          String.raw`\b((call|text|appelez|téléphonez)(?: us| nous|-nous)?(?: at| au)?)[ \t]+${PLACEHOLDER_PHONE}(?:(?:${SEPARATOR}|[ \t]+(?:or|ou)[ \t]+)(?=[\d(+])|[ \t]+(?:or|ou)[ \t]+(\p{L}))?`,
           'giu',
         ),
-        (_m, verb: string, next?: string) => (next ? (/^\p{Lu}/u.test(verb) ? next.toUpperCase() : next) : ''),
+        (m: string, phrase: string, verb: string, next?: string) => {
+          if (next) return /^\p{Lu}/u.test(verb) ? next.toUpperCase() : next;
+          return /[\d(+]$/.test(m) || /(?:[·|•\/,]|\b(?:or|ou))[ \t]*$/i.test(m) ? `${phrase} ` : '';
+        },
       )
       .replace(
         new RegExp(`(${SEPARATOR})?${PLACEHOLDER_PHONE}(${SEPARATOR})?`, 'g'),
@@ -214,7 +225,8 @@ function isNeedCta(question: string, lower: string): boolean {
     .replace(/[?!.]+$/, '')
     .trim()
     .split(/\s+/);
-  if (NEED_OFFER.test(lower) || NEED_PRAISE.test(lower)) return true;
+  // "Need to check / know / replace …?" is the visitor's own task, not an offer, even with "best" or "quality" in it.
+  if (!/^need to\b/.test(lower) && (NEED_OFFER.test(lower) || NEED_PRAISE.test(lower))) return true;
   const rest = words.slice(1).filter((word) => /^\p{L}/u.test(word) && !/^(?:a|an|the|de|du|des|un|une)$/i.test(word));
   return rest.length > 0 && rest.every((word) => /^\p{Lu}/u.test(word));
 }
@@ -255,15 +267,25 @@ type Topic = {
  * estimates?", "La soumission est-elle gratuite?". "How long does a free estimate take?" asks how long, and
  * "gluten-free" is not "free".
  */
-const QUOTE_WORD = String.raw`(?:quotes?|estimates?|consultations?|soumissions?|devis|estimations?)`;
+const QUOTE_WORD = String.raw`(?:quotes?|estimates?|consultations?|assessments?|inspections?|soumissions?|devis|estimations?|évaluations?)`;
 const FREE_QUOTE_ASK = new RegExp(
-  String.raw`\b${QUOTE_WORD}\b[^?]*\b(?:is|are) (?:it|they|that|those)? ?(?:free|gratuite?s?)\b|\b(?:is|are) (?:the |your )?${QUOTE_WORD} (?:free|gratuite?s?)\b|\b(?:offer|give|provide|do|have)\s+(?<!-)free\s+${QUOTE_WORD}\b|\best-(?:ce|elle|il) (?:gratuite?s?|sans frais)\b|\b${QUOTE_WORD} (?:est-(?:elle|il) |sont-(?:elles|ils) )?(?:gratuite?s?|sans frais)\b|\b(?:free|gratuite?s?)\s*\?`,
+  String.raw`\b${QUOTE_WORD}\b[^?]*\b(?:is|are) (?:it|they|that|those)? ?(?:free|gratuite?s?)\b|\b(?:is|are) (?:the |your )?${QUOTE_WORD} (?:free|gratuite?s?)\b|\b(?:offer|give|provide|do|have)\s+(?<!-)free\s+${QUOTE_WORD}\b|\best-(?:ce|elle|il) (?:gratuite?s?|sans frais)\b|\b${QUOTE_WORD} (?:est-(?:elle|il) |sont-(?:elles|ils) )?(?:gratuite?s?|sans frais)\b|\b${QUOTE_WORD}\b[^?]*(?<!-)\b(?:free|gratuite?s?)\s*\?|\b(?:do|does|will) (?:the |your |a |an )?${QUOTE_WORD} cost (?:anything|money|extra)\b|\b(?:is there|do you have) (?:a |any )?(?:charge|fee|cost) for (?:a |an |the |your )?${QUOTE_WORD}\b`,
 );
 
-/** A price or cost question: never a preset chip (rule 3), whatever the context says. */
+/**
+ * A price or cost question: never a preset chip (rule 3), whatever the context says. Not "cost-effective",
+ * "keep costs low", "success rates", "How much of the yard", "charge my car battery", "fruits frais" or "couture".
+ */
 const PRICE_ASK =
-  /\bcosts?\b|\bprices?\b|\bpricing\b|\bhow much\b(?! (?:time|notice|lead time|advance notice|space|room|experience)\b)|(?<![-\w])rates?\b|\bfees?\b|(?<!\bin )\bcharges?\b|\bquoted?\s+(?:price|amount)|\bbudget\b|\btarifs?\b|\bprix\b|\bco[uû]t|\bfrais\b|\bcombien (?:ça |est-ce que ça )?(?:co[uû]t|pour |demandez|chargez|facturez)/;
+  /\bcosts?\b(?!-effective)(?<!\b(?:keep|keeping|kept|reduce|reducing|lower|lowering|cut|cutting|save on|saving on|control|controlling|minimi[sz]e) costs?)|\bprices?\b|\bpricing\b|\bhow much (?:does|do|did|will|would|should|can|could|is|are|was|were|for|to|money|it|extra|more|less)\b|\b(?:your|hourly|daily|weekly|monthly|flat|labou?r|going|standard|current|the) rates?\b|\brates? (?:for|per|start)\b|\bfees?\b|\b(?:you|we|they) charge\b(?! (?:my|your|the|a|an|our|it|batter\w*|phones?|cars?|vehicles?|evs?)\b)|\bcharges? (?:for|per|extra)\b|\b(?:extra|additional|service|call-out|callout|travel|minimum|hidden|delivery|cancellation|flat) charges?\b|\bcharged\b|\bquoted?\s+(?:price|amount)|\bbudget\b|\btarifs?\b|\bprix\b|\bco[uû]t(?:s|e|ent|era|erait|eront|er)?\b|\b(?:les|des|vos|aux|quels|quelques|sans|de) frais\b|\bfrais (?:de|d'|supplémentaires|additionnels|cachés)\b|\bcombien (?:ça |est-ce que ça )?(?:co[uû]t|pour |demandez|chargez|facturez)/;
 
+/** The question without its free-quote part, so "How much does it cost, and is the estimate free?" is still about price. */
+const FREE_QUOTE_ALL = new RegExp(FREE_QUOTE_ASK.source, 'g');
+const withoutFreeQuote = (lower: string) => lower.replace(FREE_QUOTE_ALL, ' ');
+
+/** Soot, scale and mineral deposits are not a down payment. */
+const DEPOSIT_WORD =
+  /(?<!\b(?:soot|creosote|mineral|calcium|lime|limescale|scale|carbon|grease|rust|tar|fat|sediment|water|oil|salt) )\bdeposits?\b(?! of (?:soot|creosote|minerals?|calcium|lime|scale|grease|rust))|\bdown payment\b|\bretainer\b|\bdépôts?\b(?! (?:de|d') ?(?:suie|calcaire|créosote|graisse|minéraux|tartre))|\bacomptes?\b|\bversement initial\b/;
 const NO_DEPOSIT =
   /\bno deposits?\b|\b(?:do not|don't|never|won't) (?:take|require|ask for|charge|need) (?:a |any )?deposits?\b|\bwithout (?:a |any )?deposit\b|\b(?:from|after|upon|on receipt of) (?:the |your |a )?deposit\b|\baucun (?:dépôt|acompte)\b|\bsans (?:dépôt|acompte)\b/;
 
@@ -319,14 +341,14 @@ const TOPICS: Topic[] = [
   },
   {
     name: 'deposit',
-    asks: /\bdeposits?\b|\bdown payment\b|\bdépôts?\b|\bacomptes?\b/,
+    asks: DEPOSIT_WORD,
     // A deposit in a sentence about paying or booking ("soot deposits" and "dépôts de suie" are not), or a plain
     // "No deposits" / "We do not take deposits", which answers it too.
     answered: (lines) =>
       lines.some(
         (line) =>
           NO_DEPOSIT.test(line) ||
-          (/\bdeposits?\b|\bdown payment\b|\bretainer\b|\bdépôts?\b|\bacomptes?\b|\bversement initial\b/.test(line) &&
+          (DEPOSIT_WORD.test(line) &&
             /\b(?:pay\w*|book\w*|reserv\w*|secures?|contracts?|invoices?|required|requires|non-refundable|refundable|balance|percent)\b|%|\$|paiement|pay[eé]\w*|réserv\w*|requis|exigé|factur\w*|contrat|solde|remboursable/.test(
               line,
             )),
@@ -345,7 +367,7 @@ const TOPICS: Topic[] = [
     name: 'hours',
     asks: /\bhours\b(?! does| do| will| would)|\bopen\b|heures d'ouverture|\bouverts?\b|\bhoraires?\b/,
     answered: has(
-      /\b(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b[^\n]{0,40}\d|\b24\/7\b|\b(?:open|available|operating|answering|on call)\s+24 hours\b|\b24 hours,? (?:a day|7 days|seven days)\b|\b24[- ]hours? (?:emergency )?(?:service|emergenc\w*|availability|support|line|dispatch)\b|\b(?:7|seven) days a week\b|\b7\s?(?:jours?|j)\s?(?:sur|\/)\s?7\b|\b24\s?h\s?(?:sur|\/)\s?24\b|\bweekends?\b[^\n]{0,30}\b(?:open|available)\b|\b(?:open|available)\b[^\n]{0,30}\bweekends?\b|\d(?::\d\d)?\s?(?:am|pm)\b|\b\d{1,2}\s?h\s?\d{0,2}\s?(?:à|-|–)/,
+      /\b(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b[^\n]{0,40}\d|\b24\/7\b|\b(?:open|available|operating|answering|on call)\s+24 hours\b|(?<!\b(?:within|in|after|before|of) )\b24 hours,? (?:a day|(?:7|seven) days(?: a week)?)\b(?! (?:after|before|later|prior|from|of|notice|in advance)\b)|\b24[- ]hours? (?:emergency )?(?:service|emergenc\w*|availability|support|line|dispatch)\b|\b(?:7|seven) days a week\b|\b7\s?(?:jours?|j)\s?(?:sur|\/)\s?7\b|\b24\s?h\s?(?:sur|\/)\s?24\b|\bweekends?\b[^\n]{0,30}\b(?:open|available)\b|\b(?:open|available)\b[^\n]{0,30}\bweekends?\b|\d(?::\d\d)?\s?(?:am|pm)\b|\b\d{1,2}\s?h\s?\d{0,2}\s?(?:à|-|–)/,
     ),
   },
 ];
@@ -462,6 +484,9 @@ function dropUnseenBrackets(question: string, foldedContext: string): string {
   return question.replace(/\s*\(([^()]{1,60})\)/g, (whole, inner: string, offset: number) => {
     const before = fold(normalized(question.slice(0, offset))).split(' ');
     if (NEEDS_OBJECT.has(before[before.length - 1] ?? '') || before.filter(Boolean).length < 3) return whole;
+    // A worked example ("(typical bungalow)", "(e.g. a deck)") narrows the question; it isn't RedBot's filler.
+    if (/^\s*(?:typical|typique|e\.?\s?g\.?|ex\.|for example|par exemple|such as|like|say|approx)/i.test(inner))
+      return whole;
     const words = fold(normalized(inner))
       .split(' ')
       .filter((word) => word.length >= 3 && !BRACKET_FILLER.has(word));
@@ -500,7 +525,7 @@ export function applyQuestionRules(
       const language = detectVisitorLanguage(question, { names });
       if (language !== null && language !== business.language) rule = 'wrong_language';
     }
-    if (!rule && PRICE_ASK.test(lower) && !FREE_QUOTE_ASK.test(lower)) rule = 'price_question';
+    if (!rule && PRICE_ASK.test(withoutFreeQuote(lower))) rule = 'price_question';
     if (!rule) {
       const topics = TOPICS.filter((topic) => topic.asks.test(lower) && !topic.unless?.test(lower));
       const onPage = flatContext.includes(` ${key} `);

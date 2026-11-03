@@ -511,3 +511,79 @@ describe('loader', () => {
     ).toHaveLength(1);
   });
 });
+
+describe('review nits on rules v3', () => {
+  const page = '# X\n\n## Services\n- Tile and stone. Free estimates.\n';
+  const kept = (qs: string[], language: 'en' | 'fr' = 'en', ctx = page) => rulesOf(qs, ctx, language).kept;
+  const ruleOf = (q: string, language: 'en' | 'fr' = 'en', ctx = page) => rulesOf([q], ctx, language).dropped[0]?.rule;
+
+  it('price words inside other words or meanings are not price', () => {
+    const en = [
+      'Are your products cost-effective?',
+      'How do you keep costs low?',
+      'What are your success rates?',
+      'How much of the yard do you mow?',
+      'Can you charge my car battery?',
+    ];
+    expect(kept(en)).toEqual(en);
+    const fr = ['Vos fruits sont-ils frais ?', 'Faites-vous de la couture ?'];
+    expect(kept(fr, 'fr')).toEqual(fr);
+    for (const q of [
+      'Do you charge for travel?',
+      'What are your rates?',
+      'How much is a tile job?',
+      'Is there an extra charge on weekends?',
+    ])
+      expect(ruleOf(q)).toBe('price_question');
+    for (const q of ['Quels sont vos frais de déplacement ?', 'Ça coûte combien ?', 'Combien coûtent vos services ?'])
+      expect(ruleOf(q, 'fr')).toBe('price_question');
+  });
+
+  it('a price question with a free-quote clause is still a price question', () => {
+    expect(ruleOf('How much does it cost, and is the estimate free?')).toBe('price_question');
+    expect(ruleOf('Is the quote free, or is there a fee?')).toBe('price_question');
+    expect(kept(['How soon can you come out for a quote, and is it free?', 'Do quotes cost anything?'])).toHaveLength(
+      2,
+    );
+  });
+
+  it('"free?" is a free-quote question only with a quote word', () => {
+    // Not free_quote, so they need no free-estimate line and are kept as RedBot wrote them.
+    expect(kept(['Is parking free?', 'Is the menu gluten-free?'], 'en', '# X\n\n## Services\n- Tile\n')).toHaveLength(
+      2,
+    );
+    expect(ruleOf('Is the inspection free?', 'en', '# X\n\n## Services\n- Tile\n')).toBe('no_answer_in_context');
+  });
+
+  it('a placeholder before a real number keeps the label or the verb', () => {
+    expect(cleanContextText('Call (613) 000-0000, 514-555-1234')).toBe('Call 514-555-1234');
+    expect(cleanContextText('Phone: 000-0000, 514-555-1234')).toBe('Phone: 514-555-1234');
+    expect(cleanContextText('Call us at 555-000-0000 or 613-555-1234 today')).toBe('Call us at 613-555-1234 today');
+    expect(cleanContextText('Call 000-0000 or email us')).toBe('Email us');
+    expect(cleanContextText('Phone: 000-0000 · Email: x')).toBe('Email: x');
+  });
+
+  it('"Need to check / know …" is the visitor\'s question', () => {
+    expect(kept(['Need to know the best time to aerate?', 'Need to check if quality matters?'])).toHaveLength(2);
+    expect(ruleOf('Need reliable movers?')).toBe('heading_or_cta');
+    expect(ruleOf('Need To Know?')).toBe('heading_or_cta');
+  });
+
+  it('"within 24 hours, 7 days after" is not hours; soot deposits are not a down payment', () => {
+    const ctx =
+      '# X\n\n## Services\n- Replies within 24 hours, 7 days after booking.\n- Book now: soot deposits removed.\n';
+    expect(ruleOf('What are your hours?', 'en', ctx)).toBe('no_answer_in_context');
+    expect(ruleOf('What deposit do you need?', 'en', ctx)).toBe('no_answer_in_context');
+    expect(
+      kept(['What are your hours?'], 'en', '# X\n\n## Hours\n- Available 24 hours, 7 days a week.\n'),
+    ).toHaveLength(1);
+    expect(kept(['Do you remove soot deposits?'], 'en', ctx)).toHaveLength(1);
+  });
+
+  it('a worked-example bracket stays', () => {
+    const ctx = '# X\n\n## Services\n- Tile. Most jobs take 2 days to complete.\n';
+    expect(kept(['How long does a typical tile job take (typical bungalow)?'], 'en', ctx)).toEqual([
+      'How long does a typical tile job take (typical bungalow)?',
+    ]);
+  });
+});
