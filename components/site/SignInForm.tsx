@@ -7,7 +7,6 @@ import {
   forgetSignInEmail,
   rememberSignInEmail,
   requestSignInCode,
-  SOURCE_MAX,
   sourceFromUrl,
   storedSignInEmail,
   verifySignInCode,
@@ -39,7 +38,6 @@ export function SignInForm({ sent, claimToken, next }: { sent: boolean; claimTok
   const [busy, setBusy] = useState(false);
   const [resent, setResent] = useState(false);
   const [marketing, setMarketing] = useState(false);
-  const [source, setSource] = useState('');
   const wantsSharing = useSyncExternalStore(noSubscribe, fromSharing, () => false);
   const codeRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
@@ -59,7 +57,7 @@ export function SignInForm({ sent, claimToken, next }: { sent: boolean; claimTok
     setBusy(true);
     setError('');
     setNotice('');
-    const res = await requestSignInCode(value, source.trim() || sourceFromUrl(), wantsSharing);
+    const res = await requestSignInCode(value, sourceFromUrl(), wantsSharing);
     setBusy(false);
     if (!res.ok) {
       setError(res.message);
@@ -127,16 +125,6 @@ export function SignInForm({ sent, claimToken, next }: { sent: boolean; claimTok
             onChange={(e) => setEmail(e.target.value)}
             aria-invalid={error ? true : undefined}
             aria-describedby="si-email-msg"
-          />
-          <label htmlFor="si-source">How did you hear about Valetto? (optional)</label>
-          <input
-            id="si-source"
-            name="source"
-            type="text"
-            autoComplete="off"
-            maxLength={SOURCE_MAX}
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
           />
           <button className="btn" type="submit" disabled={busy}>
             {busy ? 'Sending…' : 'Send code'}
