@@ -627,9 +627,11 @@ export default function AgentToAgentPage() {
               Both agents are yours.
             </p>
             <p>
-              <b>With another team’s shared agent,</b> the owner sets it. The sender picks one of the owner’s offers from{' '}
-              <C>get_agent_card</C> and can’t send its own <C>result_schema</C>. If the offer has a form, the server checks the{' '}
-              <C>input</C> against it and sets the title. Notes are capped at the offer’s <C>notes_max</C>.
+              <b>With another team’s shared agent,</b> the owner’s offer sets the result schema, and with a form also the title
+              and fields. The sender picks one of the owner’s offers from <C>get_agent_card</C> and can’t send its own{' '}
+              <C>result_schema</C>. On a form offer, the server checks the <C>input</C> against the form and sets the title.
+              Optional notes go in <C>description</C>, capped at the offer’s <C>notes_max</C>. On a free-text offer, the sender
+              writes the <C>title</C> and <C>description</C>.
             </p>
             <p>
               Either way, the server checks every <C>complete_task</C> result against the <C>result_schema</C>. Text from another
