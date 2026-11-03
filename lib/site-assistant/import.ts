@@ -7,6 +7,7 @@ import { siteBusinesses, siteDemoLinks } from '@/db/schema';
 import { parseContextMarkdown } from './context';
 import { createDemoLink } from './demo';
 import { guessPageLanguage } from './keywords';
+import { regenerateQuestions, type AddedQuestion } from './question-regen';
 import { applyQuestionRules, cleanContextText, type DroppedQuestion } from './question-rules';
 
 /** One business as RedBot hands it over. */
@@ -19,6 +20,8 @@ export type RedbotBusiness = {
   suggestedQuestions: string[];
   /** RedBot's questions the import rules dropped (lib/site-assistant/question-rules.ts), with the rule that did. */
   droppedQuestions: DroppedQuestion[];
+  /** Rule 4: questions drawn from the context because fewer than 3 survived; already in suggestedQuestions. */
+  addedQuestions: AddedQuestion[];
   language: 'en' | 'fr';
   /** `#rrggbb` from index.json (`tile_color`, `brand_color` or `color`); null lets the server pick one. */
   tileColor: string | null;
@@ -50,7 +53,13 @@ const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp'];
  * an explicit path from index.json (relative to the context dir or its parent), then, for desktop only,
  * `<contextDir>/<slug>.<ext>`.
  */
-function shotPath(shotsDir: string, contextDir: string, slug: string, kind: 'desktop' | 'mobile', explicit: string | null) {
+function shotPath(
+  shotsDir: string,
+  contextDir: string,
+  slug: string,
+  kind: 'desktop' | 'mobile',
+  explicit: string | null,
+) {
   return firstExisting([
     ...IMAGE_EXTS.map((ext) => join(shotsDir, `${slug}-${kind}.${ext}`)),
     ...IMAGE_EXTS.map((ext) => join(shotsDir, slug, `${kind}.${ext}`)),
@@ -82,7 +91,10 @@ function nested(meta: Record<string, unknown>, key: string, inner: string[]): st
  * - otherwise every `<contextDir>/*.md`, slug from the file name.
  * Screenshots default to `<shotsDir>/<slug>-desktop.png` and `-mobile.png` (RedBot's shoot.py names).
  */
-export function loadRedbotBusinesses(contextDir: string, shotsDir: string = join(dirname(resolve(contextDir)), 'shots')) {
+export function loadRedbotBusinesses(
+  contextDir: string,
+  shotsDir: string = join(dirname(resolve(contextDir)), 'shots'),
+) {
   const dir = resolve(contextDir);
   const indexPath = join(dir, 'index.json');
   type Entry = { slug: string; meta: Record<string, unknown>; mdPath: string };
@@ -117,17 +129,24 @@ export function loadRedbotBusinesses(contextDir: string, shotsDir: string = join
     const scrapedAt = scraped && !Number.isNaN(new Date(scraped).getTime()) ? new Date(scraped) : parsed.scrapedAt;
     const metaLanguage = pick(meta, ['language', 'lang'])?.toLowerCase();
     const language: 'en' | 'fr' =
-      metaLanguage === 'fr' || metaLanguage === 'en' ? metaLanguage : (parsed.language ?? guessPageLanguage(parsed.contextMd.slice(0, 8_000)));
+      metaLanguage === 'fr' || metaLanguage === 'en'
+        ? metaLanguage
+        : (parsed.language ?? guessPageLanguage(parsed.contextMd.slice(0, 8_000)));
     const metaQuestions = Array.isArray(meta.suggested_questions)
       ? (meta.suggested_questions as unknown[]).filter((q): q is string => typeof q === 'string' && q.trim() !== '')
       : [];
     const contextMd = cleanContextText(parsed.contextMd);
-    const displayName = (pick(meta, ['display_name', 'name', 'business_name', 'business']) ?? parsed.title ?? slug).slice(0, 120);
+    const displayName = (
+      pick(meta, ['display_name', 'name', 'business_name', 'business']) ??
+      parsed.title ??
+      slug
+    ).slice(0, 120);
     const questions = applyQuestionRules(metaQuestions.length > 0 ? metaQuestions : parsed.suggestedQuestions, {
       contextMd,
       language,
       displayName,
     });
+    const added = regenerateQuestions(questions.kept, { contextMd, language, displayName });
     const desktopMissing = markedMissing(meta, ['desktop_1440', 'desktop']);
     const mobileMissing = markedMissing(meta, ['mobile_390', 'mobile']);
     return {
@@ -136,19 +155,38 @@ export function loadRedbotBusinesses(contextDir: string, shotsDir: string = join
       sourceUrl,
       scrapedAt,
       contextMd,
-      // Fewer than 3, or none, is stored as is: the page shows up to 3 chips and hides "You can ask" when there are none.
-      suggestedQuestions: questions.kept.slice(0, 10),
+      // Fewer than 3 after rule 4, or none, is stored as is: the page shows up to 3 chips and hides "You can ask" when
+      // there are none.
+      suggestedQuestions: [...questions.kept, ...added.map((a) => a.question)].slice(0, 10),
       droppedQuestions: questions.dropped,
-      tileColor: ((c) => (c && /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : null))(pick(meta, ['tile_color', 'brand_color', 'color'])),
+      addedQuestions: added,
+      tileColor: ((c) => (c && /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : null))(
+        pick(meta, ['tile_color', 'brand_color', 'color']),
+      ),
       language,
       // A shot index.json sets to null is missing: never fall back to an older <slug>-<kind> file by name.
       desktopShotPath: desktopMissing
         ? null
-        : shotPath(shotsDir, dir, slug, 'desktop', pick(meta, ['desktop', 'desktop_shot']) ?? nested(meta, 'screenshots', ['desktop_1440', 'desktop'])),
+        : shotPath(
+            shotsDir,
+            dir,
+            slug,
+            'desktop',
+            pick(meta, ['desktop', 'desktop_shot']) ?? nested(meta, 'screenshots', ['desktop_1440', 'desktop']),
+          ),
       mobileShotPath: mobileMissing
         ? null
-        : shotPath(shotsDir, dir, slug, 'mobile', pick(meta, ['mobile', 'mobile_shot']) ?? nested(meta, 'screenshots', ['mobile_390', 'mobile'])),
-      missingShots: [...(desktopMissing ? (['desktop'] as const) : []), ...(mobileMissing ? (['mobile'] as const) : [])],
+        : shotPath(
+            shotsDir,
+            dir,
+            slug,
+            'mobile',
+            pick(meta, ['mobile', 'mobile_shot']) ?? nested(meta, 'screenshots', ['mobile_390', 'mobile']),
+          ),
+      missingShots: [
+        ...(desktopMissing ? (['desktop'] as const) : []),
+        ...(mobileMissing ? (['mobile'] as const) : []),
+      ],
     };
   });
 }
@@ -208,7 +246,9 @@ export async function importRedbotBusinesses(db: Db, businesses: RedbotBusiness[
   }
   const summary: { slug: string; created: boolean; link: boolean }[] = [];
   for (const entry of businesses) {
-    const desktop = entry.desktopShotPath ? await prepareShot(entry.desktopShotPath, 'desktop', options.rawShots) : null;
+    const desktop = entry.desktopShotPath
+      ? await prepareShot(entry.desktopShotPath, 'desktop', options.rawShots)
+      : null;
     const mobile = entry.mobileShotPath ? await prepareShot(entry.mobileShotPath, 'mobile', options.rawShots) : null;
     const values = {
       slug: entry.slug,
@@ -224,7 +264,10 @@ export async function importRedbotBusinesses(db: Db, businesses: RedbotBusiness[
       mobileShot: mobile?.bytes ?? null,
       mobileShotType: mobile?.contentType ?? null,
     };
-    const [before] = await db.select({ id: siteBusinesses.id }).from(siteBusinesses).where(eq(siteBusinesses.slug, entry.slug));
+    const [before] = await db
+      .select({ id: siteBusinesses.id })
+      .from(siteBusinesses)
+      .where(eq(siteBusinesses.slug, entry.slug));
     const [business] = await db
       .insert(siteBusinesses)
       .values(values)
@@ -237,7 +280,13 @@ export async function importRedbotBusinesses(db: Db, businesses: RedbotBusiness[
     const [live] = await db
       .select({ id: siteDemoLinks.id })
       .from(siteDemoLinks)
-      .where(and(eq(siteDemoLinks.businessId, businessId), isNull(siteDemoLinks.revokedAt), gt(siteDemoLinks.expiresAt, sql`now()`)))
+      .where(
+        and(
+          eq(siteDemoLinks.businessId, businessId),
+          isNull(siteDemoLinks.revokedAt),
+          gt(siteDemoLinks.expiresAt, sql`now()`),
+        ),
+      )
       .limit(1);
     if (!live || options.newLink) {
       const { token, link } = await createDemoLink(db, businessId);
@@ -251,7 +300,8 @@ export async function importRedbotBusinesses(db: Db, businesses: RedbotBusiness[
     summary.push({ slug: entry.slug, created: !before, link: linked });
     options.log(
       `${entry.slug}: ${before ? 'updated' : 'created'}; ${entry.language}; ${entry.suggestedQuestions.length} suggested question(s)` +
-        `${entry.droppedQuestions.length ? ` (${entry.droppedQuestions.length} dropped: ${entry.droppedQuestions.map((d) => d.rule).join(', ')})` : ''}; ` +
+        `${entry.droppedQuestions.length ? ` (${entry.droppedQuestions.length} dropped: ${entry.droppedQuestions.map((d) => d.rule).join(', ')})` : ''}` +
+        `${entry.addedQuestions?.length ? ` (${entry.addedQuestions.length} added from the site: ${entry.addedQuestions.map((a) => a.source).join(', ')})` : ''}; ` +
         `shots ${desktop ? 'desktop' : '-'} ${mobile ? 'mobile' : '-'}; ` +
         `${linked ? 'new link written to the link file' : 'kept the live link'}`,
     );
@@ -266,7 +316,10 @@ export async function revokeDemoLinks(db: Db, slug: string): Promise<number> {
     .where(
       and(
         isNull(siteDemoLinks.revokedAt),
-        inArray(siteDemoLinks.businessId, db.select({ id: siteBusinesses.id }).from(siteBusinesses).where(eq(siteBusinesses.slug, slug))),
+        inArray(
+          siteDemoLinks.businessId,
+          db.select({ id: siteBusinesses.id }).from(siteBusinesses).where(eq(siteBusinesses.slug, slug)),
+        ),
       ),
     )
     .returning({ id: siteDemoLinks.id });
