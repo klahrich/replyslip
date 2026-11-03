@@ -16,11 +16,15 @@ describe('shared agent wording', () => {
     expect(MUSE_WAKE_NOTE).toContain(rules);
   });
 
-  it('the rules say the id changes for messages and answers too, then list_tasks and get_task', () => {
+  it('the rules say the id changes for messages, answers, reviews and test wakes, then list_tasks updated_since and get_task', () => {
     const rules = WAKE_RULES.join('\n');
     expect(rules).toMatch(/new task or message/);
     expect(rules).toMatch(/answer/);
-    expect(rules).toContain(`call list_tasks on ${MCP_URL}, then get_task`);
+    expect(rules).toMatch(/review/);
+    expect(rules).toMatch(/test wake/);
+    expect(rules).toContain(`call list_tasks on ${MCP_URL} with updated_since`);
+    expect(rules).toMatch(/then get_task for each task it returns/);
+    expect(rules).toMatch(/next_cursor/);
   });
 
   it('the Muse client ID on the guide is the pinned one', () => {

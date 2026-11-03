@@ -13,10 +13,10 @@ export const MUSE_SCOPES = 'agent agent:respond';
 /** Where Valetto sends you back to Muse after Allow. Muse may ask for it as the redirect URI. */
 export const MUSE_REDIRECT_URI = 'https://agent.meta.ai/api/hatch/oauth/callback';
 
-/** How an app should poll a wake link. The id changes for any new wake activity, not only new tasks. */
+/** How an app should poll a wake link. The id changes for any new wake activity, not only new tasks; list_tasks updated_since (inclusive) fetches what changed. */
 export const WAKE_RULES: readonly string[] = [
-  '- 200 returns {"id":"..."}. The id changes when something new happens for you: a new task or message, an answer to your question, or a result, question or failure on a task you sent.',
-  `- The first check only records the id. When it changes, call list_tasks on ${MCP_URL}, then get_task to read each new or updated task.`,
+  '- 200 returns {"id":"..."}. The id changes when something new happens for you: a new task or message, an answer to your question, a result, question or failure on a task you sent, an owner review, or a test wake.',
+  `- The first check only records the id. When it changes, call list_tasks on ${MCP_URL} with updated_since set to the newest updated_at you've seen, minus about a minute, then get_task for each task it returns. Skip tasks you already handled. If next_cursor isn't null, call again with cursor set to it.`,
   '- Send the last ETag back as If-None-Match. A 304 means nothing changed.',
   '- 404 means the link was revoked or replaced. Stop and ask me for a new one.',
   '- 429 means too many checks. Wait the seconds in Retry-After.',
