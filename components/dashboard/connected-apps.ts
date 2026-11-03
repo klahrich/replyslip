@@ -14,8 +14,8 @@ export type ConnectedAppsResponse = { connected_apps: ConnectedApp[] };
 export const CONNECTED_APPS_PATH = '/api/v1/connected-apps';
 export const revokePath = (id: string) => `${CONNECTED_APPS_PATH}/${encodeURIComponent(id)}/revoke`;
 
-/** The URL people paste into ChatGPT, Claude, Cursor or another MCP app. */
-export const MCP_URL = 'https://valetto.tech/api/mcp';
+/** The URL people paste into ChatGPT, Claude, Cursor or another MCP app. Defined once, in the shared module. */
+export { MCP_URL } from '@/components/site/valetto/agentConstants';
 
 /** The app's name as we show it: a name we can't confirm stays in quotes. */
 export function appName(app: Pick<ConnectedApp, 'client'>): string {

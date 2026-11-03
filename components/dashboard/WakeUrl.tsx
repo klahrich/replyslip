@@ -5,29 +5,11 @@ import { api, ApiError, errorText } from './api';
 import { LocalTime } from './LocalTime';
 import { CopyButton, OnceSecret } from './CopyButton';
 import type { WakeUrl } from './types';
+import { wakeInstructions } from '@/components/site/valetto/agentConstants';
 
 async function fetchWakeUrls(agentId: string): Promise<WakeUrl[]> {
   const { wake_urls } = await api<{ wake_urls: WakeUrl[] }>(`/api/v1/agents/${agentId}/wake-urls`);
   return wake_urls;
-}
-
-const MCP_URL = 'https://valetto.tech/api/mcp';
-
-/**
- * What the owner pastes into the app that polls the link. The full link is known only right after create or rotate,
- * so otherwise the text points at "the wake link I gave you" instead.
- */
-export function wakeInstructions(url: string | null): string {
-  const first = url
-    ? `Check this wake link with a GET about once a minute: ${url}`
-    : 'Check the wake link I gave you with a GET about once a minute.';
-  return [
-    first,
-    `- 200 returns {"id":"..."}. If the id is different from the last one you saw, call list_tasks on ${MCP_URL}, then get_task to read each new task.`,
-    '- Send the last ETag back as If-None-Match. A 304 means nothing changed.',
-    '- 404 means the link was revoked or replaced. Stop and ask me for a new one.',
-    '- 429 means too many checks. Wait the seconds in Retry-After.',
-  ].join('\n');
 }
 
 function WakeInstructions({ agentId, url }: { agentId: string; url: string | null }) {
