@@ -187,6 +187,22 @@ describe('list_tasks order, updated_since and paging', () => {
     expect(pages).toEqual(seen);
   });
 
+  it('accepts a date alone as the start of that day in UTC', async () => {
+    const { session, aliceKey, bobKey } = await pair();
+    const before = await create(aliceKey, 'bob', 'just before midnight UTC');
+    const atMidnight = await create(aliceKey, 'bob', 'at midnight UTC');
+    const after = await create(aliceKey, 'bob', 'that afternoon');
+    await backdate([before], '2026-11-02T23:59:59.999Z');
+    await backdate([atMidnight], '2026-11-03T00:00:00.000Z');
+    await backdate([after], '2026-11-03T15:00:00.000Z');
+
+    expect(ids(await changedSince(bobKey, { updated_since: '2026-11-03' }))).toEqual([after, atMidnight]);
+    const res = await call(workspaceTasksRoute, 'http://localhost/api/v1/tasks?updated_since=2026-11-03', { cookie: session.cookie });
+    expect(res.status, res.text).toBe(200);
+    expect(res.data.tasks.map((t: { id: string }) => t.id)).toEqual([after, atMidnight]);
+    expect(ids(await changedSince(bobKey, { updated_since: '2026-11-02' }))).toEqual([after, atMidnight, before]);
+  });
+
   it('rejects a bad updated_since or cursor', async () => {
     const { session, bobKey } = await pair();
     for (const args of [{ updated_since: 'yesterday' }, { updated_since: '2026-13-01T00:00:00Z' }, { cursor: 'nope' }]) {
@@ -194,7 +210,7 @@ describe('list_tasks order, updated_since and paging', () => {
       expect(res.isError).toBe(true);
       expect(res.payload).toMatchObject({ error: 'validation_error' });
     }
-    for (const q of ['updated_since=2026-11-03', 'cursor=bm9wZQ']) {
+    for (const q of ['updated_since=2026-02-30', 'updated_since=2026-11-3', 'updated_since=2026-02-30T00:00:00Z', 'cursor=bm9wZQ']) {
       const res = await call(workspaceTasksRoute, `http://localhost/api/v1/tasks?${q}`, { cookie: session.cookie });
       expect(res.status).toBe(400);
       expect(res.data.error.code).toBe('validation_error');
