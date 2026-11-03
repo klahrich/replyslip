@@ -6,9 +6,17 @@ import { GET as pollRoute } from '@/app/api/v1/wake/[token]/route';
 import { GET as listRoute, POST as issueRoute } from '@/app/api/v1/agents/[id]/wake-urls/route';
 import { POST as rotateRoute } from '@/app/api/v1/agents/[id]/wake-urls/[wakeUrlId]/rotate/route';
 import { POST as revokeRoute } from '@/app/api/v1/agents/[id]/wake-urls/[wakeUrlId]/revoke/route';
+import { GET as listAgentsRoute } from '@/app/api/v1/agents/route';
 import { keyedHash, sha256 } from '@/lib/crypto';
 import { enqueueWake } from '@/lib/wakes';
-import { WAKE_POLL_LIMITS, issueWakeUrl, revokeWakeUrl, rotateWakeUrl, type WakeSubject } from '@/lib/wake-urls';
+import {
+  WAKE_POLL_LIMITS,
+  issueWakeUrl,
+  resetWakeMissCapCache,
+  revokeWakeUrl,
+  rotateWakeUrl,
+  type WakeSubject,
+} from '@/lib/wake-urls';
 import { call, createAgent, createKey, mcpTool, signIn } from './helpers';
 
 const schema = { type: 'object', additionalProperties: false, required: ['score'], properties: { score: { type: 'number' } } };
@@ -180,13 +188,26 @@ describe('wake URLs', () => {
     expect(row?.pollCount).toBe(5);
     expect(row?.lastUsedAt).not.toBeNull();
 
+    expect(WAKE_POLL_LIMITS.perToken).toBe(300);
+    expect(WAKE_POLL_LIMITS.windowSeconds).toBe(15 * 60);
     await db.update(wakeUrls).set({ pollCount: WAKE_POLL_LIMITS.perToken }).where(eq(wakeUrls.id, issued.row.id));
+    const rowVersion = async () =>
+      (await db.execute<{ v: string }>(sql`select xmin::text as v from wake_urls where id = ${issued.row.id}`))[0]?.v;
+    const versionBefore = await rowVersion();
+    const [before] = await db.select().from(wakeUrls).where(eq(wakeUrls.id, issued.row.id));
     const limited = await poll(token, { ip });
     expect(limited.status).toBe(429);
     const retryAfter = Number(limited.res.headers.get('retry-after'));
     expect(retryAfter).toBeGreaterThan(0);
     expect(retryAfter).toBeLessThanOrEqual(WAKE_POLL_LIMITS.windowSeconds);
     expect(limited.res.headers.get('cache-control')).toBe('no-store');
+    expect((await poll(token, { ip })).status).toBe(429);
+    // A refused poll writes nothing: the row is the same version, the count did not move, no rate_events row.
+    expect(await rowVersion()).toBe(versionBefore);
+    const [after] = await db.select().from(wakeUrls).where(eq(wakeUrls.id, issued.row.id));
+    expect(after).toEqual(before);
+    expect(after?.pollCount).toBe(WAKE_POLL_LIMITS.perToken);
+    expect(await countEvents()).toBe(missesBefore);
 
     // A new window starts the count again.
     await db
@@ -198,29 +219,66 @@ describe('wake URLs', () => {
     expect(reset?.pollCount).toBe(1);
   });
 
-  it('limits misses per IP but never good polls from a busy IP', async () => {
-    const { token } = await setup();
+  it('moves last_used_at at most once a minute', async () => {
+    const { token, issued } = await setup();
+    const db = getDb();
+    const lastUsed = async () => (await db.select().from(wakeUrls).where(eq(wakeUrls.id, issued.row.id)))[0]?.lastUsedAt;
+    const recent = new Date(Date.now() - 30_000);
+    await db.update(wakeUrls).set({ lastUsedAt: recent }).where(eq(wakeUrls.id, issued.row.id));
+    expect((await poll(token)).status).toBe(200);
+    expect((await lastUsed())?.getTime()).toBe(recent.getTime());
+    const stale = new Date(Date.now() - 61_000);
+    await db.update(wakeUrls).set({ lastUsedAt: stale }).where(eq(wakeUrls.id, issued.row.id));
+    expect((await poll(token)).status).toBe(200);
+    expect((await lastUsed())!.getTime()).toBeGreaterThan(stale.getTime() + 30_000);
+  });
+
+  it('keeps answering dead URLs with the same 404 past the per-IP miss cap, writing nothing more', async () => {
+    const { token, subject, issued } = await setup();
     const db = getDb();
     const platformIp = '203.0.113.77';
     const ipKey = keyedHash('wake_url_ip', platformIp).slice(0, 40);
     const unknown = `rwu_${'B'.repeat(43)}`;
-    // Many good polls from one platform address are fine: there is no per-IP cap on them.
+    const missesForIp = async () =>
+      (await db.select().from(rateEvents).where(and(eq(rateEvents.kind, 'wakeMiss'), eq(rateEvents.ip, ipKey)))).length;
+    // Good polls from one platform address are fine: there is no per-IP cap on them.
     const many = await setup();
     for (const t of [token, many.token, token, many.token]) expect((await poll(t, { ip: platformIp })).status).toBe(200);
+    expect(await missesForIp()).toBe(0);
 
-    // Each miss is recorded against the IP; at the cap, further misses from it get 429.
-    expect((await poll(unknown, { ip: platformIp })).status).toBe(404);
-    const recorded = await db.select().from(rateEvents).where(and(eq(rateEvents.kind, 'wakeMiss'), eq(rateEvents.ip, ipKey)));
-    expect(recorded).toHaveLength(1);
+    // Under the cap each miss is recorded against the IP.
+    const plain = await poll(unknown, { ip: platformIp });
+    expect(plain.status).toBe(404);
+    expect(await missesForIp()).toBe(1);
     await db
       .insert(rateEvents)
       .values(Array.from({ length: WAKE_POLL_LIMITS.missesPerIp - 1 }, () => ({ kind: 'wakeMiss', ip: ipKey })));
-    const limited = await poll(unknown, { ip: platformIp });
-    expect(limited.status).toBe(429);
-    expect(Number(limited.res.headers.get('retry-after'))).toBeGreaterThan(0);
-    // The same IP still gets answers for real tokens, and other IPs still get the plain 404.
-    expect((await poll(token, { ip: platformIp })).status).toBe(200);
-    expect((await poll(unknown)).status).toBe(404);
+
+    // A revoked token, so both dead kinds are checked past the cap.
+    const rotated = await rotateWakeUrl(subject, issued.row.id, 'https://valetto.example');
+    const signature = (res: Awaited<ReturnType<typeof poll>>) => ({
+      status: res.status,
+      text: res.text,
+      headers: [...res.res.headers.entries()].sort(),
+    });
+    try {
+      for (let round = 0; round < 3; round += 1) {
+        for (const dead of [unknown, token, `rwu_${'C'.repeat(43)}`]) {
+          const res = await poll(dead, { ip: platformIp });
+          expect(signature(res)).toEqual(signature(plain));
+        }
+      }
+      // Past the cap nothing more was written for the IP.
+      expect(await missesForIp()).toBe(WAKE_POLL_LIMITS.missesPerIp);
+      // The same IP still gets answers for real tokens.
+      expect((await poll(tokenOf(rotated.url), { ip: platformIp })).status).toBe(200);
+      // A cold instance (no shortcut) reads the count and answers the same.
+      resetWakeMissCapCache();
+      expect(signature(await poll(unknown, { ip: platformIp }))).toEqual(signature(plain));
+      expect(await missesForIp()).toBe(WAKE_POLL_LIMITS.missesPerIp);
+    } finally {
+      resetWakeMissCapCache();
+    }
   });
 
   it('writes a marker row for a delivery-none agent only while it has an active wake URL', async () => {
@@ -344,5 +402,35 @@ describe('wake URLs', () => {
     expect((await poll(tokenOf(newUrl))).status).toBe(404);
     // After a revoke the agent may be given a fresh URL.
     expect((await call(issueRoute, base, { method: 'POST', params, cookie: session.cookie })).status).toBe(201);
+  });
+
+  it("shows each agent's wake-link status in GET /api/v1/agents, never the URL", async () => {
+    const { session, subject, issued, token, target, other } = await setup();
+    await poll(token);
+    const list = async () => {
+      const res = await call(listAgentsRoute, 'http://localhost/api/v1/agents', { cookie: session.cookie });
+      expect(res.status).toBe(200);
+      return res;
+    };
+    const res = await list();
+    expect(res.text).not.toContain(token);
+    expect(res.text).not.toContain('/api/v1/wake/');
+    const byId = new Map((res.data.agents as { id: string; wake_url: unknown }[]).map((agent) => [agent.id, agent.wake_url]));
+    const [row] = await getDb().select().from(wakeUrls).where(eq(wakeUrls.id, issued.row.id));
+    expect(byId.get(target.id)).toEqual({
+      active: true,
+      prefix: token.slice(0, 12),
+      created_at: row!.createdAt.toISOString(),
+      last_used_at: row!.lastUsedAt!.toISOString(),
+    });
+    expect(byId.get(other.id)).toBeNull();
+    // Another workspace never sees it.
+    const stranger = await signIn();
+    const strangerList = await call(listAgentsRoute, 'http://localhost/api/v1/agents', { cookie: stranger.cookie });
+    expect(strangerList.text).not.toContain(token.slice(0, 12));
+
+    await revokeWakeUrl(subject, issued.row.id);
+    const after = new Map(((await list()).data.agents as { id: string; wake_url: unknown }[]).map((agent) => [agent.id, agent.wake_url]));
+    expect(after.get(target.id)).toBeNull();
   });
 });
