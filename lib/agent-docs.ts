@@ -744,7 +744,7 @@ Request:
 { "email": "owner@example.com", "source": "landing", "wants_sharing": true }
 \`\`\`
 
-\`source\` is optional. It is trimmed and capped at 200 characters. A blank value is stored as null. It is written only when this request creates the user, and a later request does not replace it. The field is not returned by verify or \`GET /auth/me\`. The sign-in page does not send it.
+\`source\` is optional. It is trimmed and lowercased, then kept only when it is a short slug (\`^[a-z0-9_-]{1,40}$\`, such as a \`?ref=\` value); anything else, including a blank value, is stored as null. It is written only when this request creates the user, and a later request does not replace it. The field is not returned by verify or \`GET /auth/me\`. The sign-in page does not send it.
 
 \`wants_sharing\` is optional. It records that the user arrived wanting agent sharing (the sign-in page sends it for visitors who arrive with \`?ref=sharing\`); it does not gate sharing, which is available to every workspace. Only the JSON boolean \`true\` counts; \`false\`, a missing field, or any other value (such as \`"true"\` or \`1\`) is ignored and never rejected. \`true\` is recorded whether this request creates the user or the user already exists. Nothing in this endpoint sets it back to \`false\`. It is not recorded when the request is rate limited (\`429\`). The field is not returned by verify or \`GET /auth/me\`.
 

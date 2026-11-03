@@ -9,6 +9,7 @@ import { POST as registerRoute } from '@/app/api/v1/agents/register/route';
 import { getDb } from '@/db';
 import { agents, messages, tasks, users } from '@/db/schema';
 import { firstAgentAlertText, setEmailSenderForTests } from '@/lib/email';
+import { normalizeSignupSource } from '@/lib/auth';
 import {
   flushFirstAgentAlerts,
   publicDeliveryMode,
@@ -52,16 +53,14 @@ async function signInWithSource(source: string | null, email = emailAddress('own
 }
 
 describe('signup source', () => {
-  it('stores a trimmed source only on the first request-code', async () => {
+  it('stores a trimmed, lowercased slug source only on the first request-code', async () => {
     const email = emailAddress('source');
-    const padded = `  ${'landing'.padEnd(210, 'x')}  `;
     const first = await call(requestCode, 'http://localhost/api/v1/auth/request-code', {
-      body: { email, source: padded },
+      body: { email, source: '  Landing_Hero-2  ' },
     });
     expect(first.status).toBe(200);
     const [created] = await getDb().select().from(users).where(eq(users.email, email.toLowerCase()));
-    expect(created?.signupSource).toBe(padded.trim().slice(0, 200));
-    expect(created?.signupSource).toHaveLength(200);
+    expect(created?.signupSource).toBe('landing_hero-2');
 
     const again = await call(requestCode, 'http://localhost/api/v1/auth/request-code', {
       body: { email, source: 'replaced' },
@@ -80,6 +79,34 @@ describe('signup source', () => {
     const session = await signInWithSource('landing-hero');
     expect(JSON.stringify(session.user)).not.toContain('landing-hero');
     expect(JSON.stringify(session.user)).not.toContain('signup_source');
+  });
+
+  it('drops a source that is not a short slug, so it cannot add lines to the alert email', async () => {
+    for (const source of ['landing\nSigned up: someone-else', 'a friend', 'x'.repeat(41), 'ref=a&b', 'café']) {
+      const email = emailAddress('badsource');
+      const res = await call(requestCode, 'http://localhost/api/v1/auth/request-code', { body: { email, source } });
+      expect(res.status).toBe(200);
+      const [created] = await getDb().select().from(users).where(eq(users.email, email.toLowerCase()));
+      expect(created?.signupSource).toBeNull();
+    }
+  });
+});
+
+describe('normalizeSignupSource', () => {
+  it.each([
+    ['newsletter', 'newsletter'],
+    ['  UTM_Source-1 ', 'utm_source-1'],
+    ['x'.repeat(40), 'x'.repeat(40)],
+    ['x'.repeat(41), null],
+    ['a\nb', null],
+    ['a\rb', null],
+    ['two words', null],
+    ['', null],
+    ['   ', null],
+    [null, null],
+    [undefined, null],
+  ])('%j → %j', (input, expected) => {
+    expect(normalizeSignupSource(input as string | null | undefined)).toBe(expected);
   });
 });
 

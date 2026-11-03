@@ -48,10 +48,10 @@ export function retryMessage(seconds: number | undefined): string {
   return `Too many requests, try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`;
 }
 
-/** The server caps `source` at the same length. */
+/** Client-side length cap. The server keeps `source` only when it is a short slug (`^[a-z0-9_-]{1,40}$`). */
 export const SOURCE_MAX = 200;
 
-/** `?ref=` or `?utm_source=` on the current page, for `source` when the visitor leaves the field empty. */
+/** `?ref=` or `?utm_source=` on the current page: the signup `source` sent with the sign-in request. */
 export function sourceFromUrl(): string {
   try {
     const q = new URLSearchParams(window.location.search);
@@ -62,8 +62,9 @@ export function sourceFromUrl(): string {
 }
 
 /**
- * `source` is the optional "how did you hear about us" answer. It goes out only when it has text; the server keeps
- * it only when this request creates the user, so it is fine to send on every sign-in. `wants_sharing` goes out only
+ * `source` is the signup source, normally the `?ref=` / `?utm_source=` value from sourceFromUrl(). It goes out only
+ * when it has text; the server keeps it only when this request creates the user and it is a short slug, so it is fine
+ * to send on every sign-in. `wants_sharing` goes out only
  * when the visitor came from /sharing (?ref=sharing).
  */
 export async function requestSignInCode(email: string, source = '', wantsSharing = false): Promise<AuthResult> {
