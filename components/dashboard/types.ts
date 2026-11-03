@@ -278,3 +278,15 @@ export type ReviewsResponse = {
   count: number;
   by_agent: { agent_id: string; in_review: number; awaiting_release: number }[];
 };
+
+/** GET/POST /api/v1/agents/:id/wake-urls. `url` is present only in the issue and rotate responses. */
+export type WakeUrl = {
+  id: string;
+  agent_id: string;
+  prefix: string;
+  created_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  status: 'active' | 'revoked';
+  url?: string;
+};

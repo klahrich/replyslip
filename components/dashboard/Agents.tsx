@@ -5,6 +5,7 @@ import { api, errorText } from './api';
 import { LocalTime } from './LocalTime';
 import { OnceSecret } from './CopyButton';
 import { DeliveryPanel } from './DeliveryPanel';
+import { WakeUrlPanel } from './WakeUrl';
 import type { Agent, AgentKey, NewAgentKey } from './types';
 
 function deliveryLabel(a: Agent): string {
@@ -226,6 +227,8 @@ export function Agents({
                 ) : (
                   <p className="dash-muted">No keys.</p>
                 )}
+
+                {!revoked ? <WakeUrlPanel agentId={a.id} agentName={a.name} /> : null}
 
                 {!revoked ? (
                   <div className="dash-agent-danger">

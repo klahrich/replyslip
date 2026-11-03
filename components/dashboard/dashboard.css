@@ -312,3 +312,15 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
   .dash-apps .dash-table td:nth-child(n+4)[data-label]::before{content:attr(data-label) " · ";color:var(--muted)}
   .dash-apps .dash-table tr.dash-apps-confirm-row{display:block;padding-top:0}
 }
+
+/* Wake link (one per agent): Muse and similar apps poll it to know a new message is waiting */
+.dash-wake{margin-top:16px;padding-top:12px;border-top:1px solid #c4c9ce;display:grid;gap:8px;min-width:0}
+.dash-wake-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+.dash-wake h4{font-size:var(--s-small);font-weight:600}
+.dash-wake-help{max-width:40rem}
+.dash-wake .dash-secret{margin:4px 0}
+.dash-wake-meta{overflow-wrap:anywhere}
+.dash-wake-actions{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center;justify-content:flex-start}
+.dash-wake-notice{margin:0;font-size:var(--s-small)}
+.dash-wake-notice:empty{display:none}
+@media (max-width:640px){.dash-wake .dash-textbtn{min-height:44px}}
