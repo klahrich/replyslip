@@ -66,20 +66,24 @@ function codePoint(n: number, fallback: string): string {
 
 /** JSON-style `\uXXXX` and `\/`, numeric and common named HTML entities; no-break spaces become spaces. */
 export function decodeEscapes(text: string): string {
-  return text
-    .replace(/(?:\\u[0-9a-fA-F]{4})+/g, (run) =>
-      String.fromCharCode(
-        ...run
-          .split('\\u')
-          .filter(Boolean)
-          .map((hex) => parseInt(hex, 16)),
-      ),
-    )
-    .replace(/\\\//g, '/')
-    .replace(/&#(\d{1,7});/g, (m, d: string) => codePoint(Number(d), m))
-    .replace(/&#x([0-9a-f]{1,6});/gi, (m, h: string) => codePoint(parseInt(h, 16), m))
-    .replace(/&([a-zA-Z]+);/g, (m, name: string) => NAMED_ENTITIES[name] ?? NAMED_ENTITIES[name.toLowerCase()] ?? m)
-    .replace(/\u00a0/g, ' ');
+  return (
+    text
+      .replace(/(?:\\u[0-9a-fA-F]{4})+/g, (run) =>
+        String.fromCharCode(
+          ...run
+            .split('\\u')
+            .filter(Boolean)
+            .map((hex) => parseInt(hex, 16)),
+        ),
+      )
+      .replace(/\\\//g, '/')
+      .replace(/&#(\d{1,7});/g, (m, d: string) => codePoint(Number(d), m))
+      .replace(/&#x([0-9a-f]{1,6});/gi, (m, h: string) => codePoint(parseInt(h, 16), m))
+      .replace(/&([a-zA-Z]+);/g, (m, name: string) => NAMED_ENTITIES[name] ?? NAMED_ENTITIES[name.toLowerCase()] ?? m)
+      .replace(/\u00a0/g, ' ')
+      // A `\u003e` that lost its backslash in the scrape ("u003edanny@…"): the code goes.
+      .replace(/(?<![\p{L}\p{N}\\])u00(?:3[ce]|26|27|22)(?=[\p{L}\p{N}])/giu, '')
+  );
 }
 
 /**
@@ -93,9 +97,28 @@ function stripComments(text: string): string {
     .replace(/<!--\s*\S*/g, '');
 }
 
-/** The context as stored: escapes decoded and HTML comments removed. */
+/** A placeholder phone number ("(613) 000-0000") from a form field or template, not the business's number. */
+const PLACEHOLDER_PHONE = /\(?\b\d{3}\)?[\s.-]?000[\s.-]?0000\b/;
+
+/** Drops placeholder phone numbers: a "Phone:" line that is only one goes, and one in a list is taken out. */
+function stripPlaceholderPhones(text: string): string {
+  return text
+    .replace(
+      new RegExp(
+        `^[ \\t]*(?:[-*+][ \\t]+)?(?:phone|tel|tél|téléphone)\\.?[ \\t]*:?[ \\t]*${PLACEHOLDER_PHONE.source}[ \\t]*(?:\\n|$)`,
+        'gim',
+      ),
+      '',
+    )
+    .replace(
+      new RegExp(`(,[ \\t]*)?${PLACEHOLDER_PHONE.source}(,[ \\t]*)?`, 'g'),
+      (_m, before?: string, after?: string) => (before && after ? ', ' : ''),
+    );
+}
+
+/** The context as stored: escapes decoded, HTML comments and placeholder phone numbers removed. */
 export function cleanContextText(markdown: string): string {
-  return stripComments(decodeEscapes(markdown))
+  return stripPlaceholderPhones(stripComments(decodeEscapes(markdown)))
     .replace(/[ \t]+$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -273,18 +296,20 @@ const TOPICS: Topic[] = [
     name: 'hours',
     asks: /\bhours\b(?! does| do| will| would)|\bopen\b|heures d'ouverture|\bouverts?\b|\bhoraires?\b/,
     answered: has(
-      /\b(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b[^\n]{0,40}\d|\b24\/7\b|\b24 hours\b|\d(?::\d\d)?\s?(?:am|pm)\b|\b\d{1,2}\s?h\s?\d{0,2}\s?(?:à|-|–)/,
+      /\b(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b[^\n]{0,40}\d|\b24\/7\b|\b(?:open )?24 hours a day\b|\bopen 24 hours\b|\b24\s?h\s?\/\s?24\b|\d(?::\d\d)?\s?(?:am|pm)\b|\b\d{1,2}\s?h\s?\d{0,2}\s?(?:à|-|–)/,
     ),
   },
 ];
 
 /** Sections that describe RedBot's scrape, not the business. Their lines never count as an answer. */
 const NOT_EVIDENCE_HEADING = /^#{1,6}\s*(?:gaps|pages scraped|language|langue)\b/i;
+/** RedBot's header lines ("Site:", "Scraped:", "City: Montreal, QC · Niche: catering"), not the site's words. */
+const SCRAPE_META = /^(?:site|scraped|city|niche|source|url)\s*:/i;
 const PLACEHOLDER =
   /\bnot (?:stated|listed|published|found|mentioned|given)\b|\bnon (?:indiqu|précis|mentionn)|\bno faq\b|\(none\)/i;
 
 /**
- * The context's lines that can answer a question, lower-cased: RedBot's scrape notes, placeholders and headings
+ * The context's lines that can answer a question, lower-cased: RedBot's scrape notes and header lines, placeholders and headings
  * ("## Service areas" is not a service area) don't count. `withHeadings` keeps headings, to find a question the
  * page itself asks.
  */
@@ -294,7 +319,8 @@ function evidenceLines(contextMd: string, withHeadings = false): string[] {
   for (const line of contextMd.split('\n')) {
     const heading = /^#{1,6}\s/.test(line);
     if (heading) skipping = NOT_EVIDENCE_HEADING.test(line);
-    if (skipping || !line.trim() || PLACEHOLDER.test(line) || (heading && !withHeadings)) continue;
+    if (skipping || !line.trim() || PLACEHOLDER.test(line) || SCRAPE_META.test(line) || (heading && !withHeadings))
+      continue;
     lines.push(line.toLowerCase().replace(/’/g, "'"));
   }
   return lines;
@@ -307,6 +333,42 @@ const normalized = (text: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 
+/** Template words in RedBot's brackets ("(Ottawa and nearby)", "(Montreal et environs)"); they prove nothing. */
+const fold = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '');
+const BRACKET_FILLER = new Set([
+  'and',
+  'or',
+  'nearby',
+  'area',
+  'areas',
+  'the',
+  'et',
+  'ou',
+  'environs',
+  'secteur',
+  'region',
+  'de',
+  'du',
+  'des',
+  'la',
+  'le',
+  'les',
+]);
+
+/**
+ * A short bracket none of whose words is in the context is RedBot's filler, often in the wrong language
+ * ("Quel est le prix approximatif d'un projet typique (catering)?"): the bracket goes. Accents are ignored
+ * ("Montreal" matches "Montréal"). `foldedContext` is the normalized context without accents, space-padded.
+ */
+function dropUnseenBrackets(question: string, foldedContext: string): string {
+  return question.replace(/\s*\(([^()]{1,60})\)/g, (whole, inner: string) => {
+    const words = fold(normalized(inner))
+      .split(' ')
+      .filter((word) => word.length >= 3 && !BRACKET_FILLER.has(word));
+    return words.length === 0 || words.some((word) => foldedContext.includes(` ${word} `)) ? whole : '';
+  });
+}
+
 /**
  * Applies rules 1-3 to RedBot's list, in order, keeping the first copy of a repeated question. Returns what is kept
  * and, for each dropped question, the first rule that dropped it.
@@ -318,12 +380,13 @@ export function applyQuestionRules(
   const lines = evidenceLines(business.contextMd);
   const text = lines.join('\n');
   const flatContext = ` ${normalized(evidenceLines(business.contextMd, true).join(' '))} `;
+  const foldedContext = fold(flatContext);
   const names = business.displayName ? [business.displayName] : [];
   const kept: string[] = [];
   const dropped: DroppedQuestion[] = [];
   const seen = new Set<string>();
   for (const raw of questions) {
-    const question = cleanQuestionText(raw, business.language);
+    const question = dropUnseenBrackets(cleanQuestionText(raw, business.language), foldedContext);
     const key = normalized(question);
     if (!key || seen.has(key)) continue;
     seen.add(key);

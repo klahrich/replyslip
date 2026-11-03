@@ -53,6 +53,28 @@ describe('question cleanup', () => {
     expect(cleanQuestionText('<!-- q3 --> Do you serve Orleans?', 'en')).toBe('Do you serve Orleans?');
   });
 
+  it('drops placeholder phone numbers and a \\u003e that lost its backslash', () => {
+    const md = [
+      '## Contact',
+      '- Phone: (416) 000-0000',
+      '- Phone: (437) 477-5185',
+      '- Other emails seen: u003einfo',
+      '## Gaps and conflicts',
+      '- 2 different phone numbers on site: (416) 000-0000, (437) 477-5185',
+      '- 3 different phone numbers on site: (416) 542-8000, (647) 000-0000, (647) 835-7757',
+    ].join('\n');
+    expect(cleanContextText(md)).toBe(
+      [
+        '## Contact',
+        '- Phone: (437) 477-5185',
+        '- Other emails seen: info',
+        '## Gaps and conflicts',
+        '- 2 different phone numbers on site: (437) 477-5185',
+        '- 3 different phone numbers on site: (416) 542-8000, (647) 835-7757',
+      ].join('\n'),
+    );
+  });
+
   it('drops a bracket inside a bracket', () => {
     expect(cleanQuestionText('Desservez-vous mon secteur (Longueuil (Montreal area) et environs)?', 'fr')).toBe(
       'Desservez-vous mon secteur (Longueuil et environs)?',
@@ -260,6 +282,46 @@ describe('rule: a generic question needs an answer in the context', () => {
     // A free-quote question, not a job-length one: "Soumission gratuite" answers it.
     expect(rulesOf([fr], '## Contact\n- Soumission gratuite', 'fr').kept).toEqual([fr]);
     expect(rulesOf([fr], '## Services\n- Toitures.', 'fr').kept).toEqual([]);
+  });
+
+  it("hours need opening times: a 24 hours' notice is not hours", () => {
+    const q = 'What are your hours, and can I reach you on weekends?';
+    expect(rulesOf([q], "## FAQ\n- We ask for at least 24 hours' notice for cancellations.").kept).toEqual([]);
+    expect(rulesOf([q], '## Hours\n- Open 24 hours a day, 7 days a week.').kept).toEqual([q]);
+  });
+
+  it("a bracket naming nothing on the site goes (RedBot's English niche in a French question)", () => {
+    const ctx = [
+      '# Iso-Thermo',
+      'City: Longueuil (Montreal area), QC · Niche: insulation',
+      '## Service areas',
+      '- Nous desservons Longueuil et la Rive-Sud.',
+      '## Pricing and quote process',
+      '- Isolation des combles à partir de 1,50 $ le pied carré.',
+    ].join('\n');
+    expect(
+      rulesOf(
+        [
+          "Quel est le prix approximatif d'un projet typique (insulation)?",
+          'Desservez-vous mon secteur (Longueuil et environs)?',
+        ],
+        ctx,
+        'fr',
+      ).kept,
+    ).toEqual([
+      "Quel est le prix approximatif d'un projet typique?",
+      'Desservez-vous mon secteur (Longueuil et environs)?',
+    ]);
+    // Accents don't matter, and the header line is not the site's text.
+    expect(
+      rulesOf(['Do you serve my area (Montreal and nearby)?'], '## Service areas\n- We serve Montréal.').kept,
+    ).toEqual(['Do you serve my area (Montreal and nearby)?']);
+    expect(
+      rulesOf(
+        ['Do you serve my area (Ottawa and nearby)?'],
+        'City: Ottawa, ON\n## Service areas\n- We serve the region.',
+      ).kept,
+    ).toEqual(['Do you serve my area?']);
   });
 
   it('a question on no generic topic is kept as RedBot wrote it', () => {
