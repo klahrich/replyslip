@@ -612,8 +612,11 @@ export const wakeUrls = pgTable(
     tokenPrefix: text('token_prefix').notNull(),
     createdAt: ts('created_at').notNull().defaultNow(),
     revokedAt: ts('revoked_at'),
-    /** Last successful poll, written at most once a minute. */
+    /** Last successful poll. */
     lastUsedAt: ts('last_used_at'),
+    /** Per-token poll limit (lib/wake-urls.ts): a fixed window kept on this row, so a poll never inserts a row. */
+    pollWindowStartedAt: ts('poll_window_started_at'),
+    pollCount: integer('poll_count').notNull().default(0),
   },
   (table) => [
     uniqueIndex('wake_urls_token_hash_unique').on(table.tokenHash),

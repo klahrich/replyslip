@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export function POST(req: Request, context: { params: Promise<{ id: string; wakeUrlId: string }> }) {
   return handle(async () => {
     const { id, wakeUrlId } = await context.params;
-    const subject = await requireWakeUrlOwner(req, requireUuid(id, 'agent'), { forWrite: true });
+    const subject = await requireWakeUrlOwner(req, requireUuid(id, 'agent'), { issue: true });
     const { row, url, revoked } = await rotateWakeUrl(subject, requireUuid(wakeUrlId, 'wake URL'), publicOrigin(req));
     return json(
       { wake_url: { ...serializeWakeUrl(row), url }, revoked: serializeWakeUrl(revoked) },

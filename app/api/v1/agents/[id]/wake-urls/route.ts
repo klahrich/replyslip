@@ -11,7 +11,7 @@ const NO_STORE = { 'cache-control': 'private, no-store', 'referrer-policy': 'no-
 export function GET(req: Request, context: { params: Promise<{ id: string }> }) {
   return handle(async () => {
     const { id } = await context.params;
-    const subject = await requireWakeUrlOwner(req, requireUuid(id, 'agent'), { forWrite: false });
+    const subject = await requireWakeUrlOwner(req, requireUuid(id, 'agent'), { issue: false });
     return json({ wake_urls: await listWakeUrls(subject) }, 200, NO_STORE);
   });
 }
@@ -20,7 +20,7 @@ export function GET(req: Request, context: { params: Promise<{ id: string }> }) 
 export function POST(req: Request, context: { params: Promise<{ id: string }> }) {
   return handle(async () => {
     const { id } = await context.params;
-    const subject = await requireWakeUrlOwner(req, requireUuid(id, 'agent'), { forWrite: true });
+    const subject = await requireWakeUrlOwner(req, requireUuid(id, 'agent'), { issue: true });
     const { row, url } = await issueWakeUrl(subject, publicOrigin(req));
     return json({ wake_url: { ...serializeWakeUrl(row), url } }, 201, NO_STORE);
   });
