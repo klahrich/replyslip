@@ -588,6 +588,41 @@ export const wakes = pgTable(
       sql`${table.reason} in ('message', 'task', 'result', 'question', 'failure', 'test', 'answer', 'review_needed', 'sent_back')`,
     ),
     index('wakes_due_idx').on(table.status, table.nextAttemptAt),
+    /** Wake URL polls (lib/wake-urls.ts) read one agent's change marker. */
+    index('wakes_agent_created_idx').on(table.agentId, table.createdAt),
+  ],
+);
+
+/**
+ * Public wake URLs (lib/wake-urls.ts): GET /api/v1/wake/<token> answers only an opaque change id, so a platform that
+ * cannot hold a secret knows when to fetch through MCP. The token is stored as sha256 hex, like agent_keys. Scoped to
+ * one agent: agent_id names it. At most one active URL per agent.
+ */
+export const wakeUrls = pgTable(
+  'wake_urls',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    tokenPrefix: text('token_prefix').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    revokedAt: ts('revoked_at'),
+    /** Last successful poll. */
+    lastUsedAt: ts('last_used_at'),
+    /** Per-token poll limit (lib/wake-urls.ts): a fixed window kept on this row, so a poll never inserts a row. */
+    pollWindowStartedAt: ts('poll_window_started_at'),
+    pollCount: integer('poll_count').notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex('wake_urls_token_hash_unique').on(table.tokenHash),
+    uniqueIndex('wake_urls_one_active_per_agent')
+      .on(table.agentId)
+      .where(sql`${table.revokedAt} is null`),
   ],
 );
 

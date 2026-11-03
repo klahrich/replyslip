@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getDb, type Db } from '@/db';
 import { agents, tasks, wakes, type AgentRow } from '@/db/schema';
 import { WAKE_MAX_ATTEMPTS, WEBHOOK_TIMEOUT_MS } from './constants';
-import { HttpError } from './errors';
+import { HttpError, isUndefinedTable } from './errors';
 import { safeEqualString } from './crypto';
 import { buildWebhookCall, localNudgeOf } from './delivery';
 import { assertPublicWebhookUrl } from './webhook-url';
@@ -36,9 +36,17 @@ type WakeInsert = {
   messageId?: string | null;
 };
 
+/**
+ * Records a wake for the agent and returns its id when there is something to push (webhook or local delivery).
+ * A delivery-none agent gets a row only while it has an active wake URL, already `cancelled` so nothing dispatches
+ * it: that row is the change marker the URL's polls read (lib/wake-urls.ts). Insert only: no row lock beyond the
+ * new row.
+ */
 export async function enqueueWake(tx: Db, input: WakeInsert): Promise<string | null> {
   const [agent] = await tx.select().from(agents).where(eq(agents.id, input.agentId)).limit(1);
-  if (!agent || agent.revokedAt || agent.deliveryMode === 'none') return null;
+  if (!agent || agent.revokedAt) return null;
+  const pushes = agent.deliveryMode !== 'none';
+  if (!pushes && !(await hasActiveWakeUrl(tx, input.agentId))) return null;
   const [wake] = await tx
     .insert(wakes)
     .values({
@@ -47,9 +55,29 @@ export async function enqueueWake(tx: Db, input: WakeInsert): Promise<string | n
       reason: input.reason,
       taskId: input.taskId ?? null,
       messageId: input.messageId ?? null,
+      ...(pushes ? {} : { status: 'cancelled' }),
     })
     .returning();
-  return wake?.id ?? null;
+  return pushes ? (wake?.id ?? null) : null;
+}
+
+/**
+ * Whether the agent has a wake URL that is not revoked. Run in a savepoint and read a missing wake_urls table as
+ * "no": code that ships before migration 0019 is applied then keeps the old behaviour (no row for a delivery-none
+ * agent) instead of failing the caller's transaction.
+ */
+async function hasActiveWakeUrl(tx: Db, agentId: string): Promise<boolean> {
+  try {
+    return await tx.transaction(async (sp) => {
+      const rows = await sp.execute<{ one: number }>(
+        sql`select 1 as one from wake_urls where agent_id = ${agentId} and revoked_at is null limit 1`,
+      );
+      return rows.length > 0;
+    });
+  } catch (err) {
+    if (isUndefinedTable(err)) return false;
+    throw err;
+  }
 }
 
 export function wakeNoticeBody(input: {
