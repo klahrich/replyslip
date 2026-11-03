@@ -6,10 +6,12 @@ import { applyQuestionRules } from './question-rules';
  *   1. the site's own FAQ questions, each checked against its own answer (a FAQ whose answer is missing, lorem
  *      ipsum or about something else is skipped);
  *   2. "Do you offer <service>?" for short service names in the Services section (English only);
- *   3. single-topic generic questions (hours, area, years, free estimates, insurance, licence, warranty).
- * Every candidate goes through the same rules as RedBot's list (applyQuestionRules), so headings and questions the
- * context doesn't answer never survive, and a price question survives only when its answer gives the price (rule 3).
- * Deterministic: no model calls. Businesses that already have MIN_SUGGESTED or more are untouched.
+ *   3. single-topic generic questions (new patients, direct billing, hours, emergency visits, area, years, free estimates,
+ *      insurance, licence, warranty).
+ * Every candidate goes through the same rules as RedBot's list (applyQuestionRules), so headings, questions asking for
+ * the visitor's personal details and questions the context doesn't answer never survive, and a price question
+ * survives only when its answer gives the price (rule 3). Deterministic: no model calls. Businesses that already have
+ * MIN_SUGGESTED or more are untouched.
  */
 export const MIN_SUGGESTED = 3;
 
@@ -123,6 +125,10 @@ function serviceQuestions(contextMd: string): string[] {
 
 // Each generic question also needs plain evidence of its own, stronger than the rules' topic check: "Insurance" as a
 // cost line or "many years of experience" is not enough to offer "Are you insured?" or "How long in business?".
+const NEW_PATIENTS = /\b(?:accept(?:s|ing)?|welcom(?:e|es|ing)|taking) new patients\b|\bnouveaux patients\b/i;
+const DIRECT_BILLING = /\bdirect[- ]?bill\w*|\bfacturation directe\b/i;
+const EMERGENCY_VISITS =
+  /\bemergency (?:appointments?|visits?|dental|care|exams?)\b|\bsame[- ]day appointments?\b|\brendez-vous (?:d'urgence|le jour même)\b|\burgences? dentaires?\b/i;
 const HOURS = /\b\d{1,2}(?::\d\d)?\s*(?:a\.?m\.?|p\.?m\.?|h\b|h\d\d)|\b24\/7\b/i;
 const AREA = /\b(?:[Ss]erv(?:e|es|ed|ing)|[Dd]esserv\w*|[Tt]ravel(?:s|ling)?)\b[^.\n]{0,60}?\b\p{Lu}\p{Ll}{2,}/u;
 const YEARS =
@@ -134,7 +140,10 @@ const LICENSED = /\blicen[cs]ed\b|\bRBQ\b|\blicence (?:RBQ|n|#)/i;
 const WARRANTY = /\bwarrant(?:y|ies)\b|\bguarantee(?:d|s)?\b|\bgaranti(?:e|es)\b/i;
 const GENERIC: Record<'en' | 'fr', [string, RegExp][]> = {
   en: [
+    ['Do you accept new patients?', NEW_PATIENTS],
+    ['Do you direct-bill insurance?', DIRECT_BILLING],
     ['What are your hours?', HOURS],
+    ['Do you offer emergency appointments?', EMERGENCY_VISITS],
     ['What areas do you serve?', AREA],
     ['How long have you been in business?', YEARS],
     ['Do you offer free estimates?', FREE_ESTIMATE],
@@ -143,7 +152,10 @@ const GENERIC: Record<'en' | 'fr', [string, RegExp][]> = {
     ['Do you offer a warranty or guarantee?', WARRANTY],
   ],
   fr: [
+    ['Acceptez-vous de nouveaux patients ?', NEW_PATIENTS],
+    ['Offrez-vous la facturation directe aux assureurs ?', DIRECT_BILLING],
     ["Quelles sont vos heures d'ouverture ?", HOURS],
+    ["Offrez-vous des rendez-vous d'urgence ?", EMERGENCY_VISITS],
     ['Quels secteurs desservez-vous ?', AREA],
     ['Depuis combien de temps êtes-vous en affaires ?', YEARS],
     ['Offrez-vous des soumissions gratuites ?', FREE_ESTIMATE],

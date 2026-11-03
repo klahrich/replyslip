@@ -26,6 +26,7 @@ export type QuestionRule =
   | 'heading_or_cta'
   | 'policy_or_privacy'
   | 'login_or_account'
+  | 'personal_details'
   | 'wrong_language'
   | 'price_question'
   | 'no_answer_in_context';
@@ -210,6 +211,36 @@ const POLICY =
   /\b(?:personal (?:information|data)|privacy|cookies?|terms (?:of|and) (?:use|service|conditions)|gdpr|casl)\b|renseignements personnels|données personnelles|confidentialité|conditions d'utilisation|politique de confidentialité/;
 const ACCOUNT =
   /\b(?:accounts?|log ?in|log ?out|sign ?(?:in|up|out)|password|username|my profile|forgot)\b|\b(?:votre|un|mon|ton|créer un) compte\b|connexion|se connecter|mot de passe|identifiant|s'inscrire/;
+
+/**
+ * Rule 5: a preset question never invites the visitor to share their own health, medical, pet-medical, financial or
+ * legal details ("What are your symptoms?", "Describe your pain", "What's your policy number?", "Have you been
+ * injured?"). Questions about the business stay ("Do you accept new patients?", "Do you treat back pain?", "Do you
+ * direct-bill insurance?").
+ */
+const DESCRIBE_YOURSELF =
+  /^(?:please\s+)?(?:describe|tell (?:us|me)|share|explain|list|let us know|send (?:us|me)|upload)\b|^(?:veuillez\s+)?(?:décrivez|dites-nous|parlez-nous|expliquez|partagez|indiquez|envoyez)\b/;
+const PERSONAL_DETAIL =
+  /\b(?:your|my|you're|you've)\s+(?:[\w'-]+\s+){0,2}?(?:symptoms?|pain|aches?|conditions?|injur(?:y|ies)|diagnos[ie]s|medical (?:history|records?|conditions?)|health (?:history|issues?|problems?|conditions?|concerns?|card|records?)|medications?|prescriptions?|allerg(?:y|ies)|test results|x-rays?|policy (?:number|details)|claim (?:number|details)|account (?:number|details)|income|salary|debts?|credit (?:score|history)|tax (?:situation|return)|financial (?:situation|details|information)|assets|legal (?:situation|issue|matter|problem)s?|case details|divorce|separation|date of birth|birth ?date|social insurance number|sin number)\b/;
+const PERSONAL_DETAIL_FR =
+  /\b(?:vos|votre|mon|ma|mes)\s+(?:[\p{L}'-]+\s+){0,2}?(?:symptômes?|douleurs?|blessures?|état de santé|antécédents|diagnostic|médicaments?|ordonnances?|allergies?|dossier médical|carte d'assurance maladie|numéro de (?:police|réclamation|compte|dossier)|revenus?|salaire|dettes?|situation (?:financière|fiscale|juridique|familiale)|déclaration de revenus|testament|succession|divorce|séparation|date de naissance|numéro d'assurance sociale)/u;
+const ASKS_OWN_STATE =
+  /^(?:are|were|have|has|did) you\b(?! (?:ever )?(?:treat|work|help|see|handle|offer|provide|accept))[^?]{0,40}\b(?:experienc\w*|suffer\w*|feeling|hurt\w*|injured|diagnosed|been in an? (?:accident|collision)|had (?:an? )?(?:accident|surgery|injury)|taking (?:any )?medications?|pregnant|in debt|been sued|been charged)\b|^(?:avez|êtes|ressentez|souffrez)-vous\b[^?]{0,40}(?:douleurs?|mal |blessée?s?|symptômes?|souffr\w*|diagnostiquée?s?|médicaments?|accident|enceinte|dettes?)/u;
+/** "What medications are you taking?", "How are you feeling?" */
+const YOUR_STATE_NOW = /\b(?:are|were) you (?:currently |now )?(?:taking|experiencing|feeling|suffering)\b/;
+/** "Is my dog limping?", "How long has your cat had this condition?", "How long have you had the pain?" */
+const PET_OR_DURATION =
+  /\b(?:my|your) (?:dog|cat|pet|puppy|kitten|horse|bird|rabbit)'?s?\b[^?]{0,30}\b(?:symptoms?|conditions?|sick|ill|limp\w*|vomit\w*|diarrh\w*|letharg\w*|pain|injur\w*|not eating)\b|\bhow long (?:have you|has (?:my|your) [\w'-]+) (?:had|been (?:sick|ill|injured|in pain))\b|\b(?:mon|ma|votre) (?:chien|chat|animal|chiot|chaton)\b[^?]{0,30}(?:symptômes?|malade|boite|vomit|douleur|blessé)/;
+function asksPersonalDetails(lower: string): boolean {
+  if (YOUR_STATE_NOW.test(lower) || PET_OR_DURATION.test(lower)) return true;
+  return (
+    DESCRIBE_YOURSELF.test(lower) ||
+    PERSONAL_DETAIL.test(lower) ||
+    PERSONAL_DETAIL_FR.test(lower) ||
+    ASKS_OWN_STATE.test(lower) ||
+    /^souffrez-vous\b/.test(lower)
+  );
+}
 
 /**
  * "Need Waterproofing?", "Need help?", "Besoin d'une soumission?": a call to action. "Need a permit for a fence?",
@@ -709,7 +740,7 @@ function dropUnseenBrackets(question: string, foldedContext: string): string {
 }
 
 /**
- * Applies rules 1-3 to RedBot's list, in order, keeping the first copy of a repeated question. Returns what is kept
+ * Applies rules 1-3 and 5 to RedBot's list, in order, keeping the first copy of a repeated question. Returns what is kept
  * and, for each dropped question, the first rule that dropped it.
  */
 export function applyQuestionRules(
@@ -732,7 +763,9 @@ export function applyQuestionRules(
     seen.add(key);
     const lower = question.toLowerCase().replace(/’/g, "'");
     let rule: QuestionRule | null = null;
-    if (isHeadingOrCta(question, lower)) rule = 'heading_or_cta';
+    // Rule 5 first, so a question asking for personal details is always reported as such.
+    if (asksPersonalDetails(lower)) rule = 'personal_details';
+    else if (isHeadingOrCta(question, lower)) rule = 'heading_or_cta';
     else if (POLICY.test(lower)) rule = 'policy_or_privacy';
     else if (ACCOUNT.test(lower)) rule = 'login_or_account';
     else {
