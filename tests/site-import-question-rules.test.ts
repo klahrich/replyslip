@@ -45,6 +45,22 @@ describe('question cleanup', () => {
       '## FAQ\n- **Q:** Have a Question?\n  **A:**\n- Fully insured — we/re WSIB covered & bonded.',
     );
   });
+
+  it('keeps the text after a closing comment on the same line', () => {
+    expect(
+      cleanContextText('## Service areas\n<!-- note --> We serve Ottawa and Kanata.\n- <!-- src --> Barrhaven'),
+    ).toBe('## Service areas\nWe serve Ottawa and Kanata.\n- Barrhaven');
+    expect(cleanQuestionText('<!-- q3 --> Do you serve Orleans?', 'en')).toBe('Do you serve Orleans?');
+  });
+
+  it('drops a bracket inside a bracket', () => {
+    expect(cleanQuestionText('Desservez-vous mon secteur (Longueuil (Montreal area) et environs)?', 'fr')).toBe(
+      'Desservez-vous mon secteur (Longueuil et environs)?',
+    );
+    expect(cleanQuestionText('Do you serve my area (Ottawa (Orleans) and nearby)?', 'en')).toBe(
+      'Do you serve my area (Ottawa and nearby)?',
+    );
+  });
 });
 
 describe('rule: not a visitor question', () => {
@@ -67,6 +83,10 @@ describe('rule: not a visitor question', () => {
     'What services do we offer for basement waterproofing?',
     'What Areas Do We Serve Around Napanee and Kingston?',
     'Our Services',
+    'Need Waterproofing?',
+    'Need help?',
+    'Need a free quote for your project?',
+    'Need roofing work done right?',
   ])('drops the heading or call to action %j', (question) => {
     expect(rulesOf([question], ctx).dropped).toEqual([{ question, rule: 'heading_or_cta' }]);
   });
@@ -75,6 +95,8 @@ describe('rule: not a visitor question', () => {
     'Pourquoi Choisir Metropolispec ?',
     'Prêt à travailler avec nous ?',
     "Besoin d'un homme à tout faire fiable ?",
+    'Besoin de travaux de toiture ou de revêtement bien faits?',
+    "Besoin d'une soumission ?",
     'Vous préférez détailler vos travaux en ligne ?',
   ])('drops the French heading or call to action %j', (question) => {
     expect(rulesOf([question], ctx, 'fr').dropped).toEqual([{ question, rule: 'heading_or_cta' }]);
@@ -86,6 +108,8 @@ describe('rule: not a visitor question', () => {
     'Why is my basement wet? What causes a wet basement?',
     'What Is the Pre-Construction Process?',
     'Can Turnbull Masonry handle commercial projects?',
+    'Need a permit for a fence?',
+    'Need to replace just one window, or the whole frame?',
   ])('keeps the visitor question %j', (question) => {
     expect(rulesOf([question], ctx).kept).toEqual([question]);
   });
@@ -208,6 +232,34 @@ describe('rule: a generic question needs an answer in the context', () => {
     expect(
       rulesOf([q], `## FAQ\n- **Q:** ${q}\n  **A:** Usually within a couple of months of the wedding.`).kept,
     ).toEqual([q]);
+  });
+
+  it('free quotes, deposits and how to prepare need the fact on the page (wave-4 template questions)', () => {
+    const quote = 'How soon can you come out for a quote, and is it free?';
+    const deposit = 'How do I book, and what deposit do you need?';
+    const prepare = 'What do I need to do to prepare before you arrive?';
+    const bare =
+      '## Services\n- Renovations.\n- Surface preparation and priming.\n- Upfront pricing, a written price before we start.';
+    expect(rulesOf([quote, deposit, prepare], bare).dropped.map((d) => d.rule)).toEqual([
+      'no_answer_in_context',
+      'no_answer_in_context',
+      'no_answer_in_context',
+    ]);
+    const full = [
+      '## Pricing and quote process',
+      '- Free Estimates',
+      '- A 30% deposit secures your date.',
+      '## FAQ',
+      '- **Q:** How can I prepare my home?',
+      '  **A:** We provide guidelines to help you prepare your home, such as clearing out rooms.',
+    ].join('\n');
+    expect(rulesOf([quote, deposit, prepare], full).kept).toEqual([quote, deposit, prepare]);
+    // Soot deposits are not a payment.
+    expect(rulesOf([deposit], '## Services\n- Removes soot, deposits and residue.').kept).toEqual([]);
+    const fr = 'Combien de temps pour obtenir une soumission, et est-ce gratuit?';
+    // A free-quote question, not a job-length one: "Soumission gratuite" answers it.
+    expect(rulesOf([fr], '## Contact\n- Soumission gratuite', 'fr').kept).toEqual([fr]);
+    expect(rulesOf([fr], '## Services\n- Toitures.', 'fr').kept).toEqual([]);
   });
 
   it('a question on no generic topic is kept as RedBot wrote it', () => {

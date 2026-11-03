@@ -9,7 +9,8 @@ import { detectVisitorLanguage } from './keywords';
  * 2. A question is dropped when it isn't something a visitor would ask: a heading or call to action ("Ready to get
  *    started?", "Why Choose Us?", all caps, no question mark, a web address), privacy or policy text, login or
  *    account text, or a question confidently in another language than the business's.
- * 3. A generic question (service area, job length, insurance, warranty, licence, price, hours, years in business)
+ * 3. A generic question (service area, job length, insurance, warranty, licence, price, hours, years in business,
+ *    free quotes, deposits, how to prepare)
  *    is kept only when the context answers it: the question appears in the context (a FAQ entry), or the context
  *    has the fact the question asks for. A question asking two things needs both.
  *
@@ -81,11 +82,14 @@ export function decodeEscapes(text: string): string {
     .replace(/\u00a0/g, ' ');
 }
 
-/** Removes HTML comments: whole ones, lines that are only a comment (or its start), and an unclosed `<!-- url`. */
+/**
+ * Removes HTML comments. A line goes only when nothing but the comment is on it (or it opens a comment that doesn't
+ * close on that line); text after a closing `-->` stays. Then whole comments, then an unclosed `<!-- url`.
+ */
 function stripComments(text: string): string {
   return text
-    .replace(/^[ \t]*(?:[-*+][ \t]+)?<!--.*(?:\n|$)/gm, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/^[ \t]*(?:[-*+][ \t]+)?<!--(?:(?!-->).)*(?:-->[ \t]*)?(?:\n|$)/gm, '')
+    .replace(/<!--[\s\S]*?-->[ \t]*/g, '')
     .replace(/<!--\s*\S*/g, '');
 }
 
@@ -108,6 +112,8 @@ export function cleanQuestionText(question: string, language: 'en' | 'fr'): stri
     .replace(/\*{2,}|_{2,}/g, ' ')
     .replace(/(^|\s)[_*]+(?=\S)/g, '$1')
     .replace(/(?<=\S)[_*]+(?=\s|$|[?!.,])/g, '');
+  // A bracket inside a bracket ("(Longueuil (Montreal area) and nearby)"): the inner one goes.
+  q = q.replace(/\(([^()]*?)\s*\([^()]*\)([^()]*)\)/g, '($1$2)');
   q = q.replace(/\s+/g, ' ').trim();
   // French puts a space before ? and !; English doesn't.
   if (language === 'en') q = q.replace(/\s+([?!.,:;])/g, '$1');
@@ -118,7 +124,7 @@ const MAX_QUESTION_CHARS = 140;
 
 /** Starts of headings and calls to action, lower-cased with straight apostrophes. */
 const CTA_START =
-  /^(?:(?:are you )?ready\b|(?:êtes-vous |es-tu )?prête?s?\b|why (?:choose|should (?:you|we) (?:choose|hire|pick|trust))\b|pourquoi (?:nous )?choisir\b|(?:have|got) (?:a|any) (?:question|project)|need\b|besoin\b|want\b|envie\b|looking for\b|vous cherchez\b|tu cherches\b|not sure\b|pas sûr|(?:but )?did you know\b|saviez-vous\b|vous préférez\b|what can we do for you\b|que pouvons-nous faire pour vous\b)/;
+  /^(?:(?:are you )?ready\b|(?:êtes-vous |es-tu )?prête?s?\b|why (?:choose|should (?:you|we) (?:choose|hire|pick|trust))\b|pourquoi (?:nous )?choisir\b|(?:have|got) (?:a|any) (?:question|project)|want\b|envie\b|looking for\b|vous cherchez\b|tu cherches\b|not sure\b|pas sûr|(?:but )?did you know\b|saviez-vous\b|vous préférez\b|what can we do for you\b|que pouvons-nous faire pour vous\b)/;
 /** "Why <Name>?": a heading naming the business, not a question (a verb or "my" after Why makes it one). */
 const WHY_NAME =
   /^[Ww]hy\s+(?!(?:is|are|do|does|did|should|would|can|could|will|was|were|my|your|the|a|an|choose)\b)(?:[A-Z][\w'’.&-]*\s*){1,4}\?$/;
@@ -131,11 +137,33 @@ const POLICY =
 const ACCOUNT =
   /\b(?:accounts?|log ?in|log ?out|sign ?(?:in|up|out)|password|username|my profile|forgot)\b|\b(?:votre|un|mon|ton|créer un) compte\b|connexion|se connecter|mot de passe|identifiant|s'inscrire/;
 
+/**
+ * "Need Waterproofing?", "Need help?", "Besoin d'une soumission?": a call to action. "Need a permit for a fence?" is a
+ * visitor's question and stays: a "need" start is a heading only when it is two words, Title Case, offers help, or
+ * praises the work ("Besoin d'un homme à tout faire fiable?", "Need roofing done right?").
+ */
+const NEED_START = /^(?:need|besoin)\b/;
+const NEED_OFFER =
+  /^(?:need (?:(?:some |any )?help|a hand|(?:a |an )?(?:free )?(?:quote|estimate)s?|a pro|an expert|assistance|us|service)\b|besoin (?:d'aide|d'un coup de main|d'une (?:soumission|estimation)|d'un (?:devis|expert|professionnel)|de nos services)\b)/;
+const NEED_PRAISE =
+  /\b(?:reliable|trusted|trustworthy|dependable|done right|quality|professional|affordable|top-notch|expert|best|fiables?|de confiance|bien faite?s?|qualité|professionnel(?:le)?s?|abordables?|experts?|meilleure?s?)\b/;
+function isNeedCta(question: string, lower: string): boolean {
+  if (!NEED_START.test(lower)) return false;
+  const words = question
+    .replace(/[?!.]+$/, '')
+    .trim()
+    .split(/\s+/);
+  if (words.length <= 2 || NEED_OFFER.test(lower) || NEED_PRAISE.test(lower)) return true;
+  const rest = words.slice(1).filter((word) => /^\p{L}/u.test(word) && !/^(?:a|an|the|de|du|des|un|une)$/i.test(word));
+  return rest.length > 0 && rest.every((word) => /^\p{Lu}/u.test(word));
+}
+
 function isHeadingOrCta(question: string, lower: string): boolean {
   if (!question.includes('?')) return true;
   if (question.length > MAX_QUESTION_CHARS) return true;
   if (WEB_ADDRESS.test(question)) return true;
-  if (CTA_START.test(lower) || /^why\b(?! should i\b).*\bchoos(?:e|ing)\b/.test(lower)) return true;
+  if (CTA_START.test(lower) || isNeedCta(question, lower) || /^why\b(?! should i\b).*\bchoos(?:e|ing)\b/.test(lower))
+    return true;
   if (WHY_NAME.test(question)) return true;
   if (BUSINESS_VOICE.test(lower)) return true;
   const letters = question.match(/\p{L}/gu) ?? [];
@@ -156,8 +184,14 @@ const REPLY_TIME =
 type Topic = {
   name: string;
   asks: RegExp;
+  /** A question this matches is another topic's, even though `asks` matches too. */
+  unless?: RegExp;
   answered: (lines: string[], text: string) => boolean;
 };
+
+/** "How soon can you come out for a quote, and is it free?": asks whether quotes are free. */
+const FREE_QUOTE_ASK =
+  /\b(?:quotes?|estimates?|soumissions?|devis|estimations?)\b[^?]*\b(?:free|gratuite?s?)\b|\b(?:free|gratuite?s?)\b[^?]*\b(?:quotes?|estimates?|soumissions?|devis|estimations?)\b/;
 
 const has = (re: RegExp) => (_lines: string[], text: string) => re.test(text);
 
@@ -179,6 +213,7 @@ const TOPICS: Topic[] = [
   {
     name: 'duration',
     asks: /\bhow long (?!have you been)|combien de temps (?!êtes)|\bdurée\b|\bdure\b|\btimeline\b|\bdélais?\b/,
+    unless: FREE_QUOTE_ASK,
     answered: (lines) =>
       lines
         .flatMap((line) => line.split(/(?<=[.!?;])\s+/))
@@ -205,6 +240,34 @@ const TOPICS: Topic[] = [
     name: 'price',
     asks: /\bcosts?\b|\bprices?\b|\bpricing\b|\bhow much\b|\brates?\b|\bfees?\b|\bcharge\b|\btarifs?\b|\bprix\b|\bcoût|\bcoûte|\bcombien (?:co[uû]t|ça co[uû]t|est-ce que ça co[uû]t|pour |demandez|chargez|facturez)/,
     answered: has(/[$€]\s?\d|\d\s?(?:[$€]|dollars?\b)/),
+  },
+  {
+    name: 'free_quote',
+    asks: FREE_QUOTE_ASK,
+    answered: has(
+      /\bfree\b[^.\n]{0,40}\b(?:quotes?|estimates?|consultations?|assessments?|inspections?|evaluations?)\b|\b(?:quotes?|estimates?|consultations?)\b[^.\n]{0,30}\b(?:free|at no (?:cost|charge))\b|\bno[- ]obligation\b|\b(?:soumissions?|estimations?|devis|consultations?|évaluations?)\b[^.\n]{0,30}\b(?:gratuite?s?|sans frais|sans obligation)\b/,
+    ),
+  },
+  {
+    name: 'deposit',
+    asks: /\bdeposits?\b|\bdown payment\b|\bdépôts?\b|\bacomptes?\b/,
+    // A deposit in a sentence about paying or booking ("soot deposits" and "dépôts de suie" are not).
+    answered: (lines) =>
+      lines.some(
+        (line) =>
+          /\bdeposits?\b|\bdown payment\b|\bretainer\b|\bdépôts?\b|\bacomptes?\b|\bversement initial\b/.test(line) &&
+          /\b(?:pay\w*|book\w*|reserv\w*|secure|date|contract|order|invoice|requir\w*|take|no|production|percent)\b|%|\$|paiement|pay[eé]\w*|réserv\w*|requis|exigé|facture|commande|contrat|aucun/.test(
+            line,
+          ),
+      ),
+  },
+  {
+    name: 'prepare',
+    asks: /\bprepare\b|\bpreparation\b|\bbefore you (?:arrive|come|start)\b|\bpréparer\b|\bpréparation\b|\bavant votre (?:arrivée|venue|passage)\b/,
+    // The customer's part, not the crew's ("surface preparation" is the painter's job).
+    answered: has(
+      /\b(?:how to|you (?:should|can|need to|may want to)|please|to help you)\s+prepare\b|\bprepare (?:your|the) (?:home|house|space|room|rooms|yard|area|property|vehicle|car)\b|\bbefore (?:we|our (?:team|crew|technicians?|cleaners?|movers?)) (?:arrive|come)\b|\bbefore your (?:appointment|visit|cleaning|move|service|session|lesson)\b|\bcomment (?:vous )?préparer\b|\bpréparer (?:votre|vos|la|le) (?:maison|domicile|espace|pièces?|terrain|véhicule)\b|\bavant (?:notre|votre) (?:arrivée|passage|visite|rendez-vous)\b/,
+    ),
   },
   {
     name: 'hours',
@@ -274,7 +337,7 @@ export function applyQuestionRules(
       if (language !== null && language !== business.language) rule = 'wrong_language';
     }
     if (!rule) {
-      const topics = TOPICS.filter((topic) => topic.asks.test(lower));
+      const topics = TOPICS.filter((topic) => topic.asks.test(lower) && !topic.unless?.test(lower));
       const onPage = flatContext.includes(` ${key} `);
       if (topics.length > 0 && !onPage && !topics.every((topic) => topic.answered(lines, text)))
         rule = 'no_answer_in_context';
