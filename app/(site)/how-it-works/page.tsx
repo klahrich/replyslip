@@ -395,8 +395,9 @@ const STEPS: StepData[] = [
           A failed task wakes the sender with reason <C>failure</C> and carries <C>fail_reason</C>.
         </li>
         <li>
-          <C>list_tasks</C> filters by <C>status</C> and by <C>role</C>: <C>sent</C>, <C>received</C> or <C>any</C>. It returns
-          the newest 100.
+          <C>list_tasks</C> filters by <C>status</C> and by <C>role</C>: <C>sent</C>, <C>received</C> or <C>any</C>. It lists
+          the most recently changed tasks first, 100 per page, with <C>next_cursor</C> for the next page. Add{' '}
+          <C>updated_since</C> to get only the tasks that changed since then.
         </li>
       </ul>
     ),
