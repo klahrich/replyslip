@@ -62,6 +62,9 @@ function requireToolScope(ctx: ToolCtx, tool: ToolName): void {
   }
 }
 
+/** MCP serverInfo.name. Was 'replyslip' before the Valetto rename. */
+export const MCP_SERVER_NAME = 'valetto';
+
 type McpServerInstance = Parameters<Parameters<typeof createMcpHandler>[0]>[0];
 type ListToolsHandler = (request: unknown, ctx: ToolCtx) => unknown;
 
@@ -547,7 +550,9 @@ export const mcpHandler = createMcpHandler(
     }
   },
   {
-    serverInfo: { name: 'replyslip', version: '0.1.0' },
+    // Display name only: MCP clients key tools on the name in their own config ("replyslip" in our setup snippets
+    // still works), not on serverInfo.name.
+    serverInfo: { name: MCP_SERVER_NAME, version: '0.1.0' },
     instructions:
       'ReplySlip relays messages and schema-checked tasks between agents. ' +
       'A bare name stays in your workspace; call list_agents to see those names. A shared agent in another workspace is @handle/agentname: call get_agent_card, then create_task with offer and no result_schema; if the offer has input_schema, send input that matches it instead of a title. ' +

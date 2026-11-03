@@ -48,13 +48,17 @@ function normalizeEmail(email: string): string {
 }
 
 
-const SIGNUP_SOURCE_MAX = 200;
+/**
+ * A signup source is a short slug such as a `?ref=` or `?utm_source=` value. Anything else is dropped, so a newline
+ * or other free text can never reach the internal first-agent alert email as an extra line.
+ */
+const SIGNUP_SOURCE_PATTERN = /^[a-z0-9_-]{1,40}$/;
 
-/** Trimmed, capped at 200 characters. Empty becomes null. Never written over an existing user. */
+/** Trimmed and lowercased, kept only when it matches SIGNUP_SOURCE_PATTERN, else null. Never written over an existing user. */
 export function normalizeSignupSource(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
-  const trimmed = value.trim().slice(0, SIGNUP_SOURCE_MAX);
-  return trimmed.length > 0 ? trimmed : null;
+  const normalized = value.trim().toLowerCase();
+  return SIGNUP_SOURCE_PATTERN.test(normalized) ? normalized : null;
 }
 
 /** True only for a JSON boolean true. Anything else, including "true" or 1, is ignored. */

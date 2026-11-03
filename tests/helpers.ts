@@ -121,7 +121,7 @@ export async function createJoinCode(cookie: string): Promise<{ id: string; secr
   return { id: res.data.join_code.id, secret: res.data.join_code.secret };
 }
 
-function parseRpc(text: string): any {
+export function parseRpc(text: string): any {
   const trimmed = text.trim();
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) return JSON.parse(trimmed);
   const dataLines = trimmed
