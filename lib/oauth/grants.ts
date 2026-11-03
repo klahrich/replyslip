@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import { getDb, type Db, type DbTx } from '@/db';
 import {
   agents,
@@ -18,6 +18,7 @@ import {
   OAUTH_DCR_IDLE_TTL_MS,
   OAUTH_DCR_UNUSED_TTL_MS,
   OAUTH_GRANT_MAX_TTL_MS,
+  OAUTH_PINNED_CLIENT_IDS,
   OAUTH_REFRESH_IDLE_TTL_MS,
   OAUTH_REFRESH_RACE_WINDOW_MS,
 } from './constants';
@@ -610,6 +611,8 @@ export async function pruneOAuth(): Promise<{
     .where(
       and(
         eq(oauthClients.kind, 'dcr'),
+        // Pinned shared clients (Meta Muse) stay however long they sit unused. Matched on the public client_id.
+        notInArray(oauthClients.clientId, [...OAUTH_PINNED_CLIENT_IDS]),
         sql`not exists (select 1 from oauth_grants g where g.client_id = ${oauthClients.id} and g.revoked_at is null and g.absolute_expires_at > ${new Date(now).toISOString()}::timestamptz)`,
         or(
           and(
