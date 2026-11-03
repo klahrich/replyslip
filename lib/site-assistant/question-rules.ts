@@ -219,22 +219,35 @@ const ACCOUNT =
  * direct-bill insurance?").
  */
 const DESCRIBE_YOURSELF =
-  /^(?:please\s+)?(?:describe|tell (?:us|me)|share|explain|list|let us know|send (?:us|me)|upload)\b|^(?:veuillez\s+)?(?:décrivez|dites-nous|parlez-nous|expliquez|partagez|indiquez|envoyez)\b/;
+  /^(?:please\s+)?(?:share|let us know|send (?:us|me)|upload)\b|^(?:veuillez\s+)?(?:partagez|indiquez|envoyez)\b/;
+/**
+ * "Describe / tell us / explain / list" asks for the visitor's details only with "yourself" or "your <situation>":
+ * "Explain your process" and "List your services" ask about the business.
+ */
+const DESCRIBE_YOUR_SITUATION =
+  /^(?:please\s+)?(?:describe|tell (?:us|me)|explain|list)\s+(?:(?:a (?:little|bit) |more )?about\s+)?(?:yourself\b|your (?:[\w'-]+\s+){0,2}?(?:situation|case|circumstances|concerns?|problems?|issues?|history)\b)|^(?:veuillez\s+)?(?:décrivez|dites-nous|parlez-nous|expliquez)\b[^?]{0,20}\b(?:vous-même|votre (?:situation|cas|problème|historique|dossier)|vos (?:préoccupations|problèmes|antécédents))/u;
 const PERSONAL_DETAIL =
-  /\b(?:your|my|you're|you've)\s+(?:[\w'-]+\s+){0,2}?(?:symptoms?|pain|aches?|conditions?|injur(?:y|ies)|diagnos[ie]s|medical (?:history|records?|conditions?)|health (?:history|issues?|problems?|conditions?|concerns?|card|records?)|medications?|prescriptions?|allerg(?:y|ies)|test results|x-rays?|policy (?:number|details)|claim (?:number|details)|account (?:number|details)|income|salary|debts?|credit (?:score|history)|tax (?:situation|return)|financial (?:situation|details|information)|assets|legal (?:situation|issue|matter|problem)s?|case details|divorce|separation|date of birth|birth ?date|social insurance number|sin number)\b/;
+  /(?<!\bhelp (?:me |us )?(?:with|for) )\b(?:your|my|you're|you've)\s+(?:[\w'-]+\s+){0,2}?(?:symptoms?|pain(?! (?:clinics?|management|relief (?:clinics?|centres?|centers?)|centres?|centers?)\b)|aches?|(?<!\bterms (?:and|&) )conditions?|injur(?:y|ies)|diagnos[ie]s|medical (?:history|records?|conditions?)|health (?:history|issues?|problems?|conditions?|concerns?|records?)|medications?|prescriptions?|allerg(?:y|ies)|test results|x-rays?|policy (?:number|details)|claim (?:number|details)|account (?:number|details)|income|salary|debts?|credit (?:score|history)|tax (?:situation|return)|financial (?:situation|details|information)|assets|legal (?:situation|issue|matter|problem)s?|case details|divorce|separation|date of birth|birth ?date|social insurance number|sin number)\b/;
 const PERSONAL_DETAIL_FR =
-  /\b(?:vos|votre|mon|ma|mes)\s+(?:[\p{L}'-]+\s+){0,2}?(?:symptômes?|douleurs?|blessures?|état de santé|antécédents|diagnostic|médicaments?|ordonnances?|allergies?|dossier médical|carte d'assurance maladie|numéro de (?:police|réclamation|compte|dossier)|revenus?|salaire|dettes?|situation (?:financière|fiscale|juridique|familiale)|déclaration de revenus|testament|succession|divorce|séparation|date de naissance|numéro d'assurance sociale)/u;
+  /(?<!\baider? (?:pour|avec) )\b(?:vos|votre|mon|ma|mes)\s+(?:[\p{L}'-]+\s+){0,2}?(?:symptômes?|douleurs?|blessures?|état de santé|antécédents|diagnostic|médicaments?|ordonnances?|allergies?|dossier médical|numéro de (?:police|réclamation|compte|dossier)|revenus?|salaire|dettes?|situation (?:financière|fiscale|juridique|familiale)|déclaration de revenus|testament|succession|divorce|séparation|date de naissance|numéro d'assurance sociale)/u;
 const ASKS_OWN_STATE =
-  /^(?:are|were|have|has|did) you\b(?! (?:ever )?(?:treat|work|help|see|handle|offer|provide|accept))[^?]{0,40}\b(?:experienc\w*|suffer\w*|feeling|hurt\w*|injured|diagnosed|been in an? (?:accident|collision)|had (?:an? )?(?:accident|surgery|injury)|taking (?:any )?medications?|pregnant|in debt|been sued|been charged)\b|^(?:avez|êtes|ressentez|souffrez)-vous\b[^?]{0,40}(?:douleurs?|mal |blessée?s?|symptômes?|souffr\w*|diagnostiquée?s?|médicaments?|accident|enceinte|dettes?)/u;
+  /^(?:are|were|have|has|did) you\b(?! (?:ever )?(?:treat|work|help|see|handle|offer|provide|accept))[^?]{0,40}\b(?:suffer\w*|feeling|hurt\w*|injured|diagnosed|been in an? (?:accident|collision)|had (?:an? )?(?:accident|surgery|injury)|taking (?:any )?medications?|pregnant|in debt|been sued|been charged)\b|^(?:avez|êtes|ressentez|souffrez)-vous\b[^?]{0,40}(?:douleurs?|mal |blessée?s?|symptômes?|souffr\w*|diagnostiquée?s?|médicaments?|accident|enceinte|dettes?)/u;
+/**
+ * The visitor's own allergies, symptoms, medications or age: "Do you have any allergies?", "What medications do you
+ * take?", "How old are you?". "What symptoms do you treat?" asks about the business.
+ */
+const OWN_HEALTH_OR_AGE =
+  /\b(?:do|did) you (?:have|take|use|get|experience|notice) (?:any |some )?(?:allerg\w*|symptoms?|medications?|medicines?|prescriptions?)\b|\bwhat (?:kinds? of |type of )?(?:allerg\w*|symptoms?|medications?|medicines?|prescriptions?) (?:do|did) you (?:have|take|use|get|experience|notice)\b|\bare you allergic\b|\bhow old are you\b|\bwhat(?:'s| is) your age\b|\b(?:avez-vous|souffrez-vous d') ?(?:des |de |d')?(?:allergies?|symptômes?)\b|\bquels? (?:allergies?|symptômes?|médicaments?) (?:avez|prenez|ressentez)-vous\b|\bprenez-vous (?:des |un )?médicaments?\b|\bquel âge avez-vous\b/u;
 /** "What medications are you taking?", "How are you feeling?" */
 const YOUR_STATE_NOW = /\b(?:are|were) you (?:currently |now )?(?:taking|experiencing|feeling|suffering)\b/;
 /** "Is my dog limping?", "How long has your cat had this condition?", "How long have you had the pain?" */
 const PET_OR_DURATION =
   /\b(?:my|your) (?:dog|cat|pet|puppy|kitten|horse|bird|rabbit)'?s?\b[^?]{0,30}\b(?:symptoms?|conditions?|sick|ill|limp\w*|vomit\w*|diarrh\w*|letharg\w*|pain|injur\w*|not eating)\b|\bhow long (?:have you|has (?:my|your) [\w'-]+) (?:had|been (?:sick|ill|injured|in pain))\b|\b(?:mon|ma|votre) (?:chien|chat|animal|chiot|chaton)\b[^?]{0,30}(?:symptômes?|malade|boite|vomit|douleur|blessé)/;
 function asksPersonalDetails(lower: string): boolean {
-  if (YOUR_STATE_NOW.test(lower) || PET_OR_DURATION.test(lower)) return true;
+  if (YOUR_STATE_NOW.test(lower) || PET_OR_DURATION.test(lower) || OWN_HEALTH_OR_AGE.test(lower)) return true;
   return (
     DESCRIBE_YOURSELF.test(lower) ||
+    DESCRIBE_YOUR_SITUATION.test(lower) ||
     PERSONAL_DETAIL.test(lower) ||
     PERSONAL_DETAIL_FR.test(lower) ||
     ASKS_OWN_STATE.test(lower) ||

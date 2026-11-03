@@ -81,3 +81,78 @@ describe("rule 5: no preset question asks for the visitor's personal details", (
     expect(plain.map((a) => a.question)).toEqual(["Quelles sont vos heures d'ouverture ?"]);
   });
 });
+
+describe("rule 5 narrowed (EvaluatorBot review of #163)", () => {
+  const ruleOf = (q: string, language: "en" | "fr" = "en") =>
+    rules([q], language).dropped[0]?.rule;
+
+  it("keeps questions about the business that only look personal", () => {
+    for (const q of [
+      "Are you licensed and experienced?",
+      "Where is your pain clinic located?",
+      "Do you offer pain management?",
+      "Can you help with my divorce?",
+      "Can you help with my back pain?",
+      "Do I need to bring my health card?",
+      "List your services?",
+      "Explain your process",
+      "Explain your cancellation process",
+      "Describe your services",
+      "Tell us about your team",
+      "What symptoms do you treat?",
+      "How old is your company?",
+    ])
+      expect(ruleOf(q), q).not.toBe("personal_details");
+    // Rule 5 never reports these; rules 1-3 (unchanged) still apply, e.g. a bare imperative is a heading.
+    for (const q of [
+      "Pouvez-vous m’aider avec mon divorce ?",
+      "Expliquez votre processus",
+    ])
+      expect(ruleOf(q, "fr"), q).not.toBe("personal_details");
+    expect(
+      rules([
+        "Can you help with my divorce?",
+        "Where is your pain clinic located?",
+        "List your services?",
+      ]).kept,
+    ).toHaveLength(3);
+  });
+
+  it('"terms and conditions" is not a personal condition', () => {
+    // It can still be a policy question (rule 1, unchanged); rule 5 never reports it.
+    expect(ruleOf("What are your terms and conditions?")).not.toBe(
+      "personal_details",
+    );
+    expect(ruleOf("Do you have terms and conditions for rentals?")).not.toBe(
+      "personal_details",
+    );
+  });
+
+  it("drops questions about the visitor's allergies, symptoms, medications and age", () => {
+    for (const q of [
+      "Do you have any allergies?",
+      "Are you allergic to latex?",
+      "What medications do you take?",
+      "Do you take any medications?",
+      "How old are you?",
+      "What's your age?",
+      "Do you have any symptoms?",
+      "What symptoms do you have?",
+      "Are you experiencing symptoms?",
+      "Tell us about yourself",
+      "Describe your situation",
+      "Explain your legal situation",
+      "Tell us more about your case",
+      "Where is your pain located?",
+    ])
+      expect(ruleOf(q), q).toBe("personal_details");
+    for (const q of [
+      "Avez-vous des allergies ?",
+      "Quels médicaments prenez-vous ?",
+      "Quel âge avez-vous ?",
+      "Avez-vous des symptômes ?",
+      "Décrivez votre situation",
+    ])
+      expect(ruleOf(q, "fr"), q).toBe("personal_details");
+  });
+});
