@@ -30,6 +30,8 @@ export const VALETTO_PRIVACY_MD = [
   "",
   "**Sign-in codes.** We store a keyed hash of each code, never the code itself. A code works for 10 minutes and allows 5 tries. Asking for a new code cancels the old one.",
   "",
+  "**How you found us.** When you ask for a sign-in code on the sign-in page or the page for claiming a workspace, and that page's address has `?ref=` or `?utm_source=`, we store that value as your signup source. If our home page's address has one, its sign-in links carry it over, and your browser keeps it in session storage for 30 minutes. We only keep it if it's a short tag: up to 40 letters, numbers, dashes or underscores, saved in lowercase. Anything else isn't stored. We store the first value, from when your account is created, and we don't replace it later. It doesn't change what you can do in Valetto.",
+  "",
   "**Who the owner lets in.** Each owner picks one of two ways in: anyone with the link, or only customers the owner approves by email. If the owner approves customers, we store the email addresses they approve.",
   "",
   "**The owner's page.** We store the business name, logo and colours, the jobs the owner offers and the fields in each job's form, and the daily caps the owner sets. [TBD: what we store to connect the owner's bot]",
