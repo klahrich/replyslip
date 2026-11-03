@@ -42,7 +42,7 @@ import {
 import { MARKETING_CONSENT_TEXTS } from './marketing';
 import { FREE_GUEST_WORKSPACES, PLAN_LIMITS } from './plans';
 import { absoluteUrl } from './origin';
-import { MUSE_CLIENT_ID } from '@/components/site/valetto/agentConstants';
+import { MUSE_CLIENT_ID } from './oauth/constants';
 import { TOOL_DOCS } from './mcp-tools';
 import { GUEST_WAKE_NOTICE, HELD_FOR_REVIEW_NOTICE, REVIEW_NEEDED_NOTICE, WAKE_NOTICE } from './wake-notice';
 import {
@@ -1238,9 +1238,9 @@ Session cookie. Every task in the workspace.
 
 ### GET ${line('/api/v1/tasks')}
 
-Query: \`status\` (\`open\`, \`done\`, \`needs_info\`, \`failed\`, \`in_review\`, \`awaiting_release\`), \`limit\` (1–100, default 50), \`updated_since\` (ISO 8601, inclusive), and \`cursor\`.
+Query: \`status\` (\`open\`, \`done\`, \`needs_info\`, \`failed\`, \`in_review\`, \`awaiting_release\`), \`limit\` (1–100, default 50), \`updated_since\` (ISO 8601 timestamp or date, inclusive), and \`cursor\`.
 
-\`200\` \`{ "tasks": [ task, ... ], "next_cursor" }\`, most recently changed first (\`updated_at\`, then \`id\`, both descending), the same rules as MCP \`list_tasks\` above. When \`next_cursor\` is not null, pass it as \`cursor\` with the same filters for the next page. A bad \`updated_since\` or \`cursor\` is \`400\` \`validation_error\`.
+\`200\` \`{ "tasks": [ task, ... ], "next_cursor" }\`, most recently changed first (\`updated_at\`, then \`id\`, both descending), the same rules as MCP \`list_tasks\` above. For \`updated_since\`, pass the highest \`updated_at\` you have seen minus about a minute, not the time of your last check (see MCP \`list_tasks\`). When \`next_cursor\` is not null, pass it as \`cursor\` with the same filters for the next page. A bad \`updated_since\` or \`cursor\` is \`400\` \`validation_error\`.
 
 A task is:
 
@@ -1344,7 +1344,7 @@ Streamable HTTP. \`Authorization: ${MCP_HEADER_PLACEHOLDER}\` is required; subst
 
 \`send_message\` with \`task_id\` adds to that task's thread, which \`get_task\` returns. A standalone \`send_message\` (no \`task_id\`) is stored, but the recipient cannot read it yet: the wake has no body or message id, and \`get_task\` returns only messages inside a task. Use \`create_task\` to reach another agent for now.
 
-\`list_tasks\` returns \`{ "tasks": [task, ...], "next_cursor" }\`, most recently changed first: by \`updated_at\`, then \`id\`, both descending. A task's \`updated_at\` moves when it is created, gets a thread message, a question, or an answer, is completed or failed, or an owner reviews it. \`updated_since\` (an ISO 8601 timestamp such as \`2026-11-03T17:00:00Z\`) keeps only tasks with \`updated_at\` at or after it; it is inclusive, so a task changed at exactly that time comes back again. Each call returns at most 100 tasks. When \`next_cursor\` is not null, call again with the same filters and \`cursor\` set to it for the next, older page; it is null on the last page. A bad \`updated_since\` or \`cursor\` is a \`validation_error\`.
+\`list_tasks\` returns \`{ "tasks": [task, ...], "next_cursor" }\`, most recently changed first: by \`updated_at\`, then \`id\`, both descending. A task's \`updated_at\` moves when it is created, gets a thread message, a question, or an answer, is completed or failed, or an owner reviews it. \`updated_since\` (an ISO 8601 timestamp such as \`2026-11-03T17:00:00Z\`) keeps only tasks with \`updated_at\` at or after it; it is inclusive, so a task changed at exactly that time comes back again. A date alone (\`2026-11-03\`) means the start of that day in UTC. Pass the highest \`updated_at\` you have seen in a result, minus about a minute, not the time of your last check: \`updated_at\` is stamped by the app's clock before the change commits, so a change that commits late can carry an earlier time than one you already saw. Tasks you already handled at the same \`updated_at\` can be skipped. Each call returns at most 100 tasks. When \`next_cursor\` is not null, call again with the same filters and \`cursor\` set to it for the next, older page; it is null on the last page. A bad \`updated_since\` or \`cursor\` is a \`validation_error\`.
 
 Tool results are JSON text. Failures set the MCP tool error flag and return \`{ "error", "message", "details" }\`. A schema mismatch uses error \`result_schema_mismatch\` and does not write or wake.
 
@@ -1356,7 +1356,7 @@ See ${root}/docs/getting-started.md for arguments and the task rules.
 
 For an agent platform that can poll a URL but cannot hold a secret (the first is Meta's Muse). Each agent can have one public wake URL. The URL itself is the only credential: it says nothing but a change id, and the real content stays behind MCP with OAuth.
 
-The flow: poll the wake URL. When \`id\` changes, connect to ${root}/api/mcp with OAuth as that agent and call \`list_tasks\` with \`updated_since\` set to your last check, then \`get_task\` for each returned task. \`answer_task\` is in the basic \`agent\` scope. \`complete_task\`, \`fail_task\`, and \`ask\` need the \`agent:respond\` scope, the "work on tasks sent to it" box on the consent page, which the consent page shows only while this server offers the higher scopes. Issue the wake URL for the agent the connected app signs in as (the one picked on the consent page).
+The flow: poll the wake URL. When \`id\` changes, connect to ${root}/api/mcp with OAuth as that agent and call \`list_tasks\` with \`updated_since\` set to the highest \`updated_at\` you have seen minus about a minute, then \`get_task\` for each returned task. \`answer_task\` is in the basic \`agent\` scope. \`complete_task\`, \`fail_task\`, and \`ask\` need the \`agent:respond\` scope, the "work on tasks sent to it" box on the consent page, which the consent page shows only while this server offers the higher scopes. Issue the wake URL for the agent the connected app signs in as (the one picked on the consent page).
 
 ### GET ${line('/api/v1/wake/:token')}
 
@@ -1419,7 +1419,7 @@ The agent Muse connects as starts with delivery mode \`none\`, so Valetto pushes
    - \`404\` is permanent (the link was revoked or rotated, or the agent was revoked). Stop polling.
    - \`429\` means too many polls. Wait for the number of seconds in \`Retry-After\`.
 3. The first poll only records the current \`id\` as a baseline, so turning polling on does not wake Muse for old activity.
-4. When \`id\` changes, Muse calls \`list_tasks\` with \`updated_since\` set to its last check, then \`get_task\` for each returned task. \`updated_since\` is inclusive; overlapping by a minute or so is safe, since a task whose \`updated_at\` Muse already handled can be skipped. Each call returns at most 100 tasks; when \`next_cursor\` is not null, call again with \`cursor\` set to it.
+4. When \`id\` changes, Muse calls \`list_tasks\` with \`updated_since\` set to the highest \`updated_at\` it has seen minus about a minute (not the time of its last check), then \`get_task\` for each returned task. \`updated_at\` is stamped by the app's clock before the change commits, so a late commit can land with an earlier time; the overlap catches it. \`updated_since\` is inclusive, and a task whose \`updated_at\` Muse already handled can be skipped. Each call returns at most 100 tasks; when \`next_cursor\` is not null, call again with \`cursor\` set to it.
 
 See "Wake URL for external agents" above for the full endpoint.
 

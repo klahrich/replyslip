@@ -7,12 +7,8 @@
 /** The URL people paste into ChatGPT, Claude, Cursor, Meta Muse or another MCP app. */
 export const MCP_URL = 'https://valetto.tech/api/mcp';
 
-/**
- * Valetto's OAuth client for Meta Muse. Muse's connector asks for a client ID instead of registering itself, so every
- * Valetto user pastes this same public ID. It is not a secret, there is no client secret, and reconnecting reuses it.
- * Must stay in lib/oauth/constants.ts OAUTH_PINNED_CLIENT_IDS (tests/agent-wording.test.ts checks it).
- */
-export const MUSE_CLIENT_ID = 'rsdc_PST7_7QNatbPNN6qJ--EegkSjh3MiCVtNf7zJa3Tqp8';
+/** Valetto's public OAuth client ID for Meta Muse; defined in lib/oauth/constants.ts (also pinned there). */
+export { MUSE_CLIENT_ID } from '@/lib/oauth/constants';
 export const MUSE_SCOPES = 'agent agent:respond';
 /** Where Valetto sends you back to Muse after Allow. Muse may ask for it as the redirect URI. */
 export const MUSE_REDIRECT_URI = 'https://agent.meta.ai/api/hatch/oauth/callback';

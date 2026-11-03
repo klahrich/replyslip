@@ -532,11 +532,21 @@ const CURSOR_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
 /** ISO 8601 with a date and time and an explicit zone (Z or ±hh:mm), e.g. 2026-11-03T17:00:00Z. */
 const ISO_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})$/i;
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** True when the leading YYYY-MM-DD is a real calendar day (Date would roll 2026-02-30 over to March 2). */
+function realCalendarDay(value: string): boolean {
+  const [y, m, d] = value.slice(0, 10).split('-').map(Number);
+  return m >= 1 && m <= 12 && d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+/** ISO 8601 timestamp with an offset, or a date alone, which means 00:00 UTC that day (Date parses it that way). */
 export function parseUpdatedSince(value: string | null | undefined): Date | undefined {
   if (value === undefined || value === null || value === '') return undefined;
-  const date = ISO_TS_RE.test(value) ? new Date(value) : new Date(Number.NaN);
+  const shaped = (ISO_TS_RE.test(value) || ISO_DATE_RE.test(value)) && realCalendarDay(value);
+  const date = shaped ? new Date(value) : new Date(Number.NaN);
   if (Number.isNaN(date.getTime())) {
-    throw new HttpError(400, 'validation_error', 'updated_since must be an ISO 8601 timestamp, e.g. 2026-11-03T17:00:00Z.', {
+    throw new HttpError(400, 'validation_error', 'updated_since must be an ISO 8601 timestamp or date, e.g. 2026-11-03T17:00:00Z or 2026-11-03.', {
       fields: { updated_since: 'Invalid timestamp.' },
     });
   }
