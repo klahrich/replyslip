@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createAgent, listAgents, serializeAgent, watcherPresence, workspaceWatcherLastSeen } from '@/lib/agents';
 import { agentWakeActivity } from '@/lib/wakes';
+import { activeWakeUrlsByAgent } from '@/lib/wake-urls';
 import { requireUser } from '@/lib/auth';
 import { handle, json, parseBody, readJson } from '@/lib/http';
 
@@ -18,6 +19,7 @@ export function GET(req: Request) {
     const rows = await listAgents(user.workspace.id);
     const activity = await agentWakeActivity(user.workspace.id);
     const seen = await workspaceWatcherLastSeen(user.workspace.id);
+    const wakeLinks = await activeWakeUrlsByAgent(user.workspace.id);
     const now = Date.now();
     return json({
       agents: rows.map((agent) => {
@@ -28,6 +30,7 @@ export function GET(req: Request) {
           last_failed_at: wake?.last_failed_at ?? null,
           last_error: wake?.last_error ?? null,
           ...watcherPresence(agent, seen, now),
+          wake_url: agent.revokedAt ? null : (wakeLinks.get(agent.id) ?? null),
         };
       }),
     });
