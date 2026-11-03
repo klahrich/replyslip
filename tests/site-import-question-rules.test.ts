@@ -321,7 +321,7 @@ describe('rule: a generic question needs an answer in the context', () => {
     ).toHaveLength(1);
   });
 
-  it('price and cost questions are never presets, even with a $ amount on the page', () => {
+  it('a price question is kept when the page gives the price, dropped when it does not (v4)', () => {
     const ctx =
       '## Pricing and quote process\n- Drywall repair from $150. Free estimates.\n## FAQ\n- **Q:** What are your rates?';
     const result = rulesOf(
@@ -329,7 +329,7 @@ describe('rule: a generic question needs an answer in the context', () => {
         'Roughly what does a typical drywall job cost?',
         'What are your rates?',
         'How much do you charge for a small repair?',
-        "Quel est le prix approximatif d'un projet typique?",
+        'How much does a new deck cost?',
         'How soon can you come out for a quote, and is it free?',
         'How much notice do you need?',
         'Who is in charge of the permits?',
@@ -337,20 +337,10 @@ describe('rule: a generic question needs an answer in the context', () => {
       ],
       ctx,
     );
-    expect(result.dropped.filter((d) => d.rule === 'price_question').map((d) => d.question)).toEqual([
-      'Roughly what does a typical drywall job cost?',
-      'What are your rates?',
-      'How much do you charge for a small repair?',
-    ]);
+    expect(result.dropped).toEqual([{ question: 'How much does a new deck cost?', rule: 'price_question' }]);
     expect(
       rulesOf(['Combien coûte une soumission typique?'], ctx.replace('Free', 'Gratuit'), 'fr').dropped[0]?.rule,
     ).toBe('price_question');
-    expect(result.kept).toEqual([
-      'How soon can you come out for a quote, and is it free?',
-      'How much notice do you need?',
-      'Who is in charge of the permits?',
-      'Do you offer first-rate finishes?',
-    ]);
   });
 
   it('"prepare" is the customer\'s part only', () => {
@@ -509,5 +499,215 @@ describe('loader', () => {
         language: 'en',
       }),
     ).toHaveLength(1);
+  });
+});
+
+describe('review nits on rules v3', () => {
+  const page = '# X\n\n## Services\n- Tile and stone. Free estimates.\n';
+  const kept = (qs: string[], language: 'en' | 'fr' = 'en', ctx = page) => rulesOf(qs, ctx, language).kept;
+  const ruleOf = (q: string, language: 'en' | 'fr' = 'en', ctx = page) => rulesOf([q], ctx, language).dropped[0]?.rule;
+
+  it('price words inside other words or meanings are not price', () => {
+    const en = [
+      'Are your products cost-effective?',
+      'How do you keep costs low?',
+      'What are your success rates?',
+      'How much of the yard do you mow?',
+      'Can you charge my car battery?',
+    ];
+    expect(kept(en)).toEqual(en);
+    const fr = ['Vos fruits sont-ils frais ?', 'Faites-vous de la couture ?'];
+    expect(kept(fr, 'fr')).toEqual(fr);
+    for (const q of [
+      'Do you charge for travel?',
+      'What are your rates?',
+      'How much is a tile job?',
+      'Is there an extra charge on weekends?',
+    ])
+      expect(ruleOf(q)).toBe('price_question');
+    for (const q of ['Quels sont vos frais de déplacement ?', 'Ça coûte combien ?', 'Combien coûtent vos services ?'])
+      expect(ruleOf(q, 'fr')).toBe('price_question');
+  });
+
+  it('a price question with a free-quote clause is still a price question', () => {
+    expect(ruleOf('How much does it cost, and is the estimate free?')).toBe('price_question');
+    expect(ruleOf('Is the quote free, or is there a fee?')).toBe('price_question');
+    expect(kept(['How soon can you come out for a quote, and is it free?', 'Do quotes cost anything?'])).toHaveLength(
+      2,
+    );
+  });
+
+  it('"free?" is a free-quote question only with a quote word', () => {
+    // Not free_quote, so they need no free-estimate line and are kept as RedBot wrote them.
+    expect(kept(['Is parking free?', 'Is the menu gluten-free?'], 'en', '# X\n\n## Services\n- Tile\n')).toHaveLength(
+      2,
+    );
+    expect(ruleOf('Is the inspection free?', 'en', '# X\n\n## Services\n- Tile\n')).toBe('no_answer_in_context');
+  });
+
+  it('a placeholder before a real number keeps the label or the verb', () => {
+    expect(cleanContextText('Call (613) 000-0000, 514-555-1234')).toBe('Call 514-555-1234');
+    expect(cleanContextText('Phone: 000-0000, 514-555-1234')).toBe('Phone: 514-555-1234');
+    expect(cleanContextText('Call us at 555-000-0000 or 613-555-1234 today')).toBe('Call us at 613-555-1234 today');
+    expect(cleanContextText('Call 000-0000 or email us')).toBe('Email us');
+    expect(cleanContextText('Phone: 000-0000 · Email: x')).toBe('Email: x');
+  });
+
+  it('"Need to check / know …" is the visitor\'s question', () => {
+    expect(kept(['Need to know the best time to aerate?', 'Need to check if quality matters?'])).toHaveLength(2);
+    expect(ruleOf('Need reliable movers?')).toBe('heading_or_cta');
+    expect(ruleOf('Need To Know?')).toBe('heading_or_cta');
+  });
+
+  it('"within 24 hours, 7 days after" is not hours; soot deposits are not a down payment', () => {
+    const ctx =
+      '# X\n\n## Services\n- Replies within 24 hours, 7 days after booking.\n- Book now: soot deposits removed.\n';
+    expect(ruleOf('What are your hours?', 'en', ctx)).toBe('no_answer_in_context');
+    expect(ruleOf('What deposit do you need?', 'en', ctx)).toBe('no_answer_in_context');
+    expect(
+      kept(['What are your hours?'], 'en', '# X\n\n## Hours\n- Available 24 hours, 7 days a week.\n'),
+    ).toHaveLength(1);
+    expect(kept(['Do you remove soot deposits?'], 'en', ctx)).toHaveLength(1);
+  });
+
+  it('a worked-example bracket stays', () => {
+    const ctx = '# X\n\n## Services\n- Tile. Most jobs take 2 days to complete.\n';
+    expect(kept(['How long does a typical tile job take (typical bungalow)?'], 'en', ctx)).toEqual([
+      'How long does a typical tile job take (typical bungalow)?',
+    ]);
+  });
+});
+
+describe('rule 3 v4: a price question needs the price on the page', () => {
+  const ruleOf = (q: string, ctx: string, language: 'en' | 'fr' = 'en', displayName?: string) =>
+    rulesOf([q], ctx, language, displayName).dropped[0]?.rule ?? 'kept';
+
+  it('keeps it for a $ amount, a range, a fee or a price per hour', () => {
+    expect(ruleOf('How much does drywall repair cost?', '## Pricing\n- Drywall repair from $99.')).toBe('kept');
+    expect(ruleOf('What are your prices?', '## Services\n- Lessons: $120 a month.')).toBe('kept');
+    expect(ruleOf('What is your hourly rate?', '## Pricing\n- Interior painting: $80–$150/hour.')).toBe('kept');
+    expect(ruleOf('What is your consultation fee?', '## Pricing\n- Consultation fee $50.')).toBe('kept');
+    // "Is the consultation free?" is a free-quote question; the consultation's price answers it too.
+    expect(ruleOf('Is the consultation free?', '## Pricing\n- Consultation fee $50.')).toBe('kept');
+    expect(
+      ruleOf(
+        'How much does a spring replacement cost?',
+        '## FAQ\n- **Q:** How much does a spring replacement cost?\n  **A:** $220 to $350, parts and labour.',
+      ),
+    ).toBe('kept');
+  });
+
+  it('drops it when the page only says "pricing", "quote", "affordable" or "contact us"', () => {
+    const ctx = [
+      '## Pricing and quote process',
+      '- Affordable, upfront pricing.',
+      '- Contact us for a quote.',
+      '- Free estimates. Competitive rates and honest quotes.',
+      '- No surprises: a fixed price in writing.',
+    ].join('\n');
+    for (const q of [
+      'What are your prices?',
+      'How much does a typical job cost?',
+      'Roughly what does a deck cost?',
+      'What are your rates?',
+      'How much do you charge?',
+    ])
+      expect(ruleOf(q, ctx)).toBe('price_question');
+  });
+
+  it('drops it with no site text, or when the only amount is in a scrape note or placeholder', () => {
+    expect(ruleOf('What are your prices?', '')).toBe('price_question');
+    expect(ruleOf('What are your prices?', '# X\n\n## Pricing\n- (not stated on site)')).toBe('price_question');
+    expect(ruleOf('What are your prices?', '# X\n\n## Gaps and conflicts\n- Pricing around $100 is unconfirmed.')).toBe(
+      'price_question',
+    );
+    expect(ruleOf('What are your prices?', '# X\n\nSite: https://example.ca/?p=$100\n')).toBe('price_question');
+  });
+
+  it('French: "à partir de 99 $" and "45 $/h" answer it; "tarifs" or "soumission gratuite" alone do not', () => {
+    expect(ruleOf('Combien coûte un ramonage ?', '## Tarifs\n- Ramonage de cheminée à partir de 99 $.', 'fr')).toBe(
+      'kept',
+    );
+    expect(ruleOf('Quels sont vos tarifs ?', '## Tarifs\n- Tarif horaire : 45 $/h.', 'fr')).toBe('kept');
+    expect(ruleOf('Quel est votre tarif horaire ?', '## Tarifs\n- Massage 60 minutes : 1 017,63 $.', 'fr')).toBe(
+      'price_question',
+    );
+    const words = '## Tarifs\n- Tarifs compétitifs.\n- Soumission gratuite.\n- Contactez-nous pour connaître nos prix.';
+    for (const q of ['Combien coûtent vos services ?', 'Quels sont vos tarifs ?', 'Quel est le prix d’une toiture ?'])
+      expect(ruleOf(q, words, 'fr')).toBe('price_question');
+    expect(ruleOf('Combien coûtent vos services ?', '', 'fr')).toBe('price_question');
+  });
+
+  it('the price has to be for what the question asks about', () => {
+    const ctx = '## Pricing\n- Gutter cleaning from $99.\n- Kitchens from $25,000.';
+    expect(ruleOf('How much does gutter cleaning cost?', ctx)).toBe('kept');
+    expect(ruleOf('How much does window cleaning cost?', ctx)).toBe('price_question');
+    expect(ruleOf('What is your hourly rate?', ctx)).toBe('price_question');
+    // A heading names what the lines under it price.
+    expect(ruleOf('How much does window cleaning cost?', '## Window cleaning\n- From $8 per window.')).toBe('kept');
+  });
+
+  it("the business's own trade is not a subject: Acme Painting's price for a room answers a painting job", () => {
+    const q = 'Roughly what does a typical painting job cost?';
+    const ctx = '# Acme Painting\n\n## Pricing\n- Most rooms run $350 to $600.';
+    expect(ruleOf(q, ctx, 'en', 'Acme Painting')).toBe('kept');
+    expect(
+      ruleOf(q, ctx.replace('# Acme Painting\n', '# Acme\n\nCity: Ottawa, ON · Niche: painting\n'), 'en', 'Acme'),
+    ).toBe('kept');
+    expect(ruleOf(q, ctx, 'en', 'Acme')).toBe('price_question');
+  });
+
+  it('"free" or "no charge" answers only a question about that same thing', () => {
+    const ctx = '## Service areas\n- No travel charges within 40 km.\n- Free estimates.';
+    expect(ruleOf('Do you charge for travel?', ctx)).toBe('kept');
+    expect(ruleOf('Do you charge for estimates?', ctx)).toBe('kept');
+    expect(ruleOf('How much do you charge?', ctx)).toBe('price_question');
+    expect(ruleOf('What are your prices?', ctx)).toBe('price_question');
+    expect(ruleOf('How much does it cost, and is the estimate free?', ctx)).toBe('price_question');
+    expect(ruleOf('Y a-t-il des frais pour une soumission ?', '## Tarifs\n- Soumission gratuite.', 'fr')).toBe('kept');
+    // "How much…?" needs an amount: a free consultation doesn't answer what a first visit costs.
+    expect(ruleOf('Combien coûte une soumission ?', '## Tarifs\n- Soumission gratuite.', 'fr')).toBe('price_question');
+    expect(
+      ruleOf('What does a first visit or consultation cost?', '## Services\n- Free consultation for new patients.'),
+    ).toBe('price_question');
+  });
+
+  it('insurance cover, credits, gift cards, a $0 cart and deposits are not the price of the work', () => {
+    const ctx = [
+      '## Services',
+      '- Licensed and $5M insured.',
+      '- Gift cards from $25.',
+      '- A $75 credit toward your next visit if we are late.',
+      '- Cart $0.00',
+      '- Moins de 70 000 $ : couverture complète.',
+      '- A $200 deposit secures your date.',
+      '- Cancellations within 24 hours: $50 fee.',
+    ].join('\n');
+    expect(ruleOf('What are your prices?', ctx)).toBe('price_question');
+    expect(ruleOf('How much do you charge?', ctx)).toBe('price_question');
+    expect(ruleOf('How much is the deposit?', ctx)).toBe('kept');
+    expect(ruleOf('Is there a cancellation fee?', ctx)).toBe('kept');
+  });
+
+  it('thresholds, surcharges, travel fees, quote fees and $1.00 placeholders are not the price of the work', () => {
+    const ctx = [
+      '## Services',
+      '- Orders over $75 ship with tracking.',
+      '- Saturday surcharge $10.',
+      '- Travel fee $45 outside the city.',
+      '- $199 in-person consultation.',
+      '- Carpet Cleaning $1.00',
+      '- Your first visit, made simple and stress‑free.',
+    ].join('\n');
+    expect(ruleOf('How much does a typical job cost?', ctx)).toBe('price_question');
+    expect(ruleOf('Do you charge for travel?', ctx)).toBe('kept');
+    expect(ruleOf('Is there an extra charge on Saturdays?', ctx)).toBe('kept');
+    expect(ruleOf('What does a consultation cost?', ctx)).toBe('kept');
+    // "stress‑free" is not free.
+    expect(ruleOf('Do you charge for the first visit?', ctx)).toBe('price_question');
+    // The hourly rate counts even with a travel fee in the same sentence.
+    expect(
+      ruleOf('Combien coûtent vos services ?', '## Tarifs\n- À la carte : 85 $/h, frais de déplacement 45 $.\n', 'fr'),
+    ).toBe('kept');
   });
 });

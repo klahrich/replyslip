@@ -9,8 +9,11 @@ import { detectVisitorLanguage } from './keywords';
  * 2. A question is dropped when it isn't something a visitor would ask: a heading or call to action ("Ready to get
  *    started?", "Why Choose Us?", all caps, no question mark, a web address), privacy or policy text, login or
  *    account text, or a question confidently in another language than the business's.
- * 3. A price or cost question is never a preset chip (Karim, Nov 2026), even when the context has a $ amount: the
- *    assistant handles price questions when a visitor types them.
+ * 3. A price or cost question is kept only when the site's own text answers it with a real price, range or fee
+ *    ("$120", "from $99", "$80–$150/hour", "consultation fee $50", "à partir de 99 $"), on the subject the question
+ *    asks about (Karim, Nov 3 2026: "prices are fine if the website answers them"). "Pricing", "quote", "affordable"
+ *    or "contact us for a quote" is not an answer. A "free" or "no charge" line answers only a yes-or-no question about
+ *    that same thing ("Do you charge for estimates?" and "Free estimates"), never "How much…?".
  * 4. A generic question (service area, job length, insurance, warranty, licence, hours, years in business, free
  *    quotes, deposits, how the customer prepares) is kept only when the context answers it: the question appears in
  *    the context (a FAQ entry), or the context has the fact the question asks for. A question asking two things
@@ -132,13 +135,24 @@ function stripPlaceholderPhones(text: string): string {
         new RegExp(String.raw`^[ \t]*(?:[-*+][ \t]+)?${PHONE_LABEL}${PLACEHOLDER_PHONE}[ \t]*(?:\n|$)`, 'gim'),
         '',
       )
-      .replace(new RegExp(String.raw`\b${PHONE_LABEL}${PLACEHOLDER_PHONE}(?:${SEPARATOR})?`, 'gi'), '')
+      // "Phone: 000-0000, 514-555-1234" keeps the label for the real number; "Phone: 000-0000 ·" loses both.
       .replace(
         new RegExp(
-          String.raw`\b(call|text|appelez|téléphonez)(?: us| nous|-nous)?(?: at| au)?[ \t]+${PLACEHOLDER_PHONE}(?:[ \t]+(?:or|ou)[ \t]+(\p{L}))?`,
+          String.raw`\b(${PHONE_LABEL})${PLACEHOLDER_PHONE}(?:(${SEPARATOR}|[ \t]+(?:or|ou)[ \t]+)(?=[\d(+]))?(?:${SEPARATOR})?`,
+          'gi',
+        ),
+        (_m, label: string, beforeNumber?: string) => (beforeNumber ? label : ''),
+      )
+      // "Call 000-0000 or email" becomes "Email"; "Call 000-0000, 514-555-1234" becomes "Call 514-555-1234".
+      .replace(
+        new RegExp(
+          String.raw`\b((call|text|appelez|téléphonez)(?: us| nous|-nous)?(?: at| au)?)[ \t]+${PLACEHOLDER_PHONE}(?:(?:${SEPARATOR}|[ \t]+(?:or|ou)[ \t]+)(?=[\d(+])|[ \t]+(?:or|ou)[ \t]+(\p{L}))?`,
           'giu',
         ),
-        (_m, verb: string, next?: string) => (next ? (/^\p{Lu}/u.test(verb) ? next.toUpperCase() : next) : ''),
+        (m: string, phrase: string, verb: string, next?: string) => {
+          if (next) return /^\p{Lu}/u.test(verb) ? next.toUpperCase() : next;
+          return /[\d(+]$/.test(m) || /(?:[·|•\/,]|\b(?:or|ou))[ \t]*$/i.test(m) ? `${phrase} ` : '';
+        },
       )
       .replace(
         new RegExp(`(${SEPARATOR})?${PLACEHOLDER_PHONE}(${SEPARATOR})?`, 'g'),
@@ -214,7 +228,8 @@ function isNeedCta(question: string, lower: string): boolean {
     .replace(/[?!.]+$/, '')
     .trim()
     .split(/\s+/);
-  if (NEED_OFFER.test(lower) || NEED_PRAISE.test(lower)) return true;
+  // "Need to check / know / replace …?" is the visitor's own task, not an offer, even with "best" or "quality" in it.
+  if (!/^need to\b/.test(lower) && (NEED_OFFER.test(lower) || NEED_PRAISE.test(lower))) return true;
   const rest = words.slice(1).filter((word) => /^\p{L}/u.test(word) && !/^(?:a|an|the|de|du|des|un|une)$/i.test(word));
   return rest.length > 0 && rest.every((word) => /^\p{Lu}/u.test(word));
 }
@@ -255,15 +270,230 @@ type Topic = {
  * estimates?", "La soumission est-elle gratuite?". "How long does a free estimate take?" asks how long, and
  * "gluten-free" is not "free".
  */
-const QUOTE_WORD = String.raw`(?:quotes?|estimates?|consultations?|soumissions?|devis|estimations?)`;
+const QUOTE_WORD = String.raw`(?:quotes?|estimates?|consultations?|assessments?|inspections?|soumissions?|devis|estimations?|évaluations?)`;
 const FREE_QUOTE_ASK = new RegExp(
-  String.raw`\b${QUOTE_WORD}\b[^?]*\b(?:is|are) (?:it|they|that|those)? ?(?:free|gratuite?s?)\b|\b(?:is|are) (?:the |your )?${QUOTE_WORD} (?:free|gratuite?s?)\b|\b(?:offer|give|provide|do|have)\s+(?<!-)free\s+${QUOTE_WORD}\b|\best-(?:ce|elle|il) (?:gratuite?s?|sans frais)\b|\b${QUOTE_WORD} (?:est-(?:elle|il) |sont-(?:elles|ils) )?(?:gratuite?s?|sans frais)\b|\b(?:free|gratuite?s?)\s*\?`,
+  String.raw`\b${QUOTE_WORD}\b[^?]*\b(?:is|are) (?:it|they|that|those)? ?(?:free|gratuite?s?)\b|\b(?:is|are) (?:the |your )?${QUOTE_WORD} (?:free|gratuite?s?)\b|\b(?:offer|give|provide|do|have)\s+(?<!-)free\s+${QUOTE_WORD}\b|\best-(?:ce|elle|il) (?:gratuite?s?|sans frais)\b|\b${QUOTE_WORD} (?:est-(?:elle|il) |sont-(?:elles|ils) )?(?:gratuite?s?|sans frais)\b|\b${QUOTE_WORD}\b[^?]*(?<!-)\b(?:free|gratuite?s?)\s*\?|\b(?:do|does|will) (?:the |your |a |an )?${QUOTE_WORD} cost (?:anything|money|extra)\b|\b(?:is there|do you have) (?:a |any )?(?:charge|fee|cost) for (?:a |an |the |your )?${QUOTE_WORD}\b`,
 );
 
-/** A price or cost question: never a preset chip (rule 3), whatever the context says. */
+/**
+ * A price or cost question (rule 3): kept only when priceAnswered finds the price on the page. Not "cost-effective",
+ * "keep costs low", "success rates", "How much of the yard", "charge my car battery", "fruits frais" or "couture".
+ */
 const PRICE_ASK =
-  /\bcosts?\b|\bprices?\b|\bpricing\b|\bhow much\b(?! (?:time|notice|lead time|advance notice|space|room|experience)\b)|(?<![-\w])rates?\b|\bfees?\b|(?<!\bin )\bcharges?\b|\bquoted?\s+(?:price|amount)|\bbudget\b|\btarifs?\b|\bprix\b|\bco[uû]t|\bfrais\b|\bcombien (?:ça |est-ce que ça )?(?:co[uû]t|pour |demandez|chargez|facturez)/;
+  /\bcosts?\b(?!-effective)(?<!\b(?:keep|keeping|kept|reduce|reducing|lower|lowering|cut|cutting|save on|saving on|control|controlling|minimi[sz]e) costs?)|\bprices?\b|\bpricing\b|\bhow much (?:does|do|did|will|would|should|can|could|is|are|was|were|for|to|money|it|extra|more|less)\b|\b(?:your|hourly|daily|weekly|monthly|flat|labou?r|going|standard|current|the) rates?\b|\brates? (?:for|per|start)\b|\bfees?\b|\b(?:you|we|they) charge\b(?! (?:my|your|the|a|an|our|it|batter\w*|phones?|cars?|vehicles?|evs?)\b)|\bcharges? (?:for|per|extra)\b|\b(?:extra|additional|service|call-out|callout|travel|minimum|hidden|delivery|cancellation|flat) charges?\b|\bcharged\b|\bquoted?\s+(?:price|amount)|\bbudget\b|\btarifs?\b|\bprix\b|\bco[uû]t(?:s|e|ent|era|erait|eront|er)?\b|\b(?:les|des|vos|aux|quels|quelques|sans|de) frais\b|\bfrais (?:de|d'|supplémentaires|additionnels|cachés)\b|\bcombien (?:ça |est-ce que ça )?(?:co[uû]t|pour |demandez|chargez|facturez)/;
 
+/** The question without its free-quote part, so "How much does it cost, and is the estimate free?" is still about price. */
+const FREE_QUOTE_ALL = new RegExp(FREE_QUOTE_ASK.source, 'g');
+const withoutFreeQuote = (lower: string) => lower.replace(FREE_QUOTE_ALL, ' ');
+
+// --- Rule 3: a price question needs a price on the page (v4) ---------------------------------------------------
+
+/** "$120", "$ 80–150", "CAD 50", "99 $", "1 017,63$", "120 dollars", "50 €". A digit is required. */
+const AMOUNT =
+  /(?:\$|\b(?:cad|usd)\s?|€|£)\s?(\d[\d\s,.]*)|\b(\d[\d\s,.]*?)\s?(?:\$|€|£|(?:dollars?|cad|usd|euros?)\b)/gi;
+/**
+ * Sentences whose amounts are not what a visitor pays for the service: insurance cover ("$5M insured"), income
+ * brackets ("70 000 $ : couverture complète"), credits, rebates, grants, discounts, gift cards, a shop cart.
+ */
+const NOT_A_PRICE =
+  /\b(?:liability|insured|insurance|coassurance|assurée?s?|assurance)\b[^.\n]{0,30}\d|\d[^.\n]{0,30}\b(?:liability|insured|couverture|coassurance)\b|\b(?:rebates?|grants?|subventions?|tax credits?|credits?|crédits?(?: d'impôt)?|donat\w*|raised|charit\w*|fundrais\w*|prizes?|gift ?cards?|cartes?[- ]cadeaux|save|saving|savings|économis\w*|discount\w*|rabais|réductions?|income|revenue|revenus?|salar\w*|salaires?|wages?|cart|panier|subtotal|sous-total|millions?|milliards?|billions?)\b|\$\s?\d+(?:[.,]\d+)?\s?(?:m|mm|b)\b|\d\s?%\s?off\b|\$\s?\d[\d.,]*\s?(?:off|back)\b/i;
+/** "Orders over $75", "moins de 70 000 $": a threshold, not a price. Tested on the words just before the amount. */
+const THRESHOLD = /\b(?:over|above|under|more than|less than|plus de|moins de|au-delà de)\s*$/;
+/** A quote's own price: "Consultation fee $50", "$199 in-person consultation", "Estimates are $75". */
+const QUOTE_PRICE = new RegExp(
+  String.raw`\b${QUOTE_WORD} (?:fees?|costs?|charges?|frais)\b|(?:\$\s?\d[\d,.]*|\d[\d\s,.]*\s?\$)\s+(?:(?:in-person|in-home|on-site|initial|first|sur place|à domicile)\s+)?${QUOTE_WORD}\b|\b${QUOTE_WORD}\s+(?:is|are|costs?|runs?|starts? at|:|-|–|—)\s*(?:\$|\d)`,
+);
+/**
+ * Fees that are not the price of the work (a deposit, a cancellation, refund or late fee, a surcharge, travel or
+ * shipping, a quote's own fee): an amount next to one of these answers only a question that names it.
+ */
+const SIDE_FEES: { near: RegExp; asks: RegExp }[] = [
+  {
+    near: /\bdeposits?\b|\bdown payment\b|\bretainer\b|\bacomptes?\b|\bdépôts?\b/,
+    asks: /\bdeposits?\b|\bdown payment\b|\bretainer\b|\bacomptes?\b|\bdépôts?\b/,
+  },
+  {
+    near: /\bcancel\w*|\breschedul\w*|\bannul\w*|\bno[- ]shows?\b/,
+    asks: /\bcancel\w*|\breschedul\w*|\bannul\w*|\bno[- ]shows?\b/,
+  },
+  { near: /\brefund\w*|\brembours\w*/, asks: /\brefund\w*|\brembours\w*/ },
+  {
+    near: /\blate (?:fees?|payments?|charges?)\b|\bretards?\b|\bpenalt\w*|\bpénalit\w*/,
+    asks: /\blate\b|\bretards?\b|\bpenalt\w*|\bpénalit\w*/,
+  },
+  {
+    near: /\bsurcharges?\b|\bsuppléments?\b/,
+    asks: /\bsurcharges?\b|\bsuppléments?\b|\bextra\b|\badditional\b|\bweekends?\b|\bevenings?\b|\bholidays?\b|\bfin de semaine\b|\bsamedi\b|\bdimanche\b/,
+  },
+  {
+    near: /\btravel\b|\btrip\b|\bmileage\b|\bshipping\b|\bdelivery\b|\bdéplacements?\b|\blivraisons?\b|\bexpédition\b|\bkilométrage\b/,
+    asks: /\btravel\b|\btrip\b|\bmileage\b|\bshipping\b|\bdeliver\w*|\bdéplacements?\b|\blivr\w*|\bexpédi\w*|\bkilométrage\b/,
+  },
+];
+
+const QUOTE_NEAR = new RegExp(String.raw`\b${QUOTE_WORD}`);
+const QUOTE_ASKED = new RegExp(String.raw`\b${QUOTE_WORD}|\bconsult\w*|\bassess\w*`);
+
+type Amount = { before: string; after: string };
+/** The real, non-zero amounts of a sentence, each with the words around it up to a comma or semicolon. */
+function amountsIn(sentence: string): Amount[] {
+  if (NOT_A_PRICE.test(sentence)) return [];
+  const out: Amount[] = [];
+  for (const m of sentence.matchAll(AMOUNT)) {
+    const digits = (m[1] ?? m[2] ?? '').trim();
+    // "$0.00" in a cart; "$1.00" on every line is a shop template's placeholder.
+    if (!/[1-9]/.test(digits) || /^0*1[.,]00$/.test(digits)) continue;
+    const before = sentence.slice(Math.max(0, m.index - 40), m.index).replace(/^.*[,;•|]/s, '');
+    const after = sentence.slice(m.index + m[0].length, m.index + m[0].length + 30).replace(/[,;•|].*$/s, '');
+    if (THRESHOLD.test(before)) continue;
+    out.push({ before, after });
+  }
+  return out;
+}
+/** The sentence has an amount that answers this question: not a side fee the question doesn't ask about. */
+function pricedFor(sentence: string, lower: string): boolean {
+  return amountsIn(sentence).some(({ before, after }) => {
+    const near = `${before} ${after}`;
+    if (SIDE_FEES.some((fee) => fee.near.test(near) && !fee.asks.test(lower))) return false;
+    const quoteFee = QUOTE_PRICE.test(sentence) && QUOTE_NEAR.test(near);
+    return !quoteFee || QUOTE_ASKED.test(lower);
+  });
+}
+/**
+ * "No travel charges", "at no extra cost", "Free estimates", "sans frais": a zero fee, for a yes-or-no question on that
+ * same thing.
+ */
+const NO_FEE =
+  /\bno (?:extra |additional |hidden |travel |trip |delivery |cancellation |call-out |callout )?(?:charges?|fees?|costs?)\b|\bat no (?:extra |additional )?(?:cost|charge)\b|\bfree of charge\b|\bwithout (?:any )?(?:extra |additional )?charge\b|(?<![\p{L}\p{Pd}])free(?![\p{L}\p{Pd}])(?! to\b)(?<!\bfeel free)|\bsans (?:frais|supplément)\b|\baucuns? frais\b|\bgratuite?s?\b/u;
+/** A yes-or-no question on whether something costs anything: "Do you charge for travel?", "Is there a fee for…?". */
+const YES_NO_FEE =
+  /^(?:do|does|did|will|would|is|are|can)\b|^(?:y a-t-il|y-a-t-il|est-ce qu|facturez-vous|chargez-vous|faut-il payer|dois-je payer)/;
+/** The question asks for a rate per hour: the price has to be per hour too. */
+const ASKS_HOURLY = /\bhourly\b|\b(?:per|an|by the|each) hour\b|\b(?:à|de) l'heure\b|\bhoraires?\b/;
+const PER_HOUR =
+  /\bhourly\b|\/\s?(?:h|hr|hrs|hour|heure)\b|\b(?:per|an|a|by the|each|par|de l') ?(?:hour|hr|heure)\b|\$\s?\d+\s?(?:\/|per |par )?h\b|\d\s?\$\s?(?:\/|de l'|par )?(?:h|heure)\b/;
+/** Words that say nothing about what is priced ("Roughly what does a typical job cost?"). Accents folded. */
+const PRICE_FILLER = new Set(
+  (
+    'what whats which how much many does doing did will would could can should is are was were the and for of to in on at with ' +
+    'your you my our we its it this that there any some about typical typically roughly approximately approximate approx ' +
+    'average usually generally ballpark idea give cost costs costing price prices priced pricing rate rates fee fees charge ' +
+    'charges charged charging budget amount job jobs project projects service services work starting start starts range ' +
+    'ranges per each like look expect pay paying spend run runs involved small large big standard basic total overall ' +
+    'extra additional include included includes hour hourly anything something free first initial ' +
+    ' combien coute coutent couter cout couts coutera prix tarif tarifs frais quel quelle quels quelles est sont les une des ' +
+    'pour vos votre mon mes nos notre vous que qu est-ce cela approximatif approximative approximativement typique moyen ' +
+    'moyenne environ projet projets service services travail travaux budget montant faut prevoir demandez chargez facturez ' +
+    'payer generalement habituellement partir heure horaire gratuit gratuite gratuits gratuites premiere premier initiale'
+  ).split(' '),
+);
+const foldLower = (text: string) => fold(text.toLowerCase().replace(/’/g, "'"));
+/** "painting" finds "paint", "painted"; "nettoyage" finds "nettoyer". */
+const stemOf = (word: string) => {
+  const bare = word.replace(/(?:ings?|ed|es|s)$/, '');
+  return (bare.length >= 4 ? bare : word).slice(0, 6);
+};
+/** The words of the question that name what is priced, without the business's own name and niche. */
+function priceSubjects(lower: string, generic: Set<string>): string[] {
+  return foldLower(lower)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length >= 4 && !PRICE_FILLER.has(word) && !generic.has(stemOf(word)))
+    .map(stemOf);
+}
+
+type PriceLine = { sentence: string; about: string };
+/**
+ * The site's sentences with a price or a zero fee, lower-cased, each with what it is about: the sentence, its section
+ * heading and, for a FAQ answer, its question. Scrape notes and placeholders don't count.
+ */
+function priceLines(contextMd: string): PriceLine[] {
+  const out: PriceLine[] = [];
+  let heading = '';
+  let skipping = false;
+  let lastQuestion = '';
+  for (const raw of contextMd.split('\n')) {
+    const line = raw.toLowerCase().replace(/’/g, "'");
+    if (/^#{1,6}\s/.test(raw)) {
+      skipping = NOT_EVIDENCE_HEADING.test(raw);
+      heading = line;
+      lastQuestion = '';
+      continue;
+    }
+    if (skipping || !line.trim() || PLACEHOLDER.test(line) || SCRAPE_META.test(line)) continue;
+    const isQuestion = /^\s*(?:[-*+]\s+)?(?:\*\*)?q\s*:/.test(line);
+    const about = `${heading} ${isQuestion ? '' : lastQuestion}`;
+    for (const sentence of line.split(/(?<=[.!?;])\s+/))
+      if (!isQuestion && (amountsIn(sentence).length > 0 || NO_FEE.test(sentence)))
+        out.push({ sentence, about: foldLower(`${about} ${sentence}`) });
+    lastQuestion = isQuestion ? line : '';
+  }
+  return out;
+}
+/**
+ * Rule 3: the site answers this price question. A sentence with a real amount (or, for a yes-or-no question that
+ * names what is priced, a "free" / "no charge" line) on what the question asks about: every word of it ("window cleaning" is not
+ * answered by "Gutter cleaning from $99"), else (for "What are your rates?") any price. Deposit, cancellation, refund and late fees answer only a question about them; an hourly rate needs a
+ * price per hour.
+ */
+function priceAnswered(lower: string, contextMd: string, generic: Set<string>): string[] | null {
+  // "How much does it cost, and is the estimate free?" asks the price of the work, not of the estimate.
+  const priceAsk = withoutFreeQuote(lower);
+  // Only the price part of "What does a first visit cost, and what is covered by insurance?" needs a price; the other
+  // part goes through the topic check like any question.
+  const clauses = priceAsk.split(
+    /,\s*(?:and|or|et|ou)\b|;|\s+(?:and|et)\s+(?=(?:what|how|is|are|do|does|can|will|est-ce|quel|quels|quelle|quelles|combien)\b)/,
+  );
+  const priced = clauses.filter((clause) => PRICE_ASK.test(clause));
+  const lines = priceLines(contextMd);
+  const found: string[] = [];
+  for (const clause of priced.length > 0 ? priced : [priceAsk]) {
+    // "a first visit or consultation": either one priced is an answer.
+    const options = clause.split(/\s+(?:or|ou)\s+/).map((part) => priceSubjects(part, generic));
+    const hourly = ASKS_HOURLY.test(clause);
+    // "Free" answers "Do you charge for estimates?", not "How much does a consultation cost?".
+    const yesNo = YES_NO_FEE.test(clause.trim());
+    const hit = lines.find(({ sentence, about }) => {
+      if (hourly && !PER_HOUR.test(sentence)) return false;
+      const amount = pricedFor(sentence, lower);
+      return options.some((subjects) => {
+        if (subjects.length === 0) return amount;
+        if (!amount && !(yesNo && NO_FEE.test(sentence))) return false;
+        return subjects.every((stem) => new RegExp(`(?<![\\p{L}\\p{N}])${stem}`, 'u').test(about));
+      });
+    });
+    if (!hit) return null;
+    found.push(hit.sentence.replace(/^\s*(?:[-*+]\s+)?(?:\*\*)?a\s*:(?:\*\*)?\s*/, '').trim());
+  }
+  return found;
+}
+
+/**
+ * The site's sentences that answer a price question under rule 3, or null when the site doesn't answer it (or it is
+ * not a price question). For checks and logs.
+ */
+export function priceEvidence(
+  question: string,
+  business: { contextMd: string; displayName?: string },
+): string[] | null {
+  const lower = question.toLowerCase().replace(/’/g, "'");
+  if (!PRICE_ASK.test(withoutFreeQuote(lower))) return null;
+  return priceAnswered(lower, business.contextMd, genericWords(business.contextMd, business.displayName));
+}
+
+/** The business's own name and RedBot's niche: "painting" says nothing about what Abraham Painting prices. */
+function genericWords(contextMd: string, displayName?: string): Set<string> {
+  const niche = /^[ \t]*(?:[-*+][ \t]+)?.*\bniche\s*:\s*(.+)$/im.exec(contextMd)?.[1] ?? '';
+  return new Set(
+    foldLower(`${displayName ?? ''} ${niche}`)
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => word.length >= 4)
+      .map(stemOf),
+  );
+}
+
+/** Soot, scale and mineral deposits are not a down payment. */
+const DEPOSIT_WORD =
+  /(?<!\b(?:soot|creosote|mineral|calcium|lime|limescale|scale|carbon|grease|rust|tar|fat|sediment|water|oil|salt) )\bdeposits?\b(?! of (?:soot|creosote|minerals?|calcium|lime|scale|grease|rust))|\bdown payment\b|\bretainer\b|\bdépôts?\b(?! (?:de|d') ?(?:suie|calcaire|créosote|graisse|minéraux|tartre))|\bacomptes?\b|\bversement initial\b/;
 const NO_DEPOSIT =
   /\bno deposits?\b|\b(?:do not|don't|never|won't) (?:take|require|ask for|charge|need) (?:a |any )?deposits?\b|\bwithout (?:a |any )?deposit\b|\b(?:from|after|upon|on receipt of) (?:the |your |a )?deposit\b|\baucun (?:dépôt|acompte)\b|\bsans (?:dépôt|acompte)\b/;
 
@@ -313,20 +543,25 @@ const TOPICS: Topic[] = [
   {
     name: 'free_quote',
     asks: FREE_QUOTE_ASK,
-    answered: has(
-      /(?<!-)\bfree\b[^.\n]{0,40}\b(?:quotes?|estimates?|consultations?|assessments?|inspections?|evaluations?)\b|\b(?:quotes?|estimates?|consultations?)\b[^.\n]{0,30}\b(?:free|at no (?:cost|charge))\b|\bno[- ]obligation\b|\b(?:soumissions?|estimations?|devis|consultations?|évaluations?)\b[^.\n]{0,30}\b(?:gratuite?s?|sans frais|sans obligation)\b/,
-    ),
+    // "Free estimates", or the quote's own price ("Consultation fee $50"), which answers "Is the consultation free?".
+    answered: (lines, text) =>
+      /(?<!-)\bfree\b[^.\n]{0,40}\b(?:quotes?|estimates?|consultations?|assessments?|inspections?|evaluations?)\b|\b(?:quotes?|estimates?|consultations?)\b[^.\n]{0,30}\b(?:free|at no (?:cost|charge))\b|\bno[- ]obligation\b|\b(?:soumissions?|estimations?|devis|consultations?|évaluations?)\b[^.\n]{0,30}\b(?:gratuite?s?|sans frais|sans obligation)\b/.test(
+        text,
+      ) ||
+      lines.some((line) =>
+        line.split(/(?<=[.!?;])\s+/).some((sentence) => QUOTE_PRICE.test(sentence) && amountsIn(sentence).length > 0),
+      ),
   },
   {
     name: 'deposit',
-    asks: /\bdeposits?\b|\bdown payment\b|\bdépôts?\b|\bacomptes?\b/,
+    asks: DEPOSIT_WORD,
     // A deposit in a sentence about paying or booking ("soot deposits" and "dépôts de suie" are not), or a plain
     // "No deposits" / "We do not take deposits", which answers it too.
     answered: (lines) =>
       lines.some(
         (line) =>
           NO_DEPOSIT.test(line) ||
-          (/\bdeposits?\b|\bdown payment\b|\bretainer\b|\bdépôts?\b|\bacomptes?\b|\bversement initial\b/.test(line) &&
+          (DEPOSIT_WORD.test(line) &&
             /\b(?:pay\w*|book\w*|reserv\w*|secures?|contracts?|invoices?|required|requires|non-refundable|refundable|balance|percent)\b|%|\$|paiement|pay[eé]\w*|réserv\w*|requis|exigé|factur\w*|contrat|solde|remboursable/.test(
               line,
             )),
@@ -345,7 +580,7 @@ const TOPICS: Topic[] = [
     name: 'hours',
     asks: /\bhours\b(?! does| do| will| would)|\bopen\b|heures d'ouverture|\bouverts?\b|\bhoraires?\b/,
     answered: has(
-      /\b(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b[^\n]{0,40}\d|\b24\/7\b|\b(?:open|available|operating|answering|on call)\s+24 hours\b|\b24 hours,? (?:a day|7 days|seven days)\b|\b24[- ]hours? (?:emergency )?(?:service|emergenc\w*|availability|support|line|dispatch)\b|\b(?:7|seven) days a week\b|\b7\s?(?:jours?|j)\s?(?:sur|\/)\s?7\b|\b24\s?h\s?(?:sur|\/)\s?24\b|\bweekends?\b[^\n]{0,30}\b(?:open|available)\b|\b(?:open|available)\b[^\n]{0,30}\bweekends?\b|\d(?::\d\d)?\s?(?:am|pm)\b|\b\d{1,2}\s?h\s?\d{0,2}\s?(?:à|-|–)/,
+      /\b(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b[^\n]{0,40}\d|\b24\/7\b|\b(?:open|available|operating|answering|on call)\s+24 hours\b|(?<!\b(?:within|in|after|before|of) )\b24 hours,? (?:a day|(?:7|seven) days(?: a week)?)\b(?! (?:after|before|later|prior|from|of|notice|in advance)\b)|\b24[- ]hours? (?:emergency )?(?:service|emergenc\w*|availability|support|line|dispatch)\b|\b(?:7|seven) days a week\b|\b7\s?(?:jours?|j)\s?(?:sur|\/)\s?7\b|\b24\s?h\s?(?:sur|\/)\s?24\b|\bweekends?\b[^\n]{0,30}\b(?:open|available)\b|\b(?:open|available)\b[^\n]{0,30}\bweekends?\b|\d(?::\d\d)?\s?(?:am|pm)\b|\b\d{1,2}\s?h\s?\d{0,2}\s?(?:à|-|–)/,
     ),
   },
 ];
@@ -462,6 +697,9 @@ function dropUnseenBrackets(question: string, foldedContext: string): string {
   return question.replace(/\s*\(([^()]{1,60})\)/g, (whole, inner: string, offset: number) => {
     const before = fold(normalized(question.slice(0, offset))).split(' ');
     if (NEEDS_OBJECT.has(before[before.length - 1] ?? '') || before.filter(Boolean).length < 3) return whole;
+    // A worked example ("(typical bungalow)", "(e.g. a deck)") narrows the question; it isn't RedBot's filler.
+    if (/^\s*(?:typical|typique|e\.?\s?g\.?|ex\.|for example|par exemple|such as|like|say|approx)/i.test(inner))
+      return whole;
     const words = fold(normalized(inner))
       .split(' ')
       .filter((word) => word.length >= 3 && !BRACKET_FILLER.has(word));
@@ -483,6 +721,7 @@ export function applyQuestionRules(
   const flatContext = ` ${normalized(evidenceLines(business.contextMd, true).join(' '))} `;
   const foldedContext = fold(flatContext);
   const names = business.displayName ? [business.displayName] : [];
+  const generic = genericWords(business.contextMd, business.displayName);
   const kept: string[] = [];
   const dropped: DroppedQuestion[] = [];
   const seen = new Set<string>();
@@ -500,7 +739,8 @@ export function applyQuestionRules(
       const language = detectVisitorLanguage(question, { names });
       if (language !== null && language !== business.language) rule = 'wrong_language';
     }
-    if (!rule && PRICE_ASK.test(lower) && !FREE_QUOTE_ASK.test(lower)) rule = 'price_question';
+    if (!rule && PRICE_ASK.test(withoutFreeQuote(lower)) && !priceAnswered(lower, business.contextMd, generic))
+      rule = 'price_question';
     if (!rule) {
       const topics = TOPICS.filter((topic) => topic.asks.test(lower) && !topic.unless?.test(lower));
       const onPage = flatContext.includes(` ${key} `);
