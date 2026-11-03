@@ -75,6 +75,26 @@ describe('question cleanup', () => {
     );
   });
 
+  it('keeps the text after a comment that spans lines, and never swallows past a blank line', () => {
+    expect(cleanContextText('## Services\n<!-- scraped from\n /services --> Drywall and taping.')).toBe(
+      '## Services\nDrywall and taping.',
+    );
+    expect(cleanContextText('- <!-- https://example.ca/a\n\n## Services\n- Drywall. <!-- x --> Taping.')).toBe(
+      '## Services\n- Drywall. Taping.',
+    );
+  });
+
+  it('placeholder phones: only real placeholder formats, and the label and joiners go with them', () => {
+    expect(cleanContextText('- Phone: +1 (613) 000-0000 · Email: on the form')).toBe('- Email: on the form');
+    expect(cleanContextText('- Call 555-000-0000 or email us.')).toBe('- Email us.');
+    expect(cleanContextText('- call us at 000-0000 or write to us.')).toBe('- write to us.');
+    expect(cleanContextText('- Tel: 555 000 0000\n- Hours: 9 to 5')).toBe('- Hours: 9 to 5');
+    expect(cleanContextText('- Licence ID 1230000000; RBQ 5555-0000-00')).toBe(
+      '- Licence ID 1230000000; RBQ 5555-0000-00',
+    );
+    expect(cleanContextText('- Mobile\n- Phone: (437) 477-5185')).toBe('- Mobile\n- Phone: (437) 477-5185');
+  });
+
   it('drops a bracket inside a bracket', () => {
     expect(cleanQuestionText('Desservez-vous mon secteur (Longueuil (Montreal area) et environs)?', 'fr')).toBe(
       'Desservez-vous mon secteur (Longueuil et environs)?',
@@ -107,6 +127,7 @@ describe('rule: not a visitor question', () => {
     'Our Services',
     'Need Waterproofing?',
     'Need help?',
+    'Need help with your move?',
     'Need a free quote for your project?',
     'Need roofing work done right?',
   ])('drops the heading or call to action %j', (question) => {
@@ -131,6 +152,8 @@ describe('rule: not a visitor question', () => {
     'What Is the Pre-Construction Process?',
     'Can Turnbull Masonry handle commercial projects?',
     'Need a permit for a fence?',
+    'Need permits?',
+    'Need help choosing a paint colour?',
     'Need to replace just one window, or the whole frame?',
   ])('keeps the visitor question %j', (question) => {
     expect(rulesOf([question], ctx).kept).toEqual([question]);
@@ -288,6 +311,107 @@ describe('rule: a generic question needs an answer in the context', () => {
     const q = 'What are your hours, and can I reach you on weekends?';
     expect(rulesOf([q], "## FAQ\n- We ask for at least 24 hours' notice for cancellations.").kept).toEqual([]);
     expect(rulesOf([q], '## Hours\n- Open 24 hours a day, 7 days a week.').kept).toEqual([q]);
+    expect(rulesOf(['What are your hours?'], '## Hours\n- Available 24 hours, 7 days a week.').kept).toHaveLength(1);
+    const weekends = 'Are you open on weekends?';
+    expect(rulesOf([weekends], '## Services\n- 24-hour emergency service.').kept).toEqual([weekends]);
+    expect(rulesOf([weekends], '## Services\n- We work 7 days a week.').kept).toEqual([weekends]);
+    expect(rulesOf([weekends], "## FAQ\n- Please give 24 hours' notice.").kept).toEqual([]);
+    expect(
+      rulesOf(['Êtes-vous ouverts la fin de semaine?'], '## Heures\n- Service 7 jours sur 7.', 'fr').kept,
+    ).toHaveLength(1);
+  });
+
+  it('price and cost questions are never presets, even with a $ amount on the page', () => {
+    const ctx =
+      '## Pricing and quote process\n- Drywall repair from $150. Free estimates.\n## FAQ\n- **Q:** What are your rates?';
+    const result = rulesOf(
+      [
+        'Roughly what does a typical drywall job cost?',
+        'What are your rates?',
+        'How much do you charge for a small repair?',
+        "Quel est le prix approximatif d'un projet typique?",
+        'How soon can you come out for a quote, and is it free?',
+        'How much notice do you need?',
+        'Who is in charge of the permits?',
+        'Do you offer first-rate finishes?',
+      ],
+      ctx,
+    );
+    expect(result.dropped.filter((d) => d.rule === 'price_question').map((d) => d.question)).toEqual([
+      'Roughly what does a typical drywall job cost?',
+      'What are your rates?',
+      'How much do you charge for a small repair?',
+    ]);
+    expect(
+      rulesOf(['Combien coûte une soumission typique?'], ctx.replace('Free', 'Gratuit'), 'fr').dropped[0]?.rule,
+    ).toBe('price_question');
+    expect(result.kept).toEqual([
+      'How soon can you come out for a quote, and is it free?',
+      'How much notice do you need?',
+      'Who is in charge of the permits?',
+      'Do you offer first-rate finishes?',
+    ]);
+  });
+
+  it('"prepare" is the customer\'s part only', () => {
+    const ctx = '## Services\n- Catering, tax returns, painting.';
+    for (const q of [
+      'Do you prepare food on-site?',
+      'Do you prepare tax returns?',
+      'Do you prepare surfaces before painting?',
+    ])
+      expect(rulesOf([q], ctx).kept).toEqual([q]);
+    for (const [q, lang] of [
+      ['How should I prepare for the move?', 'en'],
+      ['How do I prepare my lawn?', 'en'],
+      ['What should I do before you arrive?', 'en'],
+      ['Do I need to prepare my vehicle before you arrive?', 'en'],
+      ['Que dois-je préparer avant votre arrivée?', 'fr'],
+      ['Comment me préparer pour la séance?', 'fr'],
+      ['Que dois-je faire avant le ramonage?', 'fr'],
+    ] as const)
+      expect(rulesOf([q], ctx, lang).dropped).toEqual([{ question: q, rule: 'no_answer_in_context' }]);
+  });
+
+  it('deposit evidence needs payment or booking words, not "no", "take", "date" or "order"', () => {
+    const q = 'How do I book, and what deposit do you need?';
+    expect(
+      rulesOf([q], '## Services\n- We remove soot deposits, no mess, and take care of your date and order.').kept,
+    ).toEqual([]);
+    expect(rulesOf([q], '## Booking\n- A non-refundable deposit is required to book.').kept).toEqual([q]);
+    expect(rulesOf([q], '## FAQ\n- We Do Not Take Deposits').kept).toEqual([q]);
+    expect(rulesOf([q], '## About\n- Rates up front. No deposits, ever.').kept).toEqual([q]);
+  });
+
+  it('a free estimate question asking how long goes to the duration check; gluten-free is not a free quote', () => {
+    const q = 'How long does a free estimate take?';
+    expect(rulesOf([q], '## Pricing and quote process\n- Free estimates.').kept).toEqual([]);
+    expect(rulesOf([q], '## Pricing and quote process\n- A free estimate takes about 1 hour.').kept).toEqual([q]);
+    expect(
+      rulesOf(['Do you offer free quotes?'], '## Services\n- Gluten-free menus and quotes for large events.').kept,
+    ).toEqual([]);
+    expect(rulesOf(['Do you offer free quotes?'], '## Contact\n- Free quotes, no obligation.').kept).toHaveLength(1);
+  });
+
+  it("a bracket stays when it's the question's object, and plurals match singulars", () => {
+    expect(rulesOf(['Do you serve (Kingston)?'], '## Services\n- Drywall.').dropped[0]?.question).toBe(
+      'Do you serve (Kingston)?',
+    );
+    expect(
+      rulesOf(['Do you install sliding doors (windows/doors)?'], '## Services\n- New window and door installs.').kept,
+    ).toEqual(['Do you install sliding doors (windows/doors)?']);
+  });
+
+  it('header lines are not evidence, with a list marker or bold too', () => {
+    const q = 'Do you serve my area (Ottawa and nearby)?';
+    for (const header of ['- City: Ottawa, ON', '**City:** Ottawa, ON', '- **Niche:** Ottawa movers'])
+      expect(rulesOf([q], `${header}\n## Service areas\n- We serve the region.`).kept).toEqual([
+        'Do you serve my area?',
+      ]);
+  });
+
+  it("a bare 24 hours' notice does not answer the hours question", () => {
+    expect(rulesOf(['What are your hours?'], "- 24 hours' notice please.").kept).toEqual([]);
   });
 
   it("a bracket naming nothing on the site goes (RedBot's English niche in a French question)", () => {
@@ -301,17 +425,11 @@ describe('rule: a generic question needs an answer in the context', () => {
     ].join('\n');
     expect(
       rulesOf(
-        [
-          "Quel est le prix approximatif d'un projet typique (insulation)?",
-          'Desservez-vous mon secteur (Longueuil et environs)?',
-        ],
+        ['Quels travaux faites-vous (insulation)?', 'Desservez-vous mon secteur (Longueuil et environs)?'],
         ctx,
         'fr',
       ).kept,
-    ).toEqual([
-      "Quel est le prix approximatif d'un projet typique?",
-      'Desservez-vous mon secteur (Longueuil et environs)?',
-    ]);
+    ).toEqual(['Quels travaux faites-vous?', 'Desservez-vous mon secteur (Longueuil et environs)?']);
     // Accents don't matter, and the header line is not the site's text.
     expect(
       rulesOf(['Do you serve my area (Montreal and nearby)?'], '## Service areas\n- We serve Montréal.').kept,
