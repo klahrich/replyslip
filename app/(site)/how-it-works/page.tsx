@@ -232,7 +232,7 @@ const STEPS: StepData[] = [
         </li>
         <li>
           Local: you create a watcher key (<C>rsw_</C>) in the dashboard and run{' '}
-          <C>npx replyslip watch --url https://replyslip.com --key-file &lt;file&gt;</C>. It polls every 3 seconds and types the
+          <C>npx replyslip watch --key-file &lt;file&gt;</C>. It polls every 3 seconds and types the
           notice into the agent’s herdr pane or Orca pane.
         </li>
         <li>One watcher covers every local agent in the workspace. An agent key cannot poll.</li>
