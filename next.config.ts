@@ -15,8 +15,10 @@ const PASS_THROUGH = '(?!api(?:/|$)|mcp(?:/|$)|_next/|i(?:/|$)|c(?:/|$)|sign-in(
 const REPLYSLIP_MARKETING_PAGES = ['/how-it-works', '/compare/agent-relay', '/compare/harnessrouter', '/sharing'];
 // Of those, the two whose content now lives on valetto.tech/agent-to-agent go there instead of the homepage.
 const AGENT_TO_AGENT_PAGES = new Set(['/how-it-works', '/sharing']);
-// replyslip.com also sends its home and legal pages; valetto.tech serves its own /, /privacy and /terms.
-const REPLYSLIP_ONLY_PAGES = ['/', '/privacy', '/terms'];
+// replyslip.com also sends its home page to the valetto.tech homepage; valetto.tech serves its own /.
+const REPLYSLIP_ONLY_PAGES = ['/'];
+// replyslip.com's legal pages go to the matching valetto.tech page (served there by the rewrites below).
+const REPLYSLIP_LEGAL_PAGES = ['/privacy', '/terms'];
 const toValetto = (source: string, has: typeof VALETTO_HOST) => ({
   source,
   has,
@@ -51,6 +53,12 @@ const nextConfig: NextConfig = {
       ...[...REPLYSLIP_ONLY_PAGES, ...REPLYSLIP_MARKETING_PAGES].map((source) => toValetto(source, REPLYSLIP_HOST)),
       // The connect guide (app/(site)/connect) is served canonically on valetto.tech; valetto.tech/connect itself is not redirected.
       { source: '/connect', has: REPLYSLIP_HOST, destination: 'https://valetto.tech/connect', statusCode: 301 },
+      ...REPLYSLIP_LEGAL_PAGES.map((source) => ({
+        source,
+        has: REPLYSLIP_HOST,
+        destination: `https://valetto.tech${source}`,
+        statusCode: 301 as const,
+      })),
     ];
   },
   async rewrites() {
