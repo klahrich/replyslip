@@ -998,4 +998,32 @@ describe('import', () => {
     // shots/ wins over context/<slug>.png, and the index's language wins over the file.
     expect(gamma).toMatchObject({ language: 'fr', desktopShotPath: join(shots, 'gamma-desktop.png') });
   });
+
+  it('a screenshot index.json sets to null stays missing, even with an old file by that name, and the import refuses it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'site-redbot-null-'));
+    const context = join(root, 'context');
+    const shots = join(root, 'shots');
+    mkdirSync(context);
+    mkdirSync(shots);
+    const md = '# Delta Repairs\nSource: https://delta.example/\n\n## Suggested questions\n1. Do you work weekends?\n\n## About\nText.\n';
+    writeFileSync(join(context, 'delta.md'), md);
+    writeFileSync(
+      join(context, 'index.json'),
+      JSON.stringify([{ slug: 'delta', name: 'Delta Repairs', site: 'https://delta.example/', language: 'en', screenshots: { desktop_1440: null, mobile_390: 'shots/delta-mobile.png' } }]),
+    );
+    // A stale desktop shot from an earlier run sits under the default name.
+    copyFileSync(join(FIXTURE_DIR, 'shots', 'maple-ridge-landscaping-desktop.png'), join(shots, 'delta-desktop.png'));
+    copyFileSync(join(FIXTURE_DIR, 'shots', 'maple-ridge-landscaping-mobile.png'), join(shots, 'delta-mobile.png'));
+
+    const [delta] = loadRedbotBusinesses(context);
+    expect(delta).toMatchObject({ desktopShotPath: null, mobileShotPath: join(shots, 'delta-mobile.png'), missingShots: ['desktop'] });
+
+    const db = getDb();
+    await db.delete(siteBusinesses).where(eq(siteBusinesses.slug, 'delta'));
+    const linkFile = join(root, 'links.txt');
+    await expect(importRedbotBusinesses(db, [delta!], { linkFile, baseUrl: 'https://valetto.test', log: () => {} })).rejects.toThrow(
+      /delta \(desktop\)/,
+    );
+    expect(await db.select().from(siteBusinesses).where(eq(siteBusinesses.slug, 'delta'))).toEqual([]);
+  });
 });
