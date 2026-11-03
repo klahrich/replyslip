@@ -970,7 +970,7 @@ describe('import', () => {
     mkdirSync(context);
     mkdirSync(shots);
     const md = (title: string, lang: string, q: string) =>
-      `# ${title}\nSource: https://${title.toLowerCase().replace(/[^a-z]+/g, '-')}.example/\nScraped: 2026-10-30\nLanguage: ${lang}\n\n## Suggested questions\n1. ${q}\n\n## About\nText.\n`;
+      `# ${title}\nSource: https://${title.toLowerCase().replace(/[^a-z]+/g, '-')}.example/\nScraped: 2026-10-30\nLanguage: ${lang}\n\n## Suggested questions\n1. ${q}\n\n## About\nOpen Monday to Saturday, 8 am to 5 pm.\n`;
     writeFileSync(join(context, 'alpha.md'), md('Alpha Services', 'en', 'What are your hours?'));
     writeFileSync(join(context, 'beta.md'), md('Beta Atelier', 'fr', 'Êtes-vous ouverts le samedi?'));
     writeFileSync(join(context, 'gamma.md'), md('Gamma Company', 'en', 'Do you offer gift cards?'));

@@ -7,6 +7,7 @@ import { siteBusinesses, siteDemoLinks } from '@/db/schema';
 import { parseContextMarkdown } from './context';
 import { createDemoLink } from './demo';
 import { guessPageLanguage } from './keywords';
+import { applyQuestionRules, cleanContextText, type DroppedQuestion } from './question-rules';
 
 /** One business as RedBot hands it over. */
 export type RedbotBusiness = {
@@ -16,6 +17,8 @@ export type RedbotBusiness = {
   scrapedAt: Date | null;
   contextMd: string;
   suggestedQuestions: string[];
+  /** RedBot's questions the import rules dropped (lib/site-assistant/question-rules.ts), with the rule that did. */
+  droppedQuestions: DroppedQuestion[];
   language: 'en' | 'fr';
   /** `#rrggbb` from index.json (`tile_color`, `brand_color` or `color`); null lets the server pick one. */
   tileColor: string | null;
@@ -118,15 +121,24 @@ export function loadRedbotBusinesses(contextDir: string, shotsDir: string = join
     const metaQuestions = Array.isArray(meta.suggested_questions)
       ? (meta.suggested_questions as unknown[]).filter((q): q is string => typeof q === 'string' && q.trim() !== '')
       : [];
+    const contextMd = cleanContextText(parsed.contextMd);
+    const displayName = (pick(meta, ['display_name', 'name', 'business_name', 'business']) ?? parsed.title ?? slug).slice(0, 120);
+    const questions = applyQuestionRules(metaQuestions.length > 0 ? metaQuestions : parsed.suggestedQuestions, {
+      contextMd,
+      language,
+      displayName,
+    });
     const desktopMissing = markedMissing(meta, ['desktop_1440', 'desktop']);
     const mobileMissing = markedMissing(meta, ['mobile_390', 'mobile']);
     return {
       slug,
-      displayName: (pick(meta, ['display_name', 'name', 'business_name', 'business']) ?? parsed.title ?? slug).slice(0, 120),
+      displayName,
       sourceUrl,
       scrapedAt,
-      contextMd: parsed.contextMd,
-      suggestedQuestions: (metaQuestions.length > 0 ? metaQuestions.map((q) => q.trim()) : parsed.suggestedQuestions).slice(0, 10),
+      contextMd,
+      // Fewer than 3, or none, is stored as is: the page shows up to 3 chips and hides "You can ask" when there are none.
+      suggestedQuestions: questions.kept.slice(0, 10),
+      droppedQuestions: questions.dropped,
       tileColor: ((c) => (c && /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : null))(pick(meta, ['tile_color', 'brand_color', 'color'])),
       language,
       // A shot index.json sets to null is missing: never fall back to an older <slug>-<kind> file by name.
@@ -238,7 +250,8 @@ export async function importRedbotBusinesses(db: Db, businesses: RedbotBusiness[
 
     summary.push({ slug: entry.slug, created: !before, link: linked });
     options.log(
-      `${entry.slug}: ${before ? 'updated' : 'created'}; ${entry.language}; ${entry.suggestedQuestions.length} suggested question(s); ` +
+      `${entry.slug}: ${before ? 'updated' : 'created'}; ${entry.language}; ${entry.suggestedQuestions.length} suggested question(s)` +
+        `${entry.droppedQuestions.length ? ` (${entry.droppedQuestions.length} dropped: ${entry.droppedQuestions.map((d) => d.rule).join(', ')})` : ''}; ` +
         `shots ${desktop ? 'desktop' : '-'} ${mobile ? 'mobile' : '-'}; ` +
         `${linked ? 'new link written to the link file' : 'kept the live link'}`,
     );
