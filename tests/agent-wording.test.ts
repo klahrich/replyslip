@@ -32,8 +32,10 @@ describe('shared agent wording', () => {
     expect(rules).toMatch(/newest updated_at you've seen, minus about a minute/);
   });
 
-  it('a review can change the id with nothing new to list', () => {
-    expect(WAKE_RULES.join('\n')).toMatch(/If nothing new shows up, a request may be waiting for my review/);
+  it('a review or a message outside a task can change the id with nothing new to list', () => {
+    expect(WAKE_RULES.join('\n')).toContain(
+      'If nothing new shows up, a request may be waiting for my review, or someone may have sent a message outside a task. No tool can read those messages yet.',
+    );
   });
 
   it('test wakes are only in the dashboard text, never in the note for Muse', () => {
