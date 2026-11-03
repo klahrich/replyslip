@@ -34,12 +34,19 @@ export const OAUTH_CIMD_MAX_BYTES = 8 * 1024;
 export const OAUTH_DCR_UNUSED_TTL_MS = 24 * 60 * 60 * 1000;
 export const OAUTH_DCR_IDLE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 /**
+ * Valetto's OAuth client for Meta Muse. Muse's connector asks for a client ID instead of registering itself, so every
+ * Valetto user pastes this same public ID. It is not a secret, there is no client secret, and reconnecting reuses it.
+ * Lives in lib/ so lib/agent-docs.ts can use it; components/site/valetto/agentConstants.ts re-exports it.
+ */
+export const MUSE_CLIENT_ID = 'rsdc_PST7_7QNatbPNN6qJ--EegkSjh3MiCVtNf7zJa3Tqp8';
+
+/**
  * DCR clients that pruneOAuth never deletes, by public client_id (oauth_clients.client_id, not the row's uuid).
  * Client ids are public identifiers, not secrets.
  */
 export const OAUTH_PINNED_CLIENT_IDS: readonly string[] = [
   // Meta Muse, shared by all users, documented (lib/agent-docs.ts "Connecting Meta Muse").
-  'rsdc_PST7_7QNatbPNN6qJ--EegkSjh3MiCVtNf7zJa3Tqp8',
+  MUSE_CLIENT_ID,
 ];
 /** DCR abuse limits (§5.2): new clients per rolling 24 h across all IPs, body size, list and field lengths. */
 export const OAUTH_DCR_GLOBAL_DAILY = 500;
