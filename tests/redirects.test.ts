@@ -73,7 +73,7 @@ const oldPageTarget = (path: string) => (path === '/how-it-works' || path === '/
 describe('replyslip.com redirects', () => {
   for (const host of ['replyslip.com', 'www.replyslip.com']) {
     it(`${host}: site pages go to the valetto.tech homepage or /agent-to-agent`, async () => {
-      for (const path of ['/', '/privacy', '/terms']) expect(await redirectFor(host, path), path).toBe('https://valetto.tech/');
+      expect(await redirectFor(host, '/')).toBe('https://valetto.tech/');
       for (const path of OLD_SITE_PAGES) expect(await redirectFor(host, path), path).toBe(oldPageTarget(path));
     });
 
@@ -86,6 +86,24 @@ describe('replyslip.com redirects', () => {
     it(`${host}: /connect goes to valetto.tech/connect`, async () => {
       expect(await redirectFor(host, '/connect')).toBe('https://valetto.tech/connect');
       expect(await redirectFor(host, '/connect?ref=x')).toBe('https://valetto.tech/connect?ref=x');
+    });
+
+    it(`${host}: /privacy and /terms go to the matching valetto.tech page`, async () => {
+      expect(await redirectFor(host, '/privacy')).toBe('https://valetto.tech/privacy');
+      expect(await redirectFor(host, '/terms')).toBe('https://valetto.tech/terms');
+      expect(await redirectFor(host, '/privacy?ref=x')).toBe('https://valetto.tech/privacy?ref=x');
+      // Only the exact paths; nothing below them is redirected.
+      expect(await redirectFor(host, '/privacy/extra')).toBeNull();
+      expect(await redirectFor(host, '/terms/extra')).toBeNull();
+    });
+
+    it(`${host}: the /privacy and /terms redirects are 301s`, async () => {
+      const rules = (await nextConfig.redirects?.()) ?? [];
+      const legal = rules.filter((r) => ['/privacy', '/terms'].includes(r.source) && (r.has ?? []).some((h) => h.type === 'host' && new RegExp(`^${h.value}$`).test(host)));
+      expect(legal.map((r) => [r.source, r.destination, 'statusCode' in r ? r.statusCode : undefined])).toEqual([
+        ['/privacy', 'https://valetto.tech/privacy', 301],
+        ['/terms', 'https://valetto.tech/terms', 301],
+      ]);
     });
 
     it(`${host}: API, MCP, token, app and file paths pass through`, async () => {
