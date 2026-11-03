@@ -21,7 +21,18 @@ import {
 } from './sharing';
 import { agentGuestsEnabled } from './constants';
 import { redeemInvite } from './invites';
-import { answerTask, askTask, completeTask, createTask, failTask, getTask, listTasks, sendMessage } from './tasks';
+import {
+  answerTask,
+  askTask,
+  completeTask,
+  createTask,
+  failTask,
+  getTask,
+  listTasks,
+  parseTaskCursor,
+  parseUpdatedSince,
+  sendMessage,
+} from './tasks';
 import { OAUTH_SCOPE, RSK_SCOPES, SCOPE_RESPOND, oauthEnabled, oauthIssuer, oauthResource } from './oauth/config';
 import { PROTECTED_RESOURCE_METADATA_PATH } from './oauth/metadata';
 import { INSUFFICIENT_SCOPE_MESSAGE, hasScope, toolAllowed, type ToolName } from './oauth/scopes';
@@ -324,11 +335,13 @@ export const mcpHandler = createMcpHandler(
       async (args, ctx) => {
         try {
           requireToolScope(ctx as ToolCtx, 'list_tasks');
-          const tasks = await listTasks(principalFrom(ctx as ToolCtx), {
+          const page = await listTasks(principalFrom(ctx as ToolCtx), {
             status: args.status,
             role: args.role,
+            updatedSince: parseUpdatedSince(args.updated_since),
+            cursor: parseTaskCursor(args.cursor),
           });
-          return ok({ tasks });
+          return ok(page);
         } catch (err) {
           return fail(err);
         }

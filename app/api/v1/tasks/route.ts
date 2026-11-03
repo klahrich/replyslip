@@ -1,6 +1,6 @@
 import { requireUser } from '@/lib/auth';
 import { handle, json } from '@/lib/http';
-import { listWorkspaceTasks } from '@/lib/tasks';
+import { listWorkspaceTasks, parseTaskCursor, parseUpdatedSince } from '@/lib/tasks';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,11 @@ export function GET(req: Request) {
     }
     const limitRaw = Number(url.searchParams.get('limit') ?? '50');
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 100) : 50;
-    const tasks = await listWorkspaceTasks(user.workspace.id, status, limit);
-    return json({ tasks });
+    const page = {
+      updatedSince: parseUpdatedSince(url.searchParams.get('updated_since')),
+      cursor: parseTaskCursor(url.searchParams.get('cursor')),
+    };
+    const { tasks, next_cursor } = await listWorkspaceTasks(user.workspace.id, status, limit, page);
+    return json({ tasks, next_cursor });
   });
 }
