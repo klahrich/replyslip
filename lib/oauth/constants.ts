@@ -33,6 +33,14 @@ export const OAUTH_CIMD_TIMEOUT_MS = 5_000;
 export const OAUTH_CIMD_MAX_BYTES = 8 * 1024;
 export const OAUTH_DCR_UNUSED_TTL_MS = 24 * 60 * 60 * 1000;
 export const OAUTH_DCR_IDLE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+/**
+ * DCR clients that pruneOAuth never deletes, by public client_id (oauth_clients.client_id, not the row's uuid).
+ * Client ids are public identifiers, not secrets.
+ */
+export const OAUTH_PINNED_CLIENT_IDS: readonly string[] = [
+  // Meta Muse, shared by all users, documented (lib/agent-docs.ts "Connecting Meta Muse").
+  'rsdc_PST7_7QNatbPNN6qJ--EegkSjh3MiCVtNf7zJa3Tqp8',
+];
 /** DCR abuse limits (§5.2): new clients per rolling 24 h across all IPs, body size, list and field lengths. */
 export const OAUTH_DCR_GLOBAL_DAILY = 500;
 export const OAUTH_DCR_MAX_BODY_BYTES = 8 * 1024;

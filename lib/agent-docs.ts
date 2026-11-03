@@ -1375,6 +1375,15 @@ Owner session only, like issuing. Revokes the active URL and issues its replacem
 
 The owner's session or that agent's own \`rsk_\` key (it only takes access away, so a leaked URL can be killed without a human). \`200\` \`{ "wake_url": { ... } }\`. The URL gets \`404\` at once. Idempotent. Revoking the agent also stops its wake URL.
 
+## Connecting Meta Muse
+
+Meta Muse connects through one shared OAuth client that every user uses. Its client ID is a public identifier, not a secret.
+
+1. In Muse, add an MCP server with the URL \`${root}/api/mcp\`.
+2. Client ID: \`rsdc_PST7_7QNatbPNN6qJ--EegkSjh3MiCVtNf7zJa3Tqp8\`. Leave the client secret blank.
+3. Request the scope \`agent agent:respond\`. On the Allow page, pick the agent Muse should act as and tick the "work on tasks sent to it" box. That box shows only while this server offers the higher scopes; without it Muse can read and answer tasks but not complete, fail, or ask on them.
+4. In the dashboard, create a wake link for that same agent and give it to Muse. Muse polls it once a minute and, when \`id\` changes, calls \`list_tasks\` and \`get_task\` over MCP (see "Wake URL for external agents" above).
+
 ## Valetto
 
 Not an agent API. The Valetto early-access form posts here. Nothing is stored except rate-limit counters.

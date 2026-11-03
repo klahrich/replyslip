@@ -5,7 +5,7 @@ import { OPTIONS as registerOptions } from '@/app/api/oauth/register/route';
 import { getDb } from '@/db';
 import { oauthClients, rateEvents } from '@/db/schema';
 import { setCimdFetcherForTests } from '@/lib/oauth/cimd';
-import { OAUTH_DCR_GLOBAL_DAILY } from '@/lib/oauth/constants';
+import { OAUTH_DCR_GLOBAL_DAILY, OAUTH_PINNED_CLIENT_IDS } from '@/lib/oauth/constants';
 import { pruneOAuth } from '@/lib/oauth/grants';
 import { redirectKind } from '@/lib/oauth/redirect';
 import { dcrClientName, impersonatesKnownApp } from '@/lib/oauth/register';
@@ -440,6 +440,31 @@ describe('cleanup (criterion 5)', () => {
     const left = (await getDb().select().from(oauthClients)).map((row) => row.clientId);
     expect(left).toContain(used);
     expect(left).not.toContain(unused);
+  });
+
+  it('pruneOAuth never deletes a pinned client (Meta Muse) but still deletes other stale DCR clients', async () => {
+    const pinned = OAUTH_PINNED_CLIENT_IDS[0]!;
+    expect(pinned).toBe('rsdc_PST7_7QNatbPNN6qJ--EegkSjh3MiCVtNf7zJa3Tqp8');
+    // A DCR row carrying the pinned public client_id (made-up redirect), never used.
+    const registeredId = await registered();
+    await getDb().update(oauthClients).set({ clientId: pinned }).where(eq(oauthClients.clientId, registeredId));
+    const unused = await registered();
+    const idle = await registered();
+    const owner = await signIn();
+    await connect(owner, { mode: 'new', name: 'acme' }, { client_id: idle, redirect_uri: WEB });
+
+    // Past the 24 h unused window: the other unused client goes, the pinned one stays.
+    now += 25 * 60 * 60 * 1000;
+    expect((await pruneOAuth()).clients).toBe(1);
+    let left = (await getDb().select().from(oauthClients)).map((row) => row.clientId);
+    expect(left).toContain(pinned);
+    expect(left).not.toContain(unused);
+
+    // Past the 90-day idle window (the used client's grant has expired by then): it goes, the pinned one stays.
+    now += 400 * 24 * 60 * 60 * 1000;
+    expect((await pruneOAuth()).clients).toBe(1);
+    left = (await getDb().select().from(oauthClients)).map((row) => row.clientId);
+    expect(left).toEqual([pinned]);
   });
 });
 
