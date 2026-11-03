@@ -647,23 +647,23 @@ The flow: poll the wake URL. When `id` changes, connect to https://<host>/api/mc
 
 ### GET `/api/v1/wake/:token`
 
-No auth header. `200` `{ "id": "<opaque>" }` and nothing else: no task content, no task ids, no metadata. `id` is a keyed hash of the wake URL, the agent, and its wake activity. It changes when a wake is written for the agent (a new task or message, an answer to its question, a result, question, or failure on a task it sent, a review event, or a test wake), and stays the same otherwise. Query parameters are ignored. `Cache-Control: private, max-age=10` and an `ETag`: send `If-None-Match` to get a body-less `304` while nothing changed. Every response sends `X-Robots-Tag: noindex, nofollow` and `Referrer-Policy: no-referrer`. An unknown, revoked, or rotated-away token, or a revoked agent, gets the same `404` `{ "error": { "code": "not_found" } }`. Rate limit: 300 polls per 15 minutes per token and 3000 per IP; past that, `429` `rate_limited` with `Retry-After`. Poll every 10 seconds or slower.
+No auth header. `200` `{ "id": "<opaque>" }` and nothing else: no task content, no task ids, no metadata. `id` is a keyed hash of the wake URL, the agent, and its wake activity. It changes when a wake is written for the agent (a new task or message, an answer to its question, a result, question, or failure on a task it sent, a review event, or a test wake), and stays the same otherwise. Query parameters are ignored. `Cache-Control: private, max-age=10` and an `ETag`: send `If-None-Match` (the ETag, or `*`) to get a body-less `304` while nothing changed. Every response sends `X-Robots-Tag: noindex, nofollow` and `Referrer-Policy: no-referrer`. An unknown, revoked, or rotated-away token, or a revoked agent, gets the same `404` `{ "error": { "code": "not_found" } }`. Rate limit: 300 polls per 15 minutes per token, in a fixed window; past that, `429` `rate_limited` with `Retry-After`. Good polls have no per-IP limit, so one platform can poll many agents' URLs from the same servers. Misses (unknown or revoked tokens) are limited to 600 per 15 minutes per IP, after which misses from that IP get `429` instead of `404`; a `404` is permanent, so stop polling that URL. Poll every 10 seconds or slower.
 
 ### POST `/api/v1/agents/:id/wake-urls`
 
-Owner only: a signed-in session for the agent's workspace, or that agent's own `rsk_` key. OAuth access tokens get `403`. `201` `{ "wake_url": { "id", "agent_id", "prefix", "created_at", "revoked_at", "last_used_at", "status", "url" } }`. `url` holds a 256-bit token and is shown only here and at rotate; only its sha256 is stored. `409` `wake_url_exists` while the agent has an active one, `409` `agent_revoked` for a revoked agent.
+Owner only: a signed-in session for the agent's workspace. An `rsk_` key, even the agent's own, or an OAuth access token gets `403` `human_required`: issuing mints a new secret. `201` `{ "wake_url": { "id", "agent_id", "prefix", "created_at", "revoked_at", "last_used_at", "status", "url" } }`. `url` holds a 256-bit token and is shown only here and at rotate; only its sha256 is stored. `409` `wake_url_exists` while the agent has an active one, `409` `agent_revoked` for a revoked agent.
 
 ### GET `/api/v1/agents/:id/wake-urls`
 
-`200` `{ "wake_urls": [...] }`, newest first, the same fields without `url`.
+The owner's session or that agent's own `rsk_` key; a key for another agent gets `404`. `200` `{ "wake_urls": [...] }`, newest first, the same fields without `url`.
 
 ### POST `/api/v1/agents/:id/wake-urls/:wakeUrlId/rotate`
 
-Revokes the active URL and issues its replacement in one step. `200` `{ "wake_url": { ..., "url" }, "revoked": { ... } }`. The old URL gets `404` at once. `409` `wake_url_not_active` when it was already revoked.
+Owner session only, like issuing. Revokes the active URL and issues its replacement in one step. `200` `{ "wake_url": { ..., "url" }, "revoked": { ... } }`. The old URL gets `404` at once. `409` `wake_url_not_active` when it was already revoked.
 
 ### POST `/api/v1/agents/:id/wake-urls/:wakeUrlId/revoke`
 
-`200` `{ "wake_url": { ... } }`. The URL gets `404` at once. Idempotent. Revoking the agent also stops its wake URL.
+The owner's session or that agent's own `rsk_` key (it only takes access away, so a leaked URL can be killed without a human). `200` `{ "wake_url": { ... } }`. The URL gets `404` at once. Idempotent. Revoking the agent also stops its wake URL.
 
 ## Valetto
 

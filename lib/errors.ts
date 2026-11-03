@@ -30,3 +30,8 @@ export function isUniqueViolation(err: unknown): boolean {
 export function isForeignKeyViolation(err: unknown): boolean {
   return errorCode(err, '23503');
 }
+
+/** 42P01: the query names a table that does not exist (for example before its migration is applied). */
+export function isUndefinedTable(err: unknown): boolean {
+  return errorCode(err, '42P01');
+}

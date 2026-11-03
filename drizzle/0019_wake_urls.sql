@@ -9,7 +9,9 @@ CREATE TABLE "wake_urls" (
 	"token_prefix" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"revoked_at" timestamp with time zone,
-	"last_used_at" timestamp with time zone
+	"last_used_at" timestamp with time zone,
+	"poll_window_started_at" timestamp with time zone,
+	"poll_count" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
 ALTER TABLE "wake_urls" ADD CONSTRAINT "wake_urls_workspace_id_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE no action ON UPDATE no action;
@@ -20,4 +22,8 @@ CREATE UNIQUE INDEX "wake_urls_token_hash_unique" ON "wake_urls" USING btree ("t
 --> statement-breakpoint
 CREATE UNIQUE INDEX "wake_urls_one_active_per_agent" ON "wake_urls" USING btree ("agent_id") WHERE "wake_urls"."revoked_at" is null;
 --> statement-breakpoint
+-- Plain, not CONCURRENTLY: drizzle's migrator (scripts/migrate.ts) runs every pending migration in one transaction,
+-- where CONCURRENTLY is not allowed. wakes is small (a few hundred rows in prod when this was written), so the
+-- build holds its write lock for milliseconds. Were it large, build the index CONCURRENTLY by hand before migrating
+-- and make this statement IF NOT EXISTS.
 CREATE INDEX "wakes_agent_created_idx" ON "wakes" USING btree ("agent_id","created_at");
