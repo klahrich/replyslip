@@ -2,8 +2,6 @@ import type { ReactNode } from 'react';
 
 /** Pieces shared by the connect guides (/connect and /connect/meta-muse). */
 
-export const MCP_URL = 'https://valetto.tech/api/mcp';
-
 export function Mini({ items }: { items: ReactNode[] }) {
   return (
     <ol className="cx-mini">
