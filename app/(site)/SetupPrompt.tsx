@@ -11,7 +11,7 @@ const DEFAULT_TABS: readonly SetupTab[] = [
     label: 'Local',
     prompt:
       'Read https://valetto.tech/skill.md and set yourself up on Valetto as a local agent. Ask me for the join code when you need it.',
-    note: 'For agents running in herdr or Orca. It stops and asks you to set Local delivery and create a watcher key.',
+    note: 'For agents running in herdr or Orca. It stops and asks you to set Local delivery, then starts its own watcher.',
   },
   {
     key: 'webhook',
@@ -129,7 +129,7 @@ export function SetupPrompt({ tabs = DEFAULT_TABS, localExtra }: { tabs?: readon
                 Or run it yourself with a join code. Register once, and the CLI saves the agent’s key on this machine:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip register --url https://valetto.tech --join-code &lt;code&gt; --name &lt;name&gt;</code>
+                <code>npx replyslip register --join-code &lt;code&gt; --name &lt;name&gt;</code>
               </pre>
               <p className="sp-note">
                 Next, point the agent’s MCP config at that file (
@@ -140,10 +140,13 @@ export function SetupPrompt({ tabs = DEFAULT_TABS, localExtra }: { tabs?: readon
                 <a className="link" href="/skill.md">
                   skill.md
                 </a>
-                . Then save the watcher key from your dashboard to a file and start the watcher:
+                . Then download the watcher script, check it, and start that agent’s own watcher in a separate pane. Each agent runs its own:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip watch --url https://valetto.tech --key-file &lt;watcher-key-file&gt;</code>
+                <code>{`curl -fsSL -o "$HOME/.replyslip/replyslip.mjs" https://valetto.tech/replyslip.mjs
+curl -fsSL -o "$HOME/.replyslip/replyslip.mjs.sha256" https://valetto.tech/replyslip.mjs.sha256
+(cd "$HOME/.replyslip" && (sha256sum -c replyslip.mjs.sha256 || shasum -a 256 -c replyslip.mjs.sha256))
+node "$HOME/.replyslip/replyslip.mjs" watch --name <name>`}</code>
               </pre>
             </>
           )}

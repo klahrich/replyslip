@@ -3,7 +3,15 @@
 import { GUEST_WAKE_NOTICE, REVIEW_NEEDED_NOTICE, WAKE_NOTICE } from '../../../lib/wake-notice.ts';
 import { defaultRegistry, type DriverRegistry } from './drivers/registry.ts';
 import type { CommandRunner, DriverCheck, NudgeDriver } from './drivers/types.ts';
-import { acquireWatcherLock, bindWatcherLockLifecycle, lockLostMessage, type WatcherLockHold } from './watcher-lock.ts';
+import {
+  acquireAgentWatcherLock,
+  acquireWatcherLock,
+  bindWatcherLockLifecycle,
+  findLegacyWatcherLock,
+  legacyWatcherRunningMessage,
+  lockLostMessage,
+  type WatcherLockHold,
+} from './watcher-lock.ts';
 
 export type DueWake = {
   id: string;
@@ -125,9 +133,21 @@ export const REQUEST_TIMEOUT_MS = 30_000;
 
 /** 401 or 403 from the relay: the key is invalid or revoked. The watcher stops. */
 export class WatcherAuthError extends Error {
-  constructor(origin: string) {
-    super(`Watcher key rejected by ${origin}. Check the key in your dashboard.`);
+  constructor(origin: string, agentName?: string) {
+    super(
+      agentName
+        ? `Agent key for ${agentName} rejected by ${origin}. If the agent was revoked, register it again with a new join code.`
+        : `Watcher key rejected by ${origin}. Check the key in your dashboard.`,
+    );
     this.name = 'WatcherAuthError';
+  }
+}
+
+/** Per-agent mode: the identifying poll did not name an agent, so the key is not an agent key or the server predates per-agent watchers. */
+export class AgentWatchUnsupportedError extends Error {
+  constructor(origin: string) {
+    super(`${origin} did not accept this as an agent key for a per-agent watcher. Update the server, or use a legacy watcher key with --key-file.`);
+    this.name = 'AgentWatchUnsupportedError';
   }
 }
 
@@ -178,6 +198,7 @@ async function relayRequest(
   url: string,
   origin: string,
   init: RequestInit,
+  agentName?: string,
 ): Promise<Response> {
   let response: Response;
   try {
@@ -187,7 +208,7 @@ async function relayRequest(
     throw new WatcherPollError(step, networkReason(err));
   }
   if (response.ok) return response;
-  if (response.status === 401 || response.status === 403) throw new WatcherAuthError(origin);
+  if (response.status === 401 || response.status === 403) throw new WatcherAuthError(origin, agentName);
   const text = await response.text().catch(() => '');
   throw new WatcherPollError(step, String(response.status), text.slice(0, 200) || undefined);
 }
@@ -201,7 +222,22 @@ export type WatchResult = {
   blockedPath?: string;
   /** Set when another process rewrote or removed this watcher's lock while it ran. */
   lockLost?: boolean;
+  /** Per-agent mode: another watcher for the same agent holds the lock. */
+  blockedAgent?: string;
+  /** Per-agent mode: the line to print when a legacy machine-wide watcher for this workspace runs on this machine. */
+  legacyBlocked?: string;
 };
+
+async function readPayload(response: Response): Promise<Record<string, unknown>> {
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch {
+    throw new WatcherPollError('poll', 'invalid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new WatcherPollError('poll', 'invalid JSON');
+  return parsed as Record<string, unknown>;
+}
 
 export async function watch(options: {
   url: string;
@@ -214,6 +250,12 @@ export async function watch(options: {
   log?: (message: string) => void;
   /** When set, the first poll's workspace_id scopes the lock before any nudge. */
   lock?: { home?: string; force?: boolean };
+  /**
+   * Per-agent mode: `key` is this agent's own key (rsk_). The server returns only this agent's wakes. Before the
+   * first leasing poll the watcher identifies itself with `{"lease": false}`, refuses to start beside a legacy
+   * machine-wide watcher for the workspace, and takes a lock for this agent alone.
+   */
+  agent?: { name: string };
   /** Test hook for the wait between polls and retries. */
   sleep?: (ms: number) => Promise<void>;
   /** Stops the loop after the current poll. */
@@ -233,25 +275,67 @@ export async function watch(options: {
   /** Until one poll succeeds, a 404 or a non-JSON body means a wrong --url, so the watcher exits. */
   let polledOk = false;
 
+  const agentName = options.agent?.name;
+  let agentWorkspace: string | null = null;
+
   try {
     while (!options.signal?.aborted) {
       let delay = options.intervalMs;
       try {
-        const response = await relayRequest(fetchImpl, 'poll', `${base}/api/v1/watcher/poll`, base, {
-          method: 'POST',
-          headers,
-        });
-        let parsed: unknown;
-        try {
-          parsed = await response.json();
-        } catch {
-          throw new WatcherPollError('poll', 'invalid JSON');
+        if (options.agent && options.lock && !hold) {
+          // Identify without leasing, so a refused start never holds a wake back.
+          const hello = await relayRequest(
+            fetchImpl,
+            'poll',
+            `${base}/api/v1/watcher/poll`,
+            base,
+            { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ lease: false }) },
+            agentName,
+          );
+          const who = await readPayload(hello);
+          polledOk = true;
+          const workspaceId = typeof who.workspace_id === 'string' ? who.workspace_id : '';
+          const agentId = typeof who.agent_id === 'string' ? who.agent_id : '';
+          if (!workspaceId || !agentId) throw new AgentWatchUnsupportedError(base);
+          const name = typeof who.agent_name === 'string' && who.agent_name ? who.agent_name : options.agent.name;
+          const acquired = acquireAgentWatcherLock({
+            home: options.lock.home,
+            force: options.lock.force,
+            origin: base,
+            workspaceId,
+            agentId,
+            agentName: name,
+          });
+          if (!acquired.ok) {
+            if (acquired.reason === 'legacy') return { legacyBlocked: legacyWatcherRunningMessage(acquired.pid, acquired.origin, acquired.path) };
+            return { blockedPid: acquired.pid, blockedOrigin: acquired.origin, blockedPath: acquired.path, blockedAgent: name };
+          }
+          hold = acquired.hold;
+          agentWorkspace = workspaceId;
+          unbind = bindWatcherLockLifecycle(hold.release);
+          log(`[replyslip] watching ${base} for agent ${name} (workspace ${workspaceId}); only this agent's wakes`);
+        } else if (options.agent && hold) {
+          const check = hold.stillHeld();
+          if (!check.held) {
+            log(lockLostMessage(hold.path, check.current));
+            return { lockLost: true };
+          }
+          // A legacy machine-wide watcher started after this one would wake this pane too. Stop before nudging.
+          const legacy = agentWorkspace ? findLegacyWatcherLock({ home: options.lock?.home, origin: base, workspaceId: agentWorkspace }) : null;
+          if (legacy) return { legacyBlocked: legacyWatcherRunningMessage(legacy.info.pid, legacy.info.origin, legacy.path) };
         }
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new WatcherPollError('poll', 'invalid JSON');
-        const payload = parsed as { wakes?: unknown; workspace_id?: unknown };
+        const response = await relayRequest(
+          fetchImpl,
+          'poll',
+          `${base}/api/v1/watcher/poll`,
+          base,
+          { method: 'POST', headers },
+          agentName,
+        );
+        const payload = (await readPayload(response)) as { wakes?: unknown; workspace_id?: unknown };
         polledOk = true;
         const workspaceId = typeof payload.workspace_id === 'string' && payload.workspace_id ? payload.workspace_id : null;
-        if (options.lock && !hold) {
+        if (!options.agent && options.lock && !hold) {
           const acquired = acquireWatcherLock({
             home: options.lock.home,
             force: options.lock.force,
@@ -259,11 +343,14 @@ export async function watch(options: {
             workspaceId,
             watcherKey: options.key,
           });
-          if (!acquired.ok) return { blockedPid: acquired.pid, blockedOrigin: acquired.origin, blockedPath: acquired.path };
+          if (!acquired.ok) {
+            const blockedAgent = acquired.reason === 'running' ? acquired.agentName : undefined;
+            return { blockedPid: acquired.pid, blockedOrigin: acquired.origin, blockedPath: acquired.path, ...(blockedAgent ? { blockedAgent } : {}) };
+          }
           hold = acquired.hold;
           unbind = bindWatcherLockLifecycle(hold.release);
           log(`[replyslip] watching ${base}${workspaceId ? ` (workspace ${workspaceId})` : ''}`);
-        } else if (hold) {
+        } else if (!options.agent && hold) {
           // Re-read the lock every poll. If another watcher replaced it (say with --force), stop before nudging.
           const check = hold.stillHeld();
           if (!check.held) {
@@ -273,11 +360,14 @@ export async function watch(options: {
         }
         const acked = await nudgeWakes({ wakes: Array.isArray(payload.wakes) ? (payload.wakes as DueWake[]) : [], registry, checks, warned, log });
         if (acked.length > 0) {
-          await relayRequest(fetchImpl, 'ack', `${base}/api/v1/watcher/ack`, base, {
-            method: 'POST',
-            headers: { ...headers, 'content-type': 'application/json' },
-            body: JSON.stringify({ wake_ids: acked }),
-          });
+          await relayRequest(
+            fetchImpl,
+            'ack',
+            `${base}/api/v1/watcher/ack`,
+            base,
+            { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ wake_ids: acked }) },
+            agentName,
+          );
         }
         if (failures > 0) log(`[replyslip] ${base} reachable again`);
         failures = 0;

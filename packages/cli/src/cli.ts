@@ -2,13 +2,15 @@
 
 import { readFile, stat } from 'node:fs/promises';
 import { AGENT_NAME_PATTERN } from '../../../lib/constants.ts';
-import { agentKeyPath, joinCodeEnvName, registerAgent, resolveJoinCode } from './register.ts';
+import { agentKeyPath, joinCodeEnvName, listRegisteredAgents, readAgentCredentials, registerAgent, resolveJoinCode } from './register.ts';
 import { watch, type WatchResult } from './watch.ts';
 import {
   WATCHER_NOT_RUNNING_MESSAGE,
+  agentAlreadyRunningMessage,
+  agentWatchersRunningMessage,
   alreadyRunningMessage,
   listLiveWatcherLocks,
-  runningStatusMessage,
+  statusLine,
 } from './watcher-lock.ts';
 
 /** Set by scripts/bundle-replyslip.mjs from packages/cli/package.json. Undefined under tsx. */
@@ -20,13 +22,21 @@ const HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for Valet
 
 Usage:
   replyslip register --join-code <code> --name <name> [--url <origin>] [--description <text>] [--force]
-  replyslip watch [--url <origin>] (--key-file <file> | --key <watcher-key>) [--interval <ms>] [--once] [--force]
+  replyslip watch [--name <name>] [--url <origin>] [--interval <ms>] [--once] [--force]
   replyslip watch --status
   replyslip key-path <name>
   replyslip --help | --version
 
---url defaults to REPLYSLIP_URL, then https://valetto.tech (register and watch).
-Environment: REPLYSLIP_URL, REPLYSLIP_WATCHER_KEY, REPLYSLIP_POLL_INTERVAL_MS, REPLYSLIP_ORCA_BIN.
+watch runs one agent's own watcher with the key register saved in ~/.replyslip/agents/<name>.json.
+It wakes only that agent's pane. --name is needed only when more than one agent is registered here.
+Each agent starts its own watcher. Delivery (herdr or Orca, and the pane) is set by the human on the dashboard.
+
+Legacy, machine-wide (one workspace watcher key for every local agent in the workspace):
+  replyslip watch (--key-file <file> | --key <watcher-key>) [--url <origin>] [--interval <ms>] [--once] [--force]
+A per-agent watcher refuses to start while a legacy watcher for the same workspace runs on this machine.
+
+--url defaults to REPLYSLIP_URL, then the server the agent registered with, then https://valetto.tech.
+Environment: REPLYSLIP_URL, REPLYSLIP_WATCHER_KEY (legacy), REPLYSLIP_POLL_INTERVAL_MS, REPLYSLIP_ORCA_BIN.
 Agent setup guide: https://valetto.tech/skill.md`;
 
 export type CliIo = {
@@ -149,13 +159,86 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
   if (argv.includes('--status')) {
     const live = listLiveWatcherLocks(io.home);
     if (live.length === 0) stdout(WATCHER_NOT_RUNNING_MESSAGE);
-    else for (const lock of live) stdout(runningStatusMessage(lock.pid, lock.origin, lock.workspaceId));
+    else for (const lock of live) stdout(statusLine(lock));
     return 0;
   }
 
-  const url = relayOrigin(argv, env);
   const keyFile = flag(argv, '--key-file');
-  let key = flag(argv, '--key') ?? env.REPLYSLIP_WATCHER_KEY;
+  const legacyKey = flag(argv, '--key') ?? env.REPLYSLIP_WATCHER_KEY;
+  const intervalMs = Number(flag(argv, '--interval') ?? env.REPLYSLIP_POLL_INTERVAL_MS ?? '3000');
+  if (!Number.isFinite(intervalMs) || intervalMs < 500) {
+    stderr('--interval must be at least 500 milliseconds.');
+    return 1;
+  }
+  if (keyFile || legacyKey) return watchLegacy(argv, env, io, stdout, stderr, intervalMs, keyFile, legacyKey);
+
+  // Per-agent watcher: this agent's own key from the file register wrote. It wakes only this agent's pane.
+  let name = flag(argv, '--name');
+  if (name !== undefined && !AGENT_NAME_PATTERN.test(name)) {
+    stderr('Usage: replyslip watch [--name <name>]');
+    return 1;
+  }
+  if (!name) {
+    const registered = await listRegisteredAgents(io.home);
+    if (registered.length === 0) {
+      stderr(
+        `No agent is registered on this machine (${agentKeyPath('<name>', io.home)}). Register first: replyslip register --join-code <code> --name <name>. A legacy watcher key still works with --key-file.`,
+      );
+      return 1;
+    }
+    if (registered.length > 1) {
+      stderr(`More than one agent is registered on this machine (${registered.join(', ')}). Pass --name <name>: each agent runs its own watcher.`);
+      return 1;
+    }
+    name = registered[0]!;
+  }
+  let credentials;
+  try {
+    credentials = await readAgentCredentials(name, { home: io.home, warn: stderr });
+  } catch (err) {
+    stderr(err instanceof Error ? err.message : 'Could not read the agent key file.');
+    return 1;
+  }
+  const url = flag(argv, '--url')?.trim() || env.REPLYSLIP_URL?.trim() || credentials.relayUrl || DEFAULT_RELAY_URL;
+  let result: WatchResult;
+  try {
+    result = await watch({
+      url,
+      key: credentials.apiKey,
+      intervalMs,
+      once: argv.includes('--once'),
+      fetchImpl: io.fetchImpl,
+      log: io.stderr,
+      lock: { home: io.home, force: argv.includes('--force') },
+      agent: { name },
+    });
+  } catch (err) {
+    stderr(err instanceof Error ? err.message : 'Watcher stopped.');
+    return 1;
+  }
+  if (result.legacyBlocked) {
+    stderr(result.legacyBlocked);
+    return 1;
+  }
+  if (result.blockedPid !== undefined) {
+    stdout(agentAlreadyRunningMessage(result.blockedAgent ?? name, result.blockedPid, result.blockedOrigin ?? url, result.blockedPath ?? ''));
+  }
+  return 0;
+}
+
+/** Legacy machine-wide watcher (`--key-file`, `--key`, or REPLYSLIP_WATCHER_KEY): unchanged behaviour. */
+async function watchLegacy(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  io: CliIo,
+  stdout: (line: string) => void,
+  stderr: (line: string) => void,
+  intervalMs: number,
+  keyFile: string | undefined,
+  legacyKey: string | undefined,
+): Promise<number> {
+  const url = relayOrigin(argv, env);
+  let key = legacyKey;
   if (keyFile) {
     try {
       key = await readWatcherKeyFile(keyFile, stderr);
@@ -164,13 +247,8 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
       return 1;
     }
   }
-  const intervalMs = Number(flag(argv, '--interval') ?? env.REPLYSLIP_POLL_INTERVAL_MS ?? '3000');
   if (!key) {
     stderr('Set one of --key-file, --key, or REPLYSLIP_WATCHER_KEY.');
-    return 1;
-  }
-  if (!Number.isFinite(intervalMs) || intervalMs < 500) {
-    stderr('--interval must be at least 500 milliseconds.');
     return 1;
   }
   let result: WatchResult;
@@ -188,7 +266,10 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     stderr(err instanceof Error ? err.message : 'Watcher stopped.');
     return 1;
   }
-  if (result.blockedPid !== undefined) stdout(alreadyRunningMessage(result.blockedPid, result.blockedOrigin ?? url, result.blockedPath ?? ''));
+  if (result.blockedPid !== undefined) {
+    if (result.blockedAgent) stdout(agentWatchersRunningMessage(result.blockedAgent, result.blockedPid, result.blockedPath ?? ''));
+    else stdout(alreadyRunningMessage(result.blockedPid, result.blockedOrigin ?? url, result.blockedPath ?? ''));
+  }
   return 0;
 }
 

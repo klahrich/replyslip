@@ -18,6 +18,9 @@ export type WatcherLockInfo = {
   alias?: boolean;
   /** Random per-acquire value. With pid and startedAt it says whether a file is this hold's. Older locks omit it. */
   token?: string;
+  /** Set on a per-agent watcher's lock (`replyslip watch` with the agent's own key). Absent on a legacy machine-wide lock. */
+  agentId?: string;
+  agentName?: string;
 };
 
 export type WatcherLockHold = {
@@ -31,7 +34,9 @@ export type WatcherLockHold = {
 
 export type AcquireWatcherLockResult =
   | { ok: true; hold: WatcherLockHold }
-  | { ok: false; reason: 'running'; pid: number; origin: string; path: string };
+  | { ok: false; reason: 'running'; pid: number; origin: string; path: string; agentName?: string }
+  /** Per-agent watcher only: a legacy machine-wide watcher (rsw_ key) for this workspace is live on this machine. */
+  | { ok: false; reason: 'legacy'; pid: number; origin: string; path: string };
 
 export type AcquireWatcherLockOptions = {
   home?: string;
@@ -98,6 +103,11 @@ export function watcherScopeId(workspaceId: string | null | undefined, watcherKe
   return workspaceId ? scopeHash(`workspace\n${workspaceId}`) : scopeHash(`key\n${keyHash(watcherKey)}`);
 }
 
+/** A per-agent watcher's lock scope: `sha256("agent" + newline + agent id)`. One watcher per agent per machine. */
+export function agentWatcherScopeId(agentId: string): string {
+  return scopeHash(`agent\n${agentId}`);
+}
+
 /** The pre-0.1.2 scope: `sha256(origin + newline + workspaceId)`, or origin plus the key hash. */
 export function legacyWatcherScopeId(origin: string, workspaceId: string | null | undefined, watcherKey: string): string {
   const normalized = normalizeOrigin(origin);
@@ -121,10 +131,36 @@ export function alreadyRunningMessage(pid: number, origin: string, lockPath: str
   return `A ReplySlip watcher is already running for this workspace (pid ${pid}, origin ${origin}, lock ${lockPath}); it delivers every local agent in this workspace. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
 }
 
+/** A second per-agent watcher for the same agent on this machine. */
+export function agentAlreadyRunningMessage(agentName: string, pid: number, origin: string, lockPath: string): string {
+  return `A ReplySlip watcher is already running for agent ${agentName} (pid ${pid}, origin ${origin}, lock ${lockPath}). If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+}
+
+/** A legacy `watch --key-file` started while per-agent watchers run for the same workspace. */
+export function agentWatchersRunningMessage(agentName: string, pid: number, lockPath: string): string {
+  return `A per-agent ReplySlip watcher is running for agent ${agentName} in this workspace (pid ${pid}, lock ${lockPath}). Each agent now runs its own watcher, so a machine-wide watcher beside it could deliver the same wake twice. Stop the per-agent watchers first, or keep them and do not start this one. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+}
+
+/** The per-agent watcher refuses to start, or stops, while a legacy machine-wide watcher for the workspace runs here. */
+export function legacyWatcherRunningMessage(pid: number, origin: string, lockPath: string): string {
+  return `A legacy machine-wide ReplySlip watcher (workspace watcher key) is running for this workspace on this machine (pid ${pid}, origin ${origin}, lock ${lockPath}). It already types into every local agent's pane, so this per-agent watcher will not start beside it on this machine, to avoid delivering a wake twice. Ask the human to stop that watcher first (Ctrl-C in its pane, or kill ${pid}), then start one \`replyslip watch\` per agent, and revoke the old watcher key in the dashboard under Watchers. If pid ${pid} is not a ReplySlip watcher, delete ${lockPath} and retry.`;
+}
+
 /** Printed when the poll loop finds its main lock rewritten by another watcher (for example one started with --force). */
 export function lockLostMessage(lockPath: string, holder: WatcherLockInfo | null): string {
   const by = holder ? `pid ${holder.pid}, origin ${holder.origin}` : 'the file was removed';
   return `[replyslip] lock ${lockPath} is no longer held by this watcher (${by}); stopping so only one watcher delivers this workspace.`;
+}
+
+export function agentRunningStatusMessage(pid: number, origin: string, agentName: string, workspaceId?: string): string {
+  const scope = workspaceId ? ` in workspace ${workspaceId}` : '';
+  return `A ReplySlip watcher is running for agent ${agentName}${scope} (pid ${pid}, origin ${origin}).`;
+}
+
+/** One `watch --status` line: per-agent locks name the agent, legacy machine-wide locks keep the old wording. */
+export function statusLine(lock: WatcherLockInfo): string {
+  if (lock.agentName) return agentRunningStatusMessage(lock.pid, lock.origin, lock.agentName, lock.workspaceId);
+  return runningStatusMessage(lock.pid, lock.origin, lock.workspaceId);
 }
 
 export function runningStatusMessage(pid: number, origin: string, workspaceId?: string): string {
@@ -168,6 +204,8 @@ export function readWatcherLock(file: string): WatcherLockInfo | null {
       workspaceId?: unknown;
       alias?: unknown;
       token?: unknown;
+      agentId?: unknown;
+      agentName?: unknown;
     };
     if (typeof parsed.pid !== 'number' || !Number.isInteger(parsed.pid) || parsed.pid <= 0) return null;
     if (typeof parsed.startedAt !== 'string' || parsed.startedAt.trim() === '') return null;
@@ -180,6 +218,8 @@ export function readWatcherLock(file: string): WatcherLockInfo | null {
       ...(typeof parsed.workspaceId === 'string' && parsed.workspaceId ? { workspaceId: parsed.workspaceId } : {}),
       ...(parsed.alias === true ? { alias: true } : {}),
       ...(typeof parsed.token === 'string' && parsed.token ? { token: parsed.token } : {}),
+      ...(typeof parsed.agentId === 'string' && parsed.agentId ? { agentId: parsed.agentId } : {}),
+      ...(typeof parsed.agentName === 'string' && parsed.agentName ? { agentName: parsed.agentName } : {}),
     };
   } catch {
     return null;
@@ -288,7 +328,7 @@ export function acquireWatcherLock(options: AcquireWatcherLockOptions): AcquireW
 }
 
 function running(info: WatcherLockInfo, file: string): AcquireWatcherLockResult {
-  return { ok: false, reason: 'running', pid: info.pid, origin: info.origin, path: file };
+  return { ok: false, reason: 'running', pid: info.pid, origin: info.origin, path: file, ...(info.agentName ? { agentName: info.agentName } : {}) };
 }
 
 /**
@@ -413,6 +453,96 @@ function releaseAliasIfOurs(file: string, identity: WatcherLockInfo): void {
   } catch {
     // Leave it: a dead pid makes it stale for the next watcher.
   }
+}
+
+export type AcquireAgentWatcherLockOptions = {
+  home?: string;
+  origin: string;
+  /** From the identifying poll (`{"lease": false}`). Written into the lock so 0.1.2 machine-wide watchers refuse to start beside it. */
+  workspaceId: string;
+  agentId: string;
+  agentName: string;
+  /** Skips the live check on this agent's own lock only. A legacy machine-wide watcher always blocks. */
+  force?: boolean;
+  pid?: number;
+  now?: Date;
+  hostname?: string;
+  bootId?: string;
+  isAlive?: (pid: number) => boolean;
+};
+
+function selfOf(options: { hostname?: string; bootId?: string; pid?: number }): Self {
+  return {
+    hostname: options.hostname ?? hostname(),
+    bootId: options.bootId ?? machineBootId(),
+    pid: options.pid ?? process.pid,
+  };
+}
+
+/**
+ * A live legacy machine-wide watcher lock on this machine that covers `workspaceId`: a lock without an agent id
+ * that names the workspace, or a pre-0.1.2 lock under the origin-scoped name for this origin or a hosted address.
+ * Per-agent locks never count.
+ */
+export function findLegacyWatcherLock(options: {
+  home?: string;
+  origin: string;
+  workspaceId: string;
+  hostname?: string;
+  bootId?: string;
+  pid?: number;
+  isAlive?: (pid: number) => boolean;
+}): { info: WatcherLockInfo; path: string } | null {
+  const home = options.home ?? homedir();
+  const dir = replyslipHome(home);
+  const self = selfOf(options);
+  const isAlive = options.isAlive ?? pidIsAlive;
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const legacyNames = new Set(
+    [normalizeOrigin(options.origin), ...HOSTED_ORIGINS].map((origin) => `watcher-${legacyWatcherScopeId(origin, options.workspaceId, '')}.lock`),
+  );
+  legacyNames.add(`watcher-${watcherScopeId(options.workspaceId, '')}.lock`);
+  for (const name of names) {
+    if (!LOCK_NAME.test(name)) continue;
+    const full = path.join(dir, name);
+    const info = readWatcherLock(full);
+    if (!info || info.agentId || !lockIsCurrent(info, self, isAlive)) continue;
+    if (info.workspaceId === options.workspaceId || legacyNames.has(name)) return { info, path: full };
+  }
+  return null;
+}
+
+/**
+ * One per-agent watcher per agent on this machine. Refuses while a legacy machine-wide watcher for the same
+ * workspace is live here (lock files on this machine only; a legacy watcher elsewhere is not detected). The agent key is never written to the lock.
+ */
+export function acquireAgentWatcherLock(options: AcquireAgentWatcherLockOptions): AcquireWatcherLockResult {
+  const home = options.home ?? homedir();
+  const origin = normalizeOrigin(options.origin);
+  const file = watcherLockPath(home, agentWatcherScopeId(options.agentId));
+  const self = selfOf(options);
+  const isAlive = options.isAlive ?? pidIsAlive;
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  removeStaleTemps(path.dirname(file), isAlive);
+  const legacy = findLegacyWatcherLock({ ...options, home, origin });
+  if (legacy) return { ok: false, reason: 'legacy', pid: legacy.info.pid, origin: legacy.info.origin, path: legacy.path };
+  const identity: WatcherLockInfo = {
+    pid: self.pid,
+    startedAt: (options.now ?? new Date()).toISOString(),
+    hostname: self.hostname,
+    bootId: self.bootId,
+    origin,
+    workspaceId: options.workspaceId,
+    token: randomBytes(8).toString('hex'),
+    agentId: options.agentId,
+    agentName: options.agentName,
+  };
+  return acquireMain(file, identity, self, isAlive, { origin, watcherKey: '', force: options.force });
 }
 
 /** Release on SIGINT, SIGTERM, and process exit. Returns a function that removes those listeners. */
