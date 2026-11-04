@@ -217,12 +217,13 @@ describe('replyslip watch --key-file', () => {
     }
   });
 
-  it('still requires a watcher key when --url is omitted', async () => {
+  it('with no key and no registered agent, asks to register or pass --key-file', async () => {
     const io = capture();
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-empty-'));
     const fetchImpl: typeof fetch = async () => {
       throw new Error('must not poll without a key');
     };
-    const code = await runReplyslip(['watch', '--once'], { env: {}, fetchImpl, stdout: io.stdout, stderr: io.stderr });
+    const code = await runReplyslip(['watch', '--once'], { env: {}, home, fetchImpl, stdout: io.stdout, stderr: io.stderr });
     expect(code).toBe(1);
     expect(io.err.join('\n')).toContain('--key-file');
   });

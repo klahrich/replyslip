@@ -8,7 +8,7 @@ import { POST as revokeWatcher } from '@/app/api/v1/watcher-keys/[id]/revoke/rou
 import { GET as listWatcherKeys, POST as createWatcher } from '@/app/api/v1/watcher-keys/route';
 import { getDb } from '@/db';
 import { watcherKeys } from '@/db/schema';
-import { watcherPresence } from '@/lib/agents';
+import { POLL_KEY_REJECTED, watcherPresence } from '@/lib/agents';
 import { WATCHER_ONLINE_MS } from '@/lib/constants';
 import { call, createAgent, createKey, mcpTool, setHerdr, setWebhook, signIn } from './helpers';
 
@@ -28,7 +28,7 @@ describe('watcher last_seen', () => {
     expect(watcherPresence({ deliveryMode: 'none' }, seen, 1_000).watcher_online).toBe(false);
   });
 
-  it('records last_seen on poll, shares it across local agents, and ignores agent keys', async () => {
+  it('records last_seen on poll, shares it across local agents, and agent-key polls do not stamp it', async () => {
     const session = await signIn();
     const local = await createAgent(session.cookie, 'PaneBot');
     const other = await createAgent(session.cookie, 'OtherPane');
@@ -49,14 +49,20 @@ describe('watcher last_seen', () => {
     const before = await call(listWatcherKeys, 'http://localhost/api/v1/watcher-keys', { cookie: session.cookie });
     expect(before.data.watcher_keys[0].last_seen_at).toBeNull();
 
-    const denied = await call(poll, 'http://localhost/api/v1/watcher/poll', { bearer: agentKey });
-    expect(denied.status).toBe(401);
-    expect(denied.data.error.message).toBe('Watcher key rejected. Check the key in your dashboard.');
-    const deniedAck = await call(ack, 'http://localhost/api/v1/watcher/ack', {
+    // An agent's own key polls only its own wakes and never stamps a workspace watcher key.
+    const ownPoll = await call(poll, 'http://localhost/api/v1/watcher/poll', { bearer: agentKey });
+    expect(ownPoll.status).toBe(200);
+    expect(ownPoll.data.agent_id).toBe(local.id);
+    const ownAck = await call(ack, 'http://localhost/api/v1/watcher/ack', {
       bearer: agentKey,
       body: { wake_ids: [] },
     });
-    expect(deniedAck.status).toBe(401);
+    expect(ownAck.status).toBe(200);
+    const notStamped = await call(listWatcherKeys, 'http://localhost/api/v1/watcher-keys', { cookie: session.cookie });
+    expect(notStamped.data.watcher_keys[0].last_seen_at).toBeNull();
+    const bogus = await call(poll, 'http://localhost/api/v1/watcher/poll', { bearer: 'rsk_not-a-real-key' });
+    expect(bogus.status).toBe(401);
+    expect(bogus.data.error.message).toBe(POLL_KEY_REJECTED);
 
     const stamped = new Date('2020-01-01T00:00:00.000Z');
     await getDb().update(watcherKeys).set({ lastSeenAt: stamped }).where(eq(watcherKeys.id, keyId));

@@ -354,11 +354,12 @@ export default function LandingPage() {
               <div className="txt">
                 <h3>Terminal agents get a nudge</h3>
                 <p>
+                  Each agent runs its own watcher,{' '}
                   <code translate="no" className="ic">
-                    npx replyslip watch
-                  </code>{' '}
-                  runs on your machine and prompts Claude Code, Codex, pi or opencode in its herdr or Orca pane to check
-                  the relay. It types a fixed note, never the message itself.
+                    node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;
+                  </code>
+                  , on its machine. It prompts Claude Code, Codex, pi or opencode in its herdr or Orca pane to check the
+                  relay. It types a fixed note, never the message itself.
                 </p>
               </div>
               <div className="frag term" data-ui>

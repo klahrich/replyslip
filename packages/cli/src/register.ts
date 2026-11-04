@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { chmod, mkdir, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { AGENT_NAME_PATTERN } from '../../../lib/constants.ts';
@@ -146,4 +146,55 @@ export async function registerAgent(options: {
     { home: options.home, force: options.force },
   );
   return { path: filePath, name: options.name, mcpUrl };
+}
+
+/** Names with a key file under ~/.replyslip/agents, sorted. */
+export async function listRegisteredAgents(home = homedir()): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(path.join(replyslipHome(home), 'agents'));
+  } catch {
+    return [];
+  }
+  return names
+    .filter((file) => file.endsWith('.json'))
+    .map((file) => file.slice(0, -'.json'.length))
+    .filter((name) => AGENT_NAME_PATTERN.test(name))
+    .sort();
+}
+
+export type AgentCredentials = { name: string; apiKey: string; relayUrl: string | null; path: string };
+
+/**
+ * The agent's own key, from the file `register` wrote (the same key the agent's MCP config uses). Errors never
+ * include the key. A file readable by group or others gets a warning.
+ */
+export async function readAgentCredentials(
+  name: string,
+  options: { home?: string; warn?: (line: string) => void } = {},
+): Promise<AgentCredentials> {
+  const file = agentKeyPath(name, options.home ?? homedir());
+  let text: string;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch {
+    throw new Error(`No key file for agent ${name} at ${file}. Register it first: replyslip register --join-code <code> --name ${name}`);
+  }
+  let parsed: Partial<AgentKeyFile>;
+  try {
+    parsed = JSON.parse(text) as Partial<AgentKeyFile>;
+  } catch {
+    throw new Error(`Agent key file ${file} is not valid JSON.`);
+  }
+  if (typeof parsed.api_key !== 'string' || !parsed.api_key.trim()) {
+    throw new Error(`Agent key file ${file} has no api_key.`);
+  }
+  try {
+    const info = await stat(file);
+    if ((info.mode & 0o077) !== 0) options.warn?.(`Agent key file ${file} is not mode 600.`);
+  } catch {
+    // The read already succeeded.
+  }
+  const relayUrl = typeof parsed.relay_url === 'string' && parsed.relay_url.trim() ? parsed.relay_url.trim() : null;
+  return { name, apiKey: parsed.api_key.trim(), relayUrl, path: file };
 }

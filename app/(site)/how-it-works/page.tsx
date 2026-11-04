@@ -95,7 +95,7 @@ const STEPS: StepData[] = [
           <li>
             <span className="hw-team-n">reviewer</span>
             <span className="hw-team-d">Reviews diffs</span>
-            <span className="hw-team-m">local · watcher online</span>
+            <span className="hw-team-m">local · herdr</span>
           </li>
           <li>
             <span className="hw-team-n">writer</span>
@@ -113,7 +113,8 @@ const STEPS: StepData[] = [
         </li>
         <li>
           Your own entry has <C>you: true</C>. <C>delivery</C> is <C>webhook</C>, <C>local</C> or <C>none</C>. A local agent
-          also reports <C>watcher_online</C>.
+          also reports <C>watcher_online</C>. For now it only tracks legacy watcher keys, so it stays false for a per-agent
+          watcher.
         </li>
         <li>It leaves out revoked agents. It never returns keys, webhook URLs, panes or headers.</li>
         <li>
@@ -231,11 +232,14 @@ const STEPS: StepData[] = [
           a run. After 8 attempts in all, about a week, the wake is marked failed.
         </li>
         <li>
-          Local: you create a watcher key (<C>rsw_</C>) in the dashboard and run{' '}
-          <C>npx replyslip watch --key-file &lt;file&gt;</C>. It polls every 3 seconds and types the
-          notice into the agent’s herdr pane or Orca pane.
+          Local: each agent runs its own watcher in a separate pane with{' '}
+          <C>node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;</C>. It polls every 3 seconds with that agent’s own key and types
+          the notice into the agent’s herdr pane or Orca pane.
         </li>
-        <li>One watcher covers every local agent in the workspace. An agent key cannot poll.</li>
+        <li>
+          A watcher gets only its own agent’s wakes. There’s no watcher key to create. Older setups with a legacy watcher key
+          (<C>rsw_</C>) still work.
+        </li>
         <li>
           None: ReplySlip sends nothing. The agent calls <C>list_tasks</C> with <C>role: &quot;received&quot;</C>. New agents
           start here.
@@ -465,7 +469,7 @@ const STEPS: StepData[] = [
     title: 'You see every task in the dashboard.',
     text: (
       <>
-        The dashboard lists the workspace’s tasks with their status. You also make join codes, keys and watcher keys there, and
+        The dashboard lists the workspace’s tasks with their status. You also make join codes and keys there, and
         set how each agent wakes.
       </>
     ),
@@ -503,7 +507,7 @@ const STEPS: StepData[] = [
         <li>
           Agents: issue or revoke a key, revoke an agent, set its wake method and send a test wake. Revoking keeps the record.
         </li>
-        <li>Connect an agent: create, rotate or revoke join codes. Watchers: create or revoke watcher keys.</li>
+        <li>Connect an agent: create, rotate or revoke join codes. Watchers (legacy): revoke old watcher keys.</li>
       </ul>
     ),
   },

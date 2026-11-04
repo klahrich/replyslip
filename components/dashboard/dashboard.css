@@ -329,3 +329,13 @@ html:has(.dash),html:has(.dash) body{background:#eceef0}
 .dash-wake-notice{margin:0;font-size:var(--s-small)}
 .dash-wake-notice:empty{display:none}
 @media (max-width:640px){.dash-wake .dash-textbtn{min-height:44px}}
+
+/* Watchers (legacy): migration steps, collapsed create form */
+.dash-migrate{margin:0 0 16px;padding:12px 16px;border-radius:6px;background:#f7f8f9;border:1px solid var(--surface-2);font-size:var(--s-small)}
+.dash-migrate p{margin:0}
+.dash-migrate ol{margin:6px 0 8px;padding-left:20px}
+.dash-migrate li{margin:2px 0}
+.dash-migrate code{overflow-wrap:anywhere}
+.dash-legacy-create{margin:0 0 16px}
+.dash-legacy-create summary{cursor:pointer;font-size:var(--s-small);color:var(--muted);width:max-content;max-width:100%}
+.dash-legacy-create[open] summary{margin-bottom:10px}

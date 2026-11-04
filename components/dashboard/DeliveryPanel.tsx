@@ -542,8 +542,8 @@ export function DeliveryPanel({ agent, onSaved, onClose }: { agent: Agent; onSav
           <div className="dash-fields">
             {storedMode === 'local' && agent.watcher_online ? null : (
               <p className="dash-hint">
-                {storedMode === 'local' ? 'No watcher online. ' : ''}Local agents need a watcher key. Create one under <a href="#watchers">Watchers</a> and
-                paste it to {agent.name}.
+                Each local agent runs its own watcher on its machine with <code>replyslip watch</code>, using its own key. {agent.name}{' '}
+                starts it after you save. Check it with <code>replyslip watch --status</code>, then send a test wake.
               </p>
             )}
             <div className="dash-field">

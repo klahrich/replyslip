@@ -12,8 +12,9 @@ async function fetchWatcherKeys(): Promise<WatcherKey[]> {
 }
 
 /**
- * Keys for `replyslip watch`, the local process that delivers wakes to herdr and Orca panes.
- * A key belongs to the workspace, not to one agent.
+ * Legacy keys for the machine-wide `replyslip watch --key-file`. A key belongs to the workspace, not to one agent.
+ * New setups don't need one: each local agent runs `watch --name <name>` with its own key. Existing keys stay listed
+ * and revocable; creating one is tucked behind a closed "legacy" disclosure.
  */
 export function WatcherKeys() {
   const uid = useId();
@@ -95,34 +96,51 @@ export function WatcherKeys() {
         <div>
           <h2 id="wk-h">Watchers</h2>
           <p className="dash-muted">
-            Local agents need a watcher key. One key per machine covers all its local agents, and it’s shown once.
+            Legacy. Local agents now run their own watcher with their own key, so new setups don’t need a watcher key. An existing key still works for one machine-wide watcher. Revoke it once each agent runs its own.
           </p>
         </div>
       </div>
 
-      <form className="dash-inline-form" onSubmit={create} noValidate autoComplete="off">
-        <div className="dash-field">
-          <label htmlFor={`${uid}-name`}>Machine name</label>
-          <input
-            id={`${uid}-name`}
-            value={name}
-            maxLength={100}
-            placeholder="laptop"
-            autoComplete="off"
-            aria-invalid={nameError ? true : undefined}
-            aria-describedby={nameError ? `${uid}-name-err` : undefined}
-            onChange={(e) => setName(e.target.value)}
-          />
-          {nameError ? (
-            <p className="dash-field-err" id={`${uid}-name-err`}>
-              {nameError}
-            </p>
-          ) : null}
+      {keys?.some((k) => !k.revoked_at) ? (
+        <div className="dash-migrate">
+          <p>To move an old setup over:</p>
+          <ol>
+            <li>Stop the old watcher first.</li>
+            <li>
+              Start one watcher per local agent, each in its own pane:{' '}
+              <code translate="no">node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;</code>
+            </li>
+            <li>Revoke the old watcher key below.</li>
+          </ol>
         </div>
-        <button type="submit" className="btn" disabled={busy !== null}>
-          {busy === 'create' ? 'Creating…' : 'Create watcher key'}
-        </button>
-      </form>
+      ) : null}
+
+      <details className="dash-legacy-create">
+        <summary>Create a legacy watcher key</summary>
+        <form className="dash-inline-form" onSubmit={create} noValidate autoComplete="off">
+          <div className="dash-field">
+            <label htmlFor={`${uid}-name`}>Machine name</label>
+            <input
+              id={`${uid}-name`}
+              value={name}
+              maxLength={100}
+              placeholder="laptop"
+              autoComplete="off"
+              aria-invalid={nameError ? true : undefined}
+              aria-describedby={nameError ? `${uid}-name-err` : undefined}
+              onChange={(e) => setName(e.target.value)}
+            />
+            {nameError ? (
+              <p className="dash-field-err" id={`${uid}-name-err`}>
+                {nameError}
+              </p>
+            ) : null}
+          </div>
+          <button type="submit" className="btn" disabled={busy !== null}>
+            {busy === 'create' ? 'Creating…' : 'Create watcher key'}
+          </button>
+        </form>
+      </details>
 
       {error ? (
         <p className="dash-err" role="alert">
@@ -133,14 +151,14 @@ export function WatcherKeys() {
       {created ? (
         <OnceSecret title={`Watcher key for ${created.name}. Copy it now: it won’t be shown again.`} secret={created.secret}>
           <p className="dash-secret-help">
-            Paste it to your agent; it starts the watcher in another herdr or Orca pane. That machine needs herdr 0.8.0+ or Orca 1.4.199+ with
-            its CLI on (Settings → Experimental → CLI).
+            Legacy key. Save it to a private file and run <code translate="no">replyslip watch --key-file &lt;file&gt;</code> in another herdr
+            or Orca pane. That machine needs herdr 0.8.0+ or Orca 1.4.199+ with its CLI on (Settings → Experimental → CLI).
           </p>
         </OnceSecret>
       ) : null}
 
       {keys === null ? null : keys.length === 0 ? (
-        <p className="dash-empty">No watcher keys yet.</p>
+        <p className="dash-empty">No watcher keys. New setups don’t need one.</p>
       ) : (
         <div className="dash-table-wrap">
           <table className="dash-table">

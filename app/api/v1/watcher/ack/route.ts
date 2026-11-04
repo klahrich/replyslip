@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { authenticateWatcherKey } from '@/lib/agents';
+import { POLL_KEY_REJECTED, POLL_KEY_REQUIRED, authenticateWakePoller } from '@/lib/agents';
 import { HttpError } from '@/lib/errors';
 import { bearerToken, handle, json, parseBody, readJson } from '@/lib/http';
 import { ackWakes } from '@/lib/wakes';
@@ -14,11 +14,13 @@ const bodySchema = z.object({
 export function POST(req: Request) {
   return handle(async () => {
     const token = bearerToken(req);
-    if (!token) throw new HttpError(401, 'unauthorized', 'Watcher key required.');
-    const watcher = await authenticateWatcherKey(token);
-    if (!watcher) throw new HttpError(401, 'unauthorized', 'Watcher key rejected. Check the key in your dashboard.');
+    if (!token) throw new HttpError(401, 'unauthorized', POLL_KEY_REQUIRED);
+    const poller = await authenticateWakePoller(token);
+    if (!poller) throw new HttpError(401, 'unauthorized', POLL_KEY_REJECTED);
     const body = parseBody(bodySchema, await readJson(req));
-    const acked = await ackWakes(watcher.workspaceId, body.wake_ids);
+    // An agent key acks only its own agent's wakes. Another agent's wake id is ignored and not counted.
+    const scope = poller.kind === 'agent' ? { agentId: poller.agentId } : {};
+    const acked = await ackWakes(poller.workspaceId, body.wake_ids, scope);
     return json({ acked });
   });
 }

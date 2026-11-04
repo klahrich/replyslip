@@ -614,6 +614,26 @@ export async function revokeWatcherKey(workspaceId: string, keyId: string) {
   return existing;
 }
 
+/**
+ * Who may poll and ack local wakes. A legacy workspace watcher key (`rsw_`) covers every local agent in the
+ * workspace. An agent's own key (`rsk_`) covers only that agent: the poll and ack queries are scoped to its id, so
+ * it never sees or acks another agent's wakes.
+ */
+export type WakePoller =
+  | { kind: 'watcher'; workspaceId: string; keyId: string }
+  | { kind: 'agent'; workspaceId: string; agentId: string; agentName: string };
+
+export const POLL_KEY_REQUIRED = 'Agent key or watcher key required.';
+export const POLL_KEY_REJECTED = "Key rejected. Use this agent's own key, or a watcher key from your dashboard.";
+
+export async function authenticateWakePoller(token: string): Promise<WakePoller | null> {
+  const watcher = await authenticateWatcherKey(token);
+  if (watcher) return { kind: 'watcher', ...watcher };
+  const agent = await authenticateAgentKey(token, { recordUse: false });
+  if (!agent) return null;
+  return { kind: 'agent', workspaceId: agent.workspaceId, agentId: agent.agentId, agentName: agent.agentName };
+}
+
 export async function authenticateWatcherKey(token: string): Promise<{ workspaceId: string; keyId: string } | null> {
   const db = getDb();
   const [key] = await db.select().from(watcherKeys).where(eq(watcherKeys.tokenHash, sha256(token))).limit(1);
