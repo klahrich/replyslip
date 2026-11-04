@@ -129,7 +129,7 @@ export function SetupPrompt({ tabs = DEFAULT_TABS, localExtra }: { tabs?: readon
                 Or run it yourself with a join code. Register once, and the CLI saves the agent’s key on this machine:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip register --url https://valetto.tech --join-code &lt;code&gt; --name &lt;name&gt;</code>
+                <code>npx replyslip register --join-code &lt;code&gt; --name &lt;name&gt;</code>
               </pre>
               <p className="sp-note">
                 Next, point the agent’s MCP config at that file (
@@ -143,7 +143,7 @@ export function SetupPrompt({ tabs = DEFAULT_TABS, localExtra }: { tabs?: readon
                 . Then save the watcher key from your dashboard to a file and start the watcher:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip watch --url https://valetto.tech --key-file &lt;watcher-key-file&gt;</code>
+                <code>npx replyslip watch --key-file &lt;watcher-key-file&gt;</code>
               </pre>
             </>
           )}
