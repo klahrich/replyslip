@@ -278,7 +278,10 @@ export async function dispatchDueWebhookWakes(limit = 50): Promise<{ attempted: 
   return { attempted: due.length, delivered };
 }
 
-export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
+/** Limits a poll or ack to one agent's wakes. Omitted for a legacy workspace watcher key, which covers every local agent. */
+export type WakeScope = { agentId?: string };
+
+export async function leaseHerdrWakes(workspaceId: string, scope: WakeScope = {}, limit = 20) {
   const db = getDb();
   return db.transaction(async (tx) => {
     const due = await tx.execute<{ id: string }>(sql`
@@ -290,6 +293,7 @@ export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
         and w.next_attempt_at <= now()
         and w.attempts < ${WAKE_MAX_ATTEMPTS}
         and a.revoked_at is null
+        ${scope.agentId ? sql`and w.agent_id = ${scope.agentId}` : sql``}
         and (
           (
             a.delivery_mode = 'local'
@@ -369,12 +373,20 @@ export async function leaseHerdrWakes(workspaceId: string, limit = 20) {
   });
 }
 
-export async function ackWakes(workspaceId: string, wakeIds: string[]): Promise<number> {
+/** Marks pending wakes delivered. With an agent scope, only that agent's wakes are touched; any other id is ignored. */
+export async function ackWakes(workspaceId: string, wakeIds: string[], scope: WakeScope = {}): Promise<number> {
   if (wakeIds.length === 0) return 0;
   const updated = await getDb()
     .update(wakes)
     .set({ status: 'delivered', deliveredAt: new Date(), lastError: null })
-    .where(and(eq(wakes.workspaceId, workspaceId), inArray(wakes.id, wakeIds), eq(wakes.status, 'pending')))
+    .where(
+      and(
+        eq(wakes.workspaceId, workspaceId),
+        inArray(wakes.id, wakeIds),
+        eq(wakes.status, 'pending'),
+        scope.agentId ? eq(wakes.agentId, scope.agentId) : undefined,
+      ),
+    )
     .returning({ id: wakes.id });
   return updated.length;
 }
