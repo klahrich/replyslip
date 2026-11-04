@@ -722,10 +722,10 @@ function agentAlreadyRunningMessage(agentName, pid, origin, lockPath) {
   return `A ReplySlip watcher is already running for agent ${agentName} (pid ${pid}, origin ${origin}, lock ${lockPath}). If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
 }
 function agentWatchersRunningMessage(agentName, pid, lockPath) {
-  return `A per-agent ReplySlip watcher is running for agent ${agentName} in this workspace (pid ${pid}, lock ${lockPath}). Each agent now runs its own watcher, so a machine-wide watcher would type into its pane twice. Stop the per-agent watchers first, or keep them and do not start this one. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+  return `A per-agent ReplySlip watcher is running for agent ${agentName} in this workspace (pid ${pid}, lock ${lockPath}). Each agent now runs its own watcher, so a machine-wide watcher beside it could deliver the same wake twice. Stop the per-agent watchers first, or keep them and do not start this one. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
 }
 function legacyWatcherRunningMessage(pid, origin, lockPath) {
-  return `A legacy machine-wide ReplySlip watcher (workspace watcher key) is running for this workspace on this machine (pid ${pid}, origin ${origin}, lock ${lockPath}). It already types into every local agent's pane, so this per-agent watcher will not start: a pane must never be woken twice. Ask the human to stop that watcher first (Ctrl-C in its pane, or kill ${pid}), then start one \`replyslip watch\` per agent, and revoke the old watcher key in the dashboard under Watchers. If pid ${pid} is not a ReplySlip watcher, delete ${lockPath} and retry.`;
+  return `A legacy machine-wide ReplySlip watcher (workspace watcher key) is running for this workspace on this machine (pid ${pid}, origin ${origin}, lock ${lockPath}). It already types into every local agent's pane, so this per-agent watcher will not start beside it on this machine, to avoid delivering a wake twice. Ask the human to stop that watcher first (Ctrl-C in its pane, or kill ${pid}), then start one \`replyslip watch\` per agent, and revoke the old watcher key in the dashboard under Watchers. If pid ${pid} is not a ReplySlip watcher, delete ${lockPath} and retry.`;
 }
 function lockLostMessage(lockPath, holder) {
   const by = holder ? `pid ${holder.pid}, origin ${holder.origin}` : "the file was removed";

@@ -140,10 +140,13 @@ export function SetupPrompt({ tabs = DEFAULT_TABS, localExtra }: { tabs?: readon
                 <a className="link" href="/skill.md">
                   skill.md
                 </a>
-                . Then start that agent’s own watcher in a separate pane. Each agent runs its own:
+                . Then download the watcher script, check it, and start that agent’s own watcher in a separate pane. Each agent runs its own:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip watch --name &lt;name&gt;</code>
+                <code>{`curl -fsSL -o "$HOME/.replyslip/replyslip.mjs" https://valetto.tech/replyslip.mjs
+curl -fsSL -o "$HOME/.replyslip/replyslip.mjs.sha256" https://valetto.tech/replyslip.mjs.sha256
+(cd "$HOME/.replyslip" && (sha256sum -c replyslip.mjs.sha256 || shasum -a 256 -c replyslip.mjs.sha256))
+node "$HOME/.replyslip/replyslip.mjs" watch --name <name>`}</code>
               </pre>
             </>
           )}
