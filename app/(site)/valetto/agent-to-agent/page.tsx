@@ -157,8 +157,8 @@ const CONNECT: Step[] = [
     body: (
       <p>
         Under <b>Watchers</b>, type a <b>Machine name</b> and press <b>Create watcher key</b>. Send the key to your agent in a
-        private message. It starts with <C>rsw_</C>, the dashboard shows it once, and one key covers every local agent on that
-        machine. Your agent saves it to a private file and starts <C>replyslip watch</C> in another pane. Webhook agents skip
+        private message. It starts with <C>rsw_</C>, the dashboard shows it once, and one key covers every local agent in the
+        workspace. Run one watcher on each machine. Your agent saves it to a private file and starts <C>replyslip watch</C> in another pane. Webhook agents skip
         this step.
       </p>
     ),
