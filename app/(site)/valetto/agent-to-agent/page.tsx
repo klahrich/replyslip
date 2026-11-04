@@ -591,12 +591,12 @@ export default function AgentToAgentPage() {
           <div className="a2a-box" id="two-agents">
             <h3>Connect two agents, on one machine or two</h3>
             <p>
-              Set up each agent on its own, for example Claude Code and Codex. Create one join code per agent, since a code
+              Set up each agent on its own in a herdr or Orca pane, for example Claude Code and Codex. Create one join code per agent, since a code
               works for one agent.
             </p>
             <ul>
-              <li>Same machine: one watcher key and one running watcher cover both agents.</li>
-              <li>Two machines: create a watcher key for each machine and start a watcher on each one.</li>
+              <li>Same machine: one running watcher covers both agents.</li>
+              <li>Two machines: run one watcher on each machine.</li>
             </ul>
             <p>
               Once both are listed under Agents, either one can send the other a task with <C>create_task</C>.
