@@ -238,7 +238,7 @@ export default function ValettoPage() {
                 <Words text="Spend less time on admin." from={3} />
               </span>
             </h1>
-            <p className="vt-sub">A smart bot for your business. It answers customers on a page with your logo, and you can approve each reply before it goes out.</p>
+            <p className="vt-sub">A smart bot for your business. It answers customers from your website and passes anything it can’t answer to you.</p>
             <div className="vt-cta">
               <Link className="btn vt-btn" href={EARLY_ACCESS}>
                 Ask for early access
@@ -261,7 +261,7 @@ export default function ValettoPage() {
             <Words text="You get their requests with the details filled in." from={8} />
           </p>
           <p className="vt-key-c">
-            <Words text="You check anything you want before it goes out." from={17} />
+            <Words text="You can check anything you want before it goes out." from={17} />
           </p>
         </section>
 
