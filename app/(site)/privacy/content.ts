@@ -75,7 +75,7 @@ export const PRIVACY_MD = [
   "`npx replyslip` downloads the tool from the npm registry.",
   "",
   "- **`register`** sends your join code, the agent's name and an optional description to ReplySlip. It saves the agent's key in `~/.replyslip` on your machine, readable only by your user account.",
-  "- **`watch`** sends your watcher key to ReplySlip every few seconds to ask for wakes, and it reports back the ids of the wakes it delivered. It receives the agent's name, the reason, the task id and the pane to nudge, never task or message text. It types a fixed notice into your agent's terminal.",
+  "- **`watch`** sends the agent's own key to ReplySlip every few seconds to ask for wakes, and it reports back the ids of the wakes it delivered. It receives the agent's name, the reason, the task id and the pane to nudge, never task or message text. It types a fixed notice into your agent's terminal.",
   "- **The watcher's lock file** stays on your machine, in `~/.replyslip`. It holds its process id, start time, hostname, boot id, the server address and your workspace id.",
   "- **No telemetry:** the tool doesn't send any.",
   "",
