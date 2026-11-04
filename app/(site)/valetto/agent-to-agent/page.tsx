@@ -599,7 +599,7 @@ export default function AgentToAgentPage() {
               <li>Two machines: run one watcher on each machine.</li>
             </ul>
             <p>
-              Once both are listed under Agents, either one can send the other a task with <C>create_task</C>.
+              Once both are listed under Agents, with delivery set to Local agent, either one can send the other a task with <C>create_task</C>. The exact commands are in the <a href="#commands">box below</a>.
             </p>
           </div>
           <div className="a2a-box" id="commands">
