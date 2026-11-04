@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // packages/cli/src/cli.ts
-import { readFile, stat as stat2 } from "node:fs/promises";
+import { readFile as readFile2, stat as stat2 } from "node:fs/promises";
 
 // lib/constants.ts
 var AGENT_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -41,7 +41,7 @@ var RATE_LIMITS = {
 };
 
 // packages/cli/src/register.ts
-import { chmod, mkdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 function replyslipHome(home = homedir()) {
@@ -152,6 +152,40 @@ async function registerAgent(options) {
     { home: options.home, force: options.force }
   );
   return { path: filePath, name: options.name, mcpUrl };
+}
+async function listRegisteredAgents(home = homedir()) {
+  let names;
+  try {
+    names = await readdir(path.join(replyslipHome(home), "agents"));
+  } catch {
+    return [];
+  }
+  return names.filter((file) => file.endsWith(".json")).map((file) => file.slice(0, -".json".length)).filter((name) => AGENT_NAME_PATTERN.test(name)).sort();
+}
+async function readAgentCredentials(name, options = {}) {
+  const file = agentKeyPath(name, options.home ?? homedir());
+  let text;
+  try {
+    text = await readFile(file, "utf8");
+  } catch {
+    throw new Error(`No key file for agent ${name} at ${file}. Register it first: replyslip register --join-code <code> --name ${name}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`Agent key file ${file} is not valid JSON.`);
+  }
+  if (typeof parsed.api_key !== "string" || !parsed.api_key.trim()) {
+    throw new Error(`Agent key file ${file} has no api_key.`);
+  }
+  try {
+    const info = await stat(file);
+    if ((info.mode & 63) !== 0) options.warn?.(`Agent key file ${file} is not mode 600.`);
+  } catch {
+  }
+  const relayUrl = typeof parsed.relay_url === "string" && parsed.relay_url.trim() ? parsed.relay_url.trim() : null;
+  return { name, apiKey: parsed.api_key.trim(), relayUrl, path: file };
 }
 
 // lib/wake-notice.ts
@@ -661,6 +695,10 @@ function watcherScopeId(workspaceId, watcherKey) {
 ${workspaceId}`) : scopeHash(`key
 ${keyHash(watcherKey)}`);
 }
+function agentWatcherScopeId(agentId) {
+  return scopeHash(`agent
+${agentId}`);
+}
 function legacyWatcherScopeId(origin, workspaceId, watcherKey) {
   const normalized = normalizeOrigin(origin);
   return scopeHash(workspaceId ? `${normalized}
@@ -680,9 +718,26 @@ function watcherLockPath(home, scopeId) {
 function alreadyRunningMessage(pid, origin, lockPath) {
   return `A ReplySlip watcher is already running for this workspace (pid ${pid}, origin ${origin}, lock ${lockPath}); it delivers every local agent in this workspace. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
 }
+function agentAlreadyRunningMessage(agentName, pid, origin, lockPath) {
+  return `A ReplySlip watcher is already running for agent ${agentName} (pid ${pid}, origin ${origin}, lock ${lockPath}). If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+}
+function agentWatchersRunningMessage(agentName, pid, lockPath) {
+  return `A per-agent ReplySlip watcher is running for agent ${agentName} in this workspace (pid ${pid}, lock ${lockPath}). Each agent now runs its own watcher, so a machine-wide watcher would type into its pane twice. Stop the per-agent watchers first, or keep them and do not start this one. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+}
+function legacyWatcherRunningMessage(pid, origin, lockPath) {
+  return `A legacy machine-wide ReplySlip watcher (workspace watcher key) is running for this workspace on this machine (pid ${pid}, origin ${origin}, lock ${lockPath}). It already types into every local agent's pane, so this per-agent watcher will not start: a pane must never be woken twice. Ask the human to stop that watcher first (Ctrl-C in its pane, or kill ${pid}), then start one \`replyslip watch\` per agent, and revoke the old watcher key in the dashboard under Watchers. If pid ${pid} is not a ReplySlip watcher, delete ${lockPath} and retry.`;
+}
 function lockLostMessage(lockPath, holder) {
   const by = holder ? `pid ${holder.pid}, origin ${holder.origin}` : "the file was removed";
   return `[replyslip] lock ${lockPath} is no longer held by this watcher (${by}); stopping so only one watcher delivers this workspace.`;
+}
+function agentRunningStatusMessage(pid, origin, agentName, workspaceId) {
+  const scope = workspaceId ? ` in workspace ${workspaceId}` : "";
+  return `A ReplySlip watcher is running for agent ${agentName}${scope} (pid ${pid}, origin ${origin}).`;
+}
+function statusLine(lock) {
+  if (lock.agentName) return agentRunningStatusMessage(lock.pid, lock.origin, lock.agentName, lock.workspaceId);
+  return runningStatusMessage(lock.pid, lock.origin, lock.workspaceId);
 }
 function runningStatusMessage(pid, origin, workspaceId) {
   const scope = workspaceId ? `workspace ${workspaceId}` : "this workspace";
@@ -720,7 +775,9 @@ function readWatcherLock(file) {
       origin: typeof parsed.origin === "string" ? parsed.origin : "",
       ...typeof parsed.workspaceId === "string" && parsed.workspaceId ? { workspaceId: parsed.workspaceId } : {},
       ...parsed.alias === true ? { alias: true } : {},
-      ...typeof parsed.token === "string" && parsed.token ? { token: parsed.token } : {}
+      ...typeof parsed.token === "string" && parsed.token ? { token: parsed.token } : {},
+      ...typeof parsed.agentId === "string" && parsed.agentId ? { agentId: parsed.agentId } : {},
+      ...typeof parsed.agentName === "string" && parsed.agentName ? { agentName: parsed.agentName } : {}
     };
   } catch {
     return null;
@@ -802,7 +859,7 @@ function acquireWatcherLock(options) {
   return acquired;
 }
 function running(info, file) {
-  return { ok: false, reason: "running", pid: info.pid, origin: info.origin, path: file };
+  return { ok: false, reason: "running", pid: info.pid, origin: info.origin, path: file, ...info.agentName ? { agentName: info.agentName } : {} };
 }
 function removeStaleTemps(dir, isAlive, nowMs = Date.now()) {
   let names = [];
@@ -884,6 +941,60 @@ function releaseAliasIfOurs(file, identity) {
     removeLock(file);
   } catch {
   }
+}
+function selfOf(options) {
+  return {
+    hostname: options.hostname ?? hostname(),
+    bootId: options.bootId ?? machineBootId(),
+    pid: options.pid ?? process.pid
+  };
+}
+function findLegacyWatcherLock(options) {
+  const home = options.home ?? homedir2();
+  const dir = replyslipHome(home);
+  const self = selfOf(options);
+  const isAlive = options.isAlive ?? pidIsAlive;
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const legacyNames = new Set(
+    [normalizeOrigin(options.origin), ...HOSTED_ORIGINS].map((origin) => `watcher-${legacyWatcherScopeId(origin, options.workspaceId, "")}.lock`)
+  );
+  legacyNames.add(`watcher-${watcherScopeId(options.workspaceId, "")}.lock`);
+  for (const name of names) {
+    if (!LOCK_NAME.test(name)) continue;
+    const full = path2.join(dir, name);
+    const info = readWatcherLock(full);
+    if (!info || info.agentId || !lockIsCurrent(info, self, isAlive)) continue;
+    if (info.workspaceId === options.workspaceId || legacyNames.has(name)) return { info, path: full };
+  }
+  return null;
+}
+function acquireAgentWatcherLock(options) {
+  const home = options.home ?? homedir2();
+  const origin = normalizeOrigin(options.origin);
+  const file = watcherLockPath(home, agentWatcherScopeId(options.agentId));
+  const self = selfOf(options);
+  const isAlive = options.isAlive ?? pidIsAlive;
+  mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  removeStaleTemps(path2.dirname(file), isAlive);
+  const legacy = findLegacyWatcherLock({ ...options, home, origin });
+  if (legacy) return { ok: false, reason: "legacy", pid: legacy.info.pid, origin: legacy.info.origin, path: legacy.path };
+  const identity = {
+    pid: self.pid,
+    startedAt: (options.now ?? /* @__PURE__ */ new Date()).toISOString(),
+    hostname: self.hostname,
+    bootId: self.bootId,
+    origin,
+    workspaceId: options.workspaceId,
+    token: randomBytes(8).toString("hex"),
+    agentId: options.agentId,
+    agentName: options.agentName
+  };
+  return acquireMain(file, identity, self, isAlive, { origin, watcherKey: "", force: options.force });
 }
 function bindWatcherLockLifecycle(release) {
   const onSignal = () => {
@@ -1066,9 +1177,17 @@ function warnOnce(warned, key, kind, log, message) {
 var MAX_BACKOFF_MS = 6e4;
 var REQUEST_TIMEOUT_MS = 3e4;
 var WatcherAuthError = class extends Error {
-  constructor(origin) {
-    super(`Watcher key rejected by ${origin}. Check the key in your dashboard.`);
+  constructor(origin, agentName) {
+    super(
+      agentName ? `Agent key for ${agentName} rejected by ${origin}. If the agent was revoked, register it again with a new join code.` : `Watcher key rejected by ${origin}. Check the key in your dashboard.`
+    );
     this.name = "WatcherAuthError";
+  }
+};
+var AgentWatchUnsupportedError = class extends Error {
+  constructor(origin) {
+    super(`${origin} did not accept this as an agent key for a per-agent watcher. Update the server, or use a legacy watcher key with --key-file.`);
+    this.name = "AgentWatchUnsupportedError";
   }
 };
 var WatcherNotFoundError = class extends Error {
@@ -1100,7 +1219,7 @@ function networkReason(err) {
   const message = err instanceof Error ? err.message : String(err);
   return message.split("\n")[0]?.slice(0, 80) || "network error";
 }
-async function relayRequest(fetchImpl, step, url, origin, init) {
+async function relayRequest(fetchImpl, step, url, origin, init, agentName) {
   let response;
   try {
     const signal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : void 0;
@@ -1109,11 +1228,21 @@ async function relayRequest(fetchImpl, step, url, origin, init) {
     throw new WatcherPollError(step, networkReason(err));
   }
   if (response.ok) return response;
-  if (response.status === 401 || response.status === 403) throw new WatcherAuthError(origin);
+  if (response.status === 401 || response.status === 403) throw new WatcherAuthError(origin, agentName);
   const text = await response.text().catch(() => "");
   throw new WatcherPollError(step, String(response.status), text.slice(0, 200) || void 0);
 }
 var defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function readPayload(response) {
+  let parsed;
+  try {
+    parsed = await response.json();
+  } catch {
+    throw new WatcherPollError("poll", "invalid JSON");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new WatcherPollError("poll", "invalid JSON");
+  return parsed;
+}
 async function watch(options) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const log = options.log ?? console.error;
@@ -1127,25 +1256,64 @@ async function watch(options) {
   let unbind = null;
   let failures = 0;
   let polledOk = false;
+  const agentName = options.agent?.name;
+  let agentWorkspace = null;
   try {
     while (!options.signal?.aborted) {
       let delay = options.intervalMs;
       try {
-        const response = await relayRequest(fetchImpl, "poll", `${base}/api/v1/watcher/poll`, base, {
-          method: "POST",
-          headers
-        });
-        let parsed;
-        try {
-          parsed = await response.json();
-        } catch {
-          throw new WatcherPollError("poll", "invalid JSON");
+        if (options.agent && options.lock && !hold) {
+          const hello = await relayRequest(
+            fetchImpl,
+            "poll",
+            `${base}/api/v1/watcher/poll`,
+            base,
+            { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ lease: false }) },
+            agentName
+          );
+          const who = await readPayload(hello);
+          polledOk = true;
+          const workspaceId2 = typeof who.workspace_id === "string" ? who.workspace_id : "";
+          const agentId = typeof who.agent_id === "string" ? who.agent_id : "";
+          if (!workspaceId2 || !agentId) throw new AgentWatchUnsupportedError(base);
+          const name = typeof who.agent_name === "string" && who.agent_name ? who.agent_name : options.agent.name;
+          const acquired = acquireAgentWatcherLock({
+            home: options.lock.home,
+            force: options.lock.force,
+            origin: base,
+            workspaceId: workspaceId2,
+            agentId,
+            agentName: name
+          });
+          if (!acquired.ok) {
+            if (acquired.reason === "legacy") return { legacyBlocked: legacyWatcherRunningMessage(acquired.pid, acquired.origin, acquired.path) };
+            return { blockedPid: acquired.pid, blockedOrigin: acquired.origin, blockedPath: acquired.path, blockedAgent: name };
+          }
+          hold = acquired.hold;
+          agentWorkspace = workspaceId2;
+          unbind = bindWatcherLockLifecycle(hold.release);
+          log(`[replyslip] watching ${base} for agent ${name} (workspace ${workspaceId2}); only this agent's wakes`);
+        } else if (options.agent && hold) {
+          const check = hold.stillHeld();
+          if (!check.held) {
+            log(lockLostMessage(hold.path, check.current));
+            return { lockLost: true };
+          }
+          const legacy = agentWorkspace ? findLegacyWatcherLock({ home: options.lock?.home, origin: base, workspaceId: agentWorkspace }) : null;
+          if (legacy) return { legacyBlocked: legacyWatcherRunningMessage(legacy.info.pid, legacy.info.origin, legacy.path) };
         }
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new WatcherPollError("poll", "invalid JSON");
-        const payload = parsed;
+        const response = await relayRequest(
+          fetchImpl,
+          "poll",
+          `${base}/api/v1/watcher/poll`,
+          base,
+          { method: "POST", headers },
+          agentName
+        );
+        const payload = await readPayload(response);
         polledOk = true;
         const workspaceId = typeof payload.workspace_id === "string" && payload.workspace_id ? payload.workspace_id : null;
-        if (options.lock && !hold) {
+        if (!options.agent && options.lock && !hold) {
           const acquired = acquireWatcherLock({
             home: options.lock.home,
             force: options.lock.force,
@@ -1153,11 +1321,14 @@ async function watch(options) {
             workspaceId,
             watcherKey: options.key
           });
-          if (!acquired.ok) return { blockedPid: acquired.pid, blockedOrigin: acquired.origin, blockedPath: acquired.path };
+          if (!acquired.ok) {
+            const blockedAgent = acquired.reason === "running" ? acquired.agentName : void 0;
+            return { blockedPid: acquired.pid, blockedOrigin: acquired.origin, blockedPath: acquired.path, ...blockedAgent ? { blockedAgent } : {} };
+          }
           hold = acquired.hold;
           unbind = bindWatcherLockLifecycle(hold.release);
           log(`[replyslip] watching ${base}${workspaceId ? ` (workspace ${workspaceId})` : ""}`);
-        } else if (hold) {
+        } else if (!options.agent && hold) {
           const check = hold.stillHeld();
           if (!check.held) {
             log(lockLostMessage(hold.path, check.current));
@@ -1166,11 +1337,14 @@ async function watch(options) {
         }
         const acked = await nudgeWakes({ wakes: Array.isArray(payload.wakes) ? payload.wakes : [], registry, checks, warned, log });
         if (acked.length > 0) {
-          await relayRequest(fetchImpl, "ack", `${base}/api/v1/watcher/ack`, base, {
-            method: "POST",
-            headers: { ...headers, "content-type": "application/json" },
-            body: JSON.stringify({ wake_ids: acked })
-          });
+          await relayRequest(
+            fetchImpl,
+            "ack",
+            `${base}/api/v1/watcher/ack`,
+            base,
+            { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ wake_ids: acked }) },
+            agentName
+          );
         }
         if (failures > 0) log(`[replyslip] ${base} reachable again`);
         failures = 0;
@@ -1192,18 +1366,26 @@ async function watch(options) {
 }
 
 // packages/cli/src/cli.ts
-var REPLYSLIP_VERSION = true ? "0.1.2" : "dev";
+var REPLYSLIP_VERSION = true ? "0.1.3" : "dev";
 var HELP = `replyslip ${REPLYSLIP_VERSION}: watcher and register CLI for Valetto (https://valetto.tech)
 
 Usage:
   replyslip register --join-code <code> --name <name> [--url <origin>] [--description <text>] [--force]
-  replyslip watch [--url <origin>] (--key-file <file> | --key <watcher-key>) [--interval <ms>] [--once] [--force]
+  replyslip watch [--name <name>] [--url <origin>] [--interval <ms>] [--once] [--force]
   replyslip watch --status
   replyslip key-path <name>
   replyslip --help | --version
 
---url defaults to REPLYSLIP_URL, then https://valetto.tech (register and watch).
-Environment: REPLYSLIP_URL, REPLYSLIP_WATCHER_KEY, REPLYSLIP_POLL_INTERVAL_MS, REPLYSLIP_ORCA_BIN.
+watch runs one agent's own watcher with the key register saved in ~/.replyslip/agents/<name>.json.
+It wakes only that agent's pane. --name is needed only when more than one agent is registered here.
+Each agent starts its own watcher. Delivery (herdr or Orca, and the pane) is set by the human on the dashboard.
+
+Legacy, machine-wide (one workspace watcher key for every local agent in the workspace):
+  replyslip watch (--key-file <file> | --key <watcher-key>) [--url <origin>] [--interval <ms>] [--once] [--force]
+A per-agent watcher refuses to start while a legacy watcher for the same workspace runs on this machine.
+
+--url defaults to REPLYSLIP_URL, then the server the agent registered with, then https://valetto.tech.
+Environment: REPLYSLIP_URL, REPLYSLIP_WATCHER_KEY (legacy), REPLYSLIP_POLL_INTERVAL_MS, REPLYSLIP_ORCA_BIN.
 Agent setup guide: https://valetto.tech/skill.md`;
 function flag(argv, name) {
   const index = argv.indexOf(name);
@@ -1253,12 +1435,12 @@ async function runReplyslip(argv, io = {}) {
     return 0;
   }
   if (command === "key-path") {
-    const name = rest[0] ?? flag(argv, "--name");
-    if (!name || !AGENT_NAME_PATTERN.test(name)) {
+    const name2 = rest[0] ?? flag(argv, "--name");
+    if (!name2 || !AGENT_NAME_PATTERN.test(name2)) {
       stderr("Usage: replyslip key-path <name>");
       return 1;
     }
-    stdout(agentKeyPath(name, io.home));
+    stdout(agentKeyPath(name2, io.home));
     return 0;
   }
   if ((command === "register" || command === "watch") && !argv.includes("--status") && urlFlagMissingValue(argv)) {
@@ -1266,22 +1448,22 @@ async function runReplyslip(argv, io = {}) {
     return 1;
   }
   if (command === "register") {
-    const name = flag(argv, "--name");
-    if (!name || !AGENT_NAME_PATTERN.test(name)) {
+    const name2 = flag(argv, "--name");
+    if (!name2 || !AGENT_NAME_PATTERN.test(name2)) {
       stderr("Usage: replyslip register --join-code <code> --name <name> [--url <origin>] [--description <text>] [--force]");
       return 1;
     }
-    const joinCode = resolveJoinCode(name, flag(argv, "--join-code"), env);
+    const joinCode = resolveJoinCode(name2, flag(argv, "--join-code"), env);
     if (!joinCode) {
       stderr(
-        `Pass --join-code or set ${joinCodeEnvName(name)}. A shared REPLYSLIP_JOIN_CODE is ignored: one name on a shared machine burned single-use join codes when the wrong process registered first.`
+        `Pass --join-code or set ${joinCodeEnvName(name2)}. A shared REPLYSLIP_JOIN_CODE is ignored: one name on a shared machine burned single-use join codes when the wrong process registered first.`
       );
       return 1;
     }
     const relayUrl = relayOrigin2(argv, env);
     try {
       const saved = await registerAgent({
-        name,
+        name: name2,
         description: flag(argv, "--description"),
         joinCode,
         relayUrl,
@@ -1305,12 +1487,72 @@ async function runReplyslip(argv, io = {}) {
   if (argv.includes("--status")) {
     const live = listLiveWatcherLocks(io.home);
     if (live.length === 0) stdout(WATCHER_NOT_RUNNING_MESSAGE);
-    else for (const lock of live) stdout(runningStatusMessage(lock.pid, lock.origin, lock.workspaceId));
+    else for (const lock of live) stdout(statusLine(lock));
     return 0;
   }
-  const url = relayOrigin2(argv, env);
   const keyFile = flag(argv, "--key-file");
-  let key = flag(argv, "--key") ?? env.REPLYSLIP_WATCHER_KEY;
+  const legacyKey = flag(argv, "--key") ?? env.REPLYSLIP_WATCHER_KEY;
+  const intervalMs = Number(flag(argv, "--interval") ?? env.REPLYSLIP_POLL_INTERVAL_MS ?? "3000");
+  if (!Number.isFinite(intervalMs) || intervalMs < 500) {
+    stderr("--interval must be at least 500 milliseconds.");
+    return 1;
+  }
+  if (keyFile || legacyKey) return watchLegacy(argv, env, io, stdout, stderr, intervalMs, keyFile, legacyKey);
+  let name = flag(argv, "--name");
+  if (name !== void 0 && !AGENT_NAME_PATTERN.test(name)) {
+    stderr("Usage: replyslip watch [--name <name>]");
+    return 1;
+  }
+  if (!name) {
+    const registered = await listRegisteredAgents(io.home);
+    if (registered.length === 0) {
+      stderr(
+        `No agent is registered on this machine (${agentKeyPath("<name>", io.home)}). Register first: replyslip register --join-code <code> --name <name>. A legacy watcher key still works with --key-file.`
+      );
+      return 1;
+    }
+    if (registered.length > 1) {
+      stderr(`More than one agent is registered on this machine (${registered.join(", ")}). Pass --name <name>: each agent runs its own watcher.`);
+      return 1;
+    }
+    name = registered[0];
+  }
+  let credentials;
+  try {
+    credentials = await readAgentCredentials(name, { home: io.home, warn: stderr });
+  } catch (err) {
+    stderr(err instanceof Error ? err.message : "Could not read the agent key file.");
+    return 1;
+  }
+  const url = flag(argv, "--url")?.trim() || env.REPLYSLIP_URL?.trim() || credentials.relayUrl || DEFAULT_RELAY_URL;
+  let result;
+  try {
+    result = await watch({
+      url,
+      key: credentials.apiKey,
+      intervalMs,
+      once: argv.includes("--once"),
+      fetchImpl: io.fetchImpl,
+      log: io.stderr,
+      lock: { home: io.home, force: argv.includes("--force") },
+      agent: { name }
+    });
+  } catch (err) {
+    stderr(err instanceof Error ? err.message : "Watcher stopped.");
+    return 1;
+  }
+  if (result.legacyBlocked) {
+    stderr(result.legacyBlocked);
+    return 1;
+  }
+  if (result.blockedPid !== void 0) {
+    stdout(agentAlreadyRunningMessage(result.blockedAgent ?? name, result.blockedPid, result.blockedOrigin ?? url, result.blockedPath ?? ""));
+  }
+  return 0;
+}
+async function watchLegacy(argv, env, io, stdout, stderr, intervalMs, keyFile, legacyKey) {
+  const url = relayOrigin2(argv, env);
+  let key = legacyKey;
   if (keyFile) {
     try {
       key = await readWatcherKeyFile(keyFile, stderr);
@@ -1319,13 +1561,8 @@ async function runReplyslip(argv, io = {}) {
       return 1;
     }
   }
-  const intervalMs = Number(flag(argv, "--interval") ?? env.REPLYSLIP_POLL_INTERVAL_MS ?? "3000");
   if (!key) {
     stderr("Set one of --key-file, --key, or REPLYSLIP_WATCHER_KEY.");
-    return 1;
-  }
-  if (!Number.isFinite(intervalMs) || intervalMs < 500) {
-    stderr("--interval must be at least 500 milliseconds.");
     return 1;
   }
   let result;
@@ -1343,13 +1580,16 @@ async function runReplyslip(argv, io = {}) {
     stderr(err instanceof Error ? err.message : "Watcher stopped.");
     return 1;
   }
-  if (result.blockedPid !== void 0) stdout(alreadyRunningMessage(result.blockedPid, result.blockedOrigin ?? url, result.blockedPath ?? ""));
+  if (result.blockedPid !== void 0) {
+    if (result.blockedAgent) stdout(agentWatchersRunningMessage(result.blockedAgent, result.blockedPid, result.blockedPath ?? ""));
+    else stdout(alreadyRunningMessage(result.blockedPid, result.blockedOrigin ?? url, result.blockedPath ?? ""));
+  }
   return 0;
 }
 async function readWatcherKeyFile(file, stderr) {
   let text;
   try {
-    text = await readFile(file, "utf8");
+    text = await readFile2(file, "utf8");
   } catch {
     throw new Error(`Could not read watcher key file ${file}.`);
   }
