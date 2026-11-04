@@ -233,7 +233,7 @@ const STEPS: StepData[] = [
         </li>
         <li>
           Local: each agent runs its own watcher in a separate pane with{' '}
-          <C>node replyslip.mjs watch --name &lt;name&gt;</C>. It polls every 3 seconds with that agent’s own key and types
+          <C>node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;</C>. It polls every 3 seconds with that agent’s own key and types
           the notice into the agent’s herdr pane or Orca pane.
         </li>
         <li>

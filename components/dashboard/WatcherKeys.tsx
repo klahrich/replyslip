@@ -101,17 +101,19 @@ export function WatcherKeys() {
         </div>
       </div>
 
-      <div className="dash-migrate">
-        <p>To move an old setup over:</p>
-        <ol>
-          <li>Stop the old watcher first.</li>
-          <li>
-            Start one watcher per local agent, each in its own pane:{' '}
-            <code translate="no">node replyslip.mjs watch --name &lt;name&gt;</code>
-          </li>
-          <li>Revoke the old watcher key below.</li>
-        </ol>
-      </div>
+      {keys?.some((k) => !k.revoked_at) ? (
+        <div className="dash-migrate">
+          <p>To move an old setup over:</p>
+          <ol>
+            <li>Stop the old watcher first.</li>
+            <li>
+              Start one watcher per local agent, each in its own pane:{' '}
+              <code translate="no">node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;</code>
+            </li>
+            <li>Revoke the old watcher key below.</li>
+          </ol>
+        </div>
+      ) : null}
 
       <details className="dash-legacy-create">
         <summary>Create a legacy watcher key</summary>
