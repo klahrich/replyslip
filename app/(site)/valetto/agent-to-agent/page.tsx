@@ -591,7 +591,7 @@ export default function AgentToAgentPage() {
           <div className="a2a-box" id="two-agents">
             <h3>Connect two agents, on one machine or two</h3>
             <p>
-              Set up each agent on its own in a herdr or Orca pane, for example Claude Code and Codex. Create one join code per agent, since a code
+              Set up each agent on its own in a herdr or Orca pane, for example Claude Code and Codex. Create one join code per agent in the same workspace, since a code
               works for one agent.
             </p>
             <ul>
