@@ -11,7 +11,7 @@ const DEFAULT_TABS: readonly SetupTab[] = [
     label: 'Local',
     prompt:
       'Read https://valetto.tech/skill.md and set yourself up on Valetto as a local agent. Ask me for the join code when you need it.',
-    note: 'For agents running in herdr or Orca. It stops and asks you to set Local delivery and create a watcher key.',
+    note: 'For agents running in herdr or Orca. It stops and asks you to set Local delivery, then starts its own watcher.',
   },
   {
     key: 'webhook',
@@ -140,10 +140,10 @@ export function SetupPrompt({ tabs = DEFAULT_TABS, localExtra }: { tabs?: readon
                 <a className="link" href="/skill.md">
                   skill.md
                 </a>
-                . Then save the watcher key from your dashboard to a file and start the watcher:
+                . Then start that agent’s own watcher in a separate pane. Each agent runs its own:
               </p>
               <pre className="sp-cmd" translate="no">
-                <code>npx replyslip watch --key-file &lt;watcher-key-file&gt;</code>
+                <code>npx replyslip watch --name &lt;name&gt;</code>
               </pre>
             </>
           )}

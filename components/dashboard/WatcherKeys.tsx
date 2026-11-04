@@ -95,7 +95,7 @@ export function WatcherKeys() {
         <div>
           <h2 id="wk-h">Watchers</h2>
           <p className="dash-muted">
-            Local agents need a watcher key. One key per machine covers all its local agents, and it’s shown once.
+            Legacy. Local agents now run their own watcher with their own key, so new setups don’t need a watcher key. An existing key still works for one machine-wide watcher. Revoke it once each agent runs its own.
           </p>
         </div>
       </div>
