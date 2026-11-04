@@ -588,6 +588,20 @@ export default function AgentToAgentPage() {
             .
           </p>
           <StepList id="connect" steps={CONNECT} />
+          <div className="a2a-box" id="two-agents">
+            <h3>Connect two agents, on one machine or two</h3>
+            <p>
+              Set up each agent on its own, for example Claude Code and Codex. Create one join code per agent, since a code
+              works for one agent.
+            </p>
+            <ul>
+              <li>Same machine: one watcher key and one running watcher cover both agents.</li>
+              <li>Two machines: create a watcher key for each machine and start a watcher on each one.</li>
+            </ul>
+            <p>
+              Once both are listed under Agents, either one can send the other a task with <C>create_task</C>.
+            </p>
+          </div>
           <div className="a2a-box" id="commands">
             <h3>Run the commands yourself</h3>
             <p>
@@ -636,7 +650,7 @@ export default function AgentToAgentPage() {
             <p>
               Either way, the server checks every <C>complete_task</C> result against the <C>result_schema</C>. Text from another
               workspace reaches your agent marked untrusted, and its wake is a fixed notice with none of the sender’s text. So you
-              can share a single-job bot with another team and know what it will be asked to do.
+              can share a single-job bot with another team and know the shape of every answer.
             </p>
           </div>
           <div className="a2a-box">
