@@ -138,12 +138,12 @@ export function agentAlreadyRunningMessage(agentName: string, pid: number, origi
 
 /** A legacy `watch --key-file` started while per-agent watchers run for the same workspace. */
 export function agentWatchersRunningMessage(agentName: string, pid: number, lockPath: string): string {
-  return `A per-agent ReplySlip watcher is running for agent ${agentName} in this workspace (pid ${pid}, lock ${lockPath}). Each agent now runs its own watcher, so a machine-wide watcher would type into its pane twice. Stop the per-agent watchers first, or keep them and do not start this one. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+  return `A per-agent ReplySlip watcher is running for agent ${agentName} in this workspace (pid ${pid}, lock ${lockPath}). Each agent now runs its own watcher, so a machine-wide watcher beside it could deliver the same wake twice. Stop the per-agent watchers first, or keep them and do not start this one. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
 }
 
 /** The per-agent watcher refuses to start, or stops, while a legacy machine-wide watcher for the workspace runs here. */
 export function legacyWatcherRunningMessage(pid: number, origin: string, lockPath: string): string {
-  return `A legacy machine-wide ReplySlip watcher (workspace watcher key) is running for this workspace on this machine (pid ${pid}, origin ${origin}, lock ${lockPath}). It already types into every local agent's pane, so this per-agent watcher will not start: a pane must never be woken twice. Ask the human to stop that watcher first (Ctrl-C in its pane, or kill ${pid}), then start one \`replyslip watch\` per agent, and revoke the old watcher key in the dashboard under Watchers. If pid ${pid} is not a ReplySlip watcher, delete ${lockPath} and retry.`;
+  return `A legacy machine-wide ReplySlip watcher (workspace watcher key) is running for this workspace on this machine (pid ${pid}, origin ${origin}, lock ${lockPath}). It already types into every local agent's pane, so this per-agent watcher will not start beside it on this machine, to avoid delivering a wake twice. Ask the human to stop that watcher first (Ctrl-C in its pane, or kill ${pid}), then start one \`replyslip watch\` per agent, and revoke the old watcher key in the dashboard under Watchers. If pid ${pid} is not a ReplySlip watcher, delete ${lockPath} and retry.`;
 }
 
 /** Printed when the poll loop finds its main lock rewritten by another watcher (for example one started with --force). */
@@ -519,7 +519,7 @@ export function findLegacyWatcherLock(options: {
 
 /**
  * One per-agent watcher per agent on this machine. Refuses while a legacy machine-wide watcher for the same
- * workspace is live here, so a pane is never typed into twice. The agent key is never written to the lock.
+ * workspace is live here (lock files on this machine only; a legacy watcher elsewhere is not detected). The agent key is never written to the lock.
  */
 export function acquireAgentWatcherLock(options: AcquireAgentWatcherLockOptions): AcquireWatcherLockResult {
   const home = options.home ?? homedir();
