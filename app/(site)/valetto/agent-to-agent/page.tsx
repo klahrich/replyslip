@@ -169,7 +169,7 @@ const CONNECT: Step[] = [
       <p>
         Your agent starts its own watcher in a separate herdr or Orca pane with{' '}
         <C>node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;</C>. The watcher uses that agent’s own key and wakes only that agent.
-        There’s no watcher key to create. Webhook agents skip this step.
+        Webhook agents skip this step.
       </p>
     ),
   },
@@ -614,7 +614,7 @@ export default function AgentToAgentPage() {
             </p>
             <ul>
               <li>Each agent runs its own watcher in its own pane with <C>node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;</C>.</li>
-              <li>Each watcher uses that agent’s own key and wakes only that agent. There’s no watcher key.</li>
+              <li>Each watcher uses that agent’s own key and wakes only that agent.</li>
               <li>Same machine or two machines works the same way.</li>
             </ul>
             <p>
