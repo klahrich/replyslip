@@ -33,8 +33,8 @@ function Words({ text, from = 0 }: { text: string; from?: number }) {
 const CONTROL: { h: string; p: string; frag: ReactNode; wide?: boolean }[] = [
   {
     wide: true,
-    h: 'Customers fill in the fields you set',
-    p: 'Each job has a short form you design: picklists, numbers and an optional notes field. Your bot gets clean answers to known questions instead of whatever a stranger types, and Valetto sends back input that doesn’t fit.',
+    h: 'Requests come in with the details you need',
+    p: 'Each job has a short form you set up, with choices, numbers and an optional notes field. You get what you need the first time, and Valetto asks the customer to fix anything that doesn’t fit.',
     frag: (
       <div className="vt-mini">
         <span className="vt-f">
@@ -50,8 +50,8 @@ const CONTROL: { h: string; p: string; frag: ReactNode; wide?: boolean }[] = [
     ),
   },
   {
-    h: 'They get the jobs you granted',
-    p: 'Maya’s page shows Render my ring and Check order status. Jobs you didn’t grant her stay off her page and won’t run.',
+    h: 'Customers see only the jobs you allow',
+    p: 'Maya’s page shows Render my ring and Check order status. Jobs you leave off stay hidden from her and won’t run.',
     frag: (
       <ul className="vt-grants">
         <li className="on">
@@ -70,8 +70,8 @@ const CONTROL: { h: string; p: string; frag: ReactNode; wide?: boolean }[] = [
     ),
   },
   {
-    h: 'A daily cap for each customer',
-    p: 'You pick how many requests each customer can send in a day. Past it, Valetto turns their requests away until tomorrow.',
+    h: 'A daily limit for each customer',
+    p: 'You pick how many requests each customer can send in a day. Past that, Valetto turns their requests away until the next day.',
     frag: (
       <div className="vt-cap">
         <div className="vt-cap-row">
@@ -85,8 +85,8 @@ const CONTROL: { h: string; p: string; frag: ReactNode; wide?: boolean }[] = [
     ),
   },
   {
-    h: 'Revoke in one click',
-    p: 'Click revoke and the link stops working. Maya’s next request gets a polite no.',
+    h: 'Cut off access in one click',
+    p: 'Click Revoke and Maya’s link stops working. Her next request gets a polite no.',
     frag: (
       <div className="vt-revoke">
         <span>valetto.tech/c/k7Qm…</span>
@@ -95,8 +95,8 @@ const CONTROL: { h: string; p: string; frag: ReactNode; wide?: boolean }[] = [
     ),
   },
   {
-    h: 'Every request leaves a record',
-    p: 'You can read each request next to the answer your bot sent back.',
+    h: 'All your requests in one place',
+    p: 'You can read each request next to the answer your bot sent, without digging through your inbox.',
     frag: (
       <ul className="vt-log">
         <li>
@@ -116,8 +116,8 @@ const CONTROL: { h: string; p: string; frag: ReactNode; wide?: boolean }[] = [
   },
   {
     wide: true,
-    h: 'Approve requests and answers first, or let them run',
-    p: 'Pick auto-approve, or review first. In review-first, a new request waits for your Approve before your bot sees it, and the answer waits for your Release before your customer sees it. Your bot pings you in its chat with a link to both buttons. Only you can tap them, so your bot can’t approve itself.',
+    h: 'Check replies before they go out, or let your bot answer',
+    p: 'Pick auto-approve or review first. With review first, you approve each new request before your bot starts on it, and you release each answer before your customer sees it. Valetto emails you when something is waiting, and only you can approve.',
     frag: (
       <div className="vt-review">
         <div className="vt-review-mode">
@@ -145,12 +145,12 @@ const JOBS = [
   {
     who: 'A jeweller',
     job: 'Render my ring',
-    p: 'A client picks the metal, the stone and the size, and gets a product render back. The rest of your shop stays off their page.',
+    p: 'A client picks the metal, the stone and the size, and sees a render of the ring before you spend time on a call.',
   },
   {
     who: 'A contractor or manufacturer',
     job: 'Get a quote',
-    p: 'Customers enter the material, the quantity and a deadline. Your bot prices it from your rate sheet and sends a quote with a total. Quotes are all this bot does for them.',
+    p: 'Customers enter the material, the quantity and a deadline. Your bot prices it from your rate sheet and sends a quote with a total, so you don’t write it by hand.',
   },
   {
     who: 'A consultant',
@@ -166,22 +166,16 @@ const JOBS = [
 
 const STEPS: { h: string; p: ReactNode }[] = [
   {
-    h: 'Tell your bot which jobs to offer.',
-    p: 'Describe each one in plain words, like “ask for the metal and ring size, reply with a price range”, and Valetto turns it into a simple form for your customers.',
+    h: 'Tell your bot what customers can ask for.',
+    p: 'Describe each job in plain words, like “ask for the metal and ring size, reply with a price range”, and Valetto turns it into a short form for your customers.',
   },
   {
-    h: 'Share one open link, or approve each customer by email.',
-    p: (
-      <>
-        Customers open it on any phone, with nothing to install. The page
-        carries your logo and your colors, so customers see your business.{' '}
-        <code className="vt-link">valetto.tech/c/k7Qm2xR9vTb4…</code>
-      </>
-    ),
+    h: 'Send customers your link.',
+    p: 'Use one link for everyone, or approve each customer by email. Customers open it on any phone with nothing to install, and the page shows your logo and colors.',
   },
   {
-    h: 'They ask, your bot answers, you see every request.',
-    p: 'Valetto wakes your bot when a request comes in. Answers take a few minutes, so the page shows your bot at work and emails the customer when the answer is ready.',
+    h: 'Your bot answers, and you see each request.',
+    p: 'Your bot starts on a request as soon as it comes in. If the answer takes a few minutes, the page shows your bot at work and Valetto emails the customer when it’s ready.',
   },
 ];
 
@@ -238,13 +232,13 @@ export default function ValettoPage() {
             </div>
             <h1 id="h1">
               <span className="l">
-                <Words text="Share your bot with customers." />
+                <Words text="A smart bot for your business." />
               </span>{' '}
               <span className="l vt-dim vt-h1-2">
-                <Words text="Only the jobs you choose." from={5} />
+                <Words text="Answer customers faster. Spend less time on admin." from={6} />
               </span>
             </h1>
-            <p className="vt-sub">Customers send it the requests you allow, by private link or a widget on your site.</p>
+            <p className="vt-sub">Your bot answers customers on a page with your logo, and you can approve each reply before it goes out.</p>
             <div className="vt-cta">
               <Link className="btn vt-btn" href={EARLY_ACCESS}>
                 Ask for early access
@@ -259,22 +253,22 @@ export default function ValettoPage() {
           </div>
         </section>
 
-        <section className="vt-key" aria-label="What customers get" data-play>
+        <section className="vt-key" aria-label="What you get" data-play>
           <p className="vt-key-a">
-            <Words text="Your bot understands your business." />
+            <Words text="Your customers get answers without waiting for you." />
           </p>
           <p className="vt-key-b">
-            <Words text="Your customers get the jobs you choose." from={5} />
+            <Words text="You get their requests with the details filled in." from={8} />
           </p>
           <p className="vt-key-c">
-            <Words text="Nothing else." from={12} />
+            <Words text="You check anything you want before it goes out." from={17} />
           </p>
         </section>
 
         <section className="vt-sec" id="control" aria-labelledby="control-h">
-          <p className="vt-kicker">Controlled access</p>
-          <h2 id="control-h">You set the limits for each customer</h2>
-          <p className="vt-lede">You decide who gets in: anyone with the link, or only customers you approve.</p>
+          <p className="vt-kicker">You stay in charge</p>
+          <h2 id="control-h">You decide what your bot does for customers</h2>
+          <p className="vt-lede">Let in anyone with the link, or only the customers you approve.</p>
           <div className="vt-control">
             {CONTROL.map((c) => (
               <article className={c.wide ? 'vt-cell wide-cell' : 'vt-cell'} key={c.h}>
@@ -291,7 +285,7 @@ export default function ValettoPage() {
         </section>
 
         <section className="vt-sec" id="jobs" aria-labelledby="jobs-h">
-          <h2 id="jobs-h">Jobs you can hand out</h2>
+          <h2 id="jobs-h">Jobs your bot can do for you</h2>
           <p className="vt-lede">Each job is one button on your customer’s page.</p>
           <ul className="vt-jobgrid">
             {JOBS.map((j) => (
@@ -322,8 +316,8 @@ export default function ValettoPage() {
         </section>
 
         <section className="close vt-close" aria-label="Get early access">
-          <p className="say">Start with one customer and one job.</p>
-          <p className="vt-close-sub">Valetto is in early access for Grok&nbsp;Bot owners.</p>
+          <p className="say">Start with the request you answer most.</p>
+          <p className="vt-close-sub">Valetto is in early access and runs on Grok&nbsp;Bot. No bot yet? You can still ask.</p>
           <Link className="btn vt-btn" href={EARLY_ACCESS}>
             Ask for early access
           </Link>

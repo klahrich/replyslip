@@ -4,9 +4,9 @@ import type { Metadata } from 'next';
 export const VALETTO_URL = 'https://valetto.tech';
 
 /** Valetto's default share text: the root layout's title and description, and the valetto.tech home page. */
-export const VALETTO_TITLE = 'Valetto: share your bot with customers, one job at a time';
+export const VALETTO_TITLE = 'Valetto: a smart bot for your business';
 export const VALETTO_DESCRIPTION =
-  'Give each customer a private link to the jobs your Grok Bot does for them. Daily caps, one-click revoke, and a record of every request.';
+  'Answer customers faster and spend less time on admin. Your bot answers customer requests on a page with your logo, and you can approve replies before they go out.';
 
 /** The Valetto pages as served at the root of valetto.tech (next.config.ts rewrites them to /valetto/...; /connect and /connect/meta-muse are served as is). */
 export const VALETTO_PATHS = ['/', '/early-access', '/agent-to-agent', '/connect', '/connect/meta-muse', '/privacy', '/terms'] as const;
