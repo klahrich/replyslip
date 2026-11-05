@@ -3,11 +3,30 @@ import { join } from 'node:path';
 import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match';
 import { describe, expect, it } from 'vitest';
 import nextConfig from '../next.config';
-import { VALETTO_OG_IMAGE, VALETTO_PATHS, valettoMeta } from '@/components/site/valetto/seo';
+import { VALETTO_DESCRIPTION, VALETTO_OG_IMAGE, VALETTO_PATHS, VALETTO_TITLE, valettoMeta } from '@/components/site/valetto/seo';
 
 const ROOT = join(__dirname, '..');
 
 describe('Valetto social image', () => {
+  it('share text leads with the pain and matches the hero lines', () => {
+    const page = readFileSync(join(ROOT, 'app/(site)/valetto/page.tsx'), 'utf8');
+    const sub = page.match(/<p className="vt-sub">([\s\S]*?)<\/p>/)?.[1] ?? '';
+    expect(VALETTO_TITLE).toBe('Customers wait while you’re on a job. Valetto answers.');
+    expect(VALETTO_TITLE.length).toBeLessThanOrEqual(60);
+    expect(VALETTO_TITLE.startsWith('Valetto')).toBe(false);
+    expect(VALETTO_DESCRIPTION).toBe(
+      'Answer every customer, even when you’re on a job. It answers from your website and content, and passes anything it can’t answer to you.',
+    );
+    expect(VALETTO_DESCRIPTION.length).toBeLessThanOrEqual(155);
+    expect(VALETTO_DESCRIPTION).not.toMatch(/approv|review first/i);
+    expect(VALETTO_OG_IMAGE.alt).toBe('Valetto: Answer every customer. Even when you’re on a job.');
+    expect(page).toContain('text="Answer every customer."');
+    expect(page).toContain('text="Even when you’re on a job."');
+    expect(sub).toContain('answers from your website and content');
+    expect(sub).toContain('passes anything it can’t answer to you');
+    expect(sub).not.toMatch(/approv|review first/i);
+  });
+
   it('is a 1200x630 PNG in public at the path the metadata uses', () => {
     const png = readFileSync(join(ROOT, 'public', VALETTO_OG_IMAGE.url));
     expect(png.subarray(1, 4).toString('ascii')).toBe('PNG');
