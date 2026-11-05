@@ -232,13 +232,13 @@ export default function ValettoPage() {
             </div>
             <h1 id="h1">
               <span className="l">
-                <Words text="Answer customers faster." />
+                <Words text="Answer every customer." />
               </span>{' '}
               <span className="l vt-dim vt-h1-2">
-                <Words text="Spend less time on admin." from={3} />
+                <Words text="Even when you’re on a job." from={3} />
               </span>
             </h1>
-            <p className="vt-sub">A smart bot for your business. It answers customers from your website and passes anything it can’t answer to you.</p>
+            <p className="vt-sub">A smart bot for your business. It answers from your website and content, and passes anything it can’t answer to you.</p>
             <div className="vt-cta">
               <Link className="btn vt-btn" href={EARLY_ACCESS}>
                 Ask for early access

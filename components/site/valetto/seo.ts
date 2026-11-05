@@ -4,9 +4,9 @@ import type { Metadata } from 'next';
 export const VALETTO_URL = 'https://valetto.tech';
 
 /** Valetto's default share text: the root layout's title and description, and the valetto.tech home page. */
-export const VALETTO_TITLE = 'Valetto: answer customers faster with a smart bot for your business';
+export const VALETTO_TITLE = 'Customers wait while you’re on a job. Valetto answers.';
 export const VALETTO_DESCRIPTION =
-  'Answer customers faster and spend less time on admin. A smart bot that answers from your website and passes anything it can’t answer to you.';
+  'Answer every customer, even when you’re on a job. It answers from your website and content, and passes anything it can’t answer to you.';
 
 /** The Valetto pages as served at the root of valetto.tech (next.config.ts rewrites them to /valetto/...; /connect and /connect/meta-muse are served as is). */
 export const VALETTO_PATHS = ['/', '/early-access', '/agent-to-agent', '/connect', '/connect/meta-muse', '/privacy', '/terms'] as const;
@@ -19,7 +19,7 @@ export const VALETTO_OG_IMAGE = {
   url: '/valetto/og.png',
   width: 1200,
   height: 630,
-  alt: 'Valetto: Answer customers faster. Spend less time on admin.',
+  alt: 'Valetto: Answer every customer. Even when you’re on a job.',
 };
 
 /**
