@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Fragment, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { MarkIcon } from '@/components/site/Mark';
 import { SignInLink } from '@/components/site/SignInLink';
@@ -17,7 +17,6 @@ import { VALETTO_DESCRIPTION, VALETTO_TITLE, valettoMeta } from '@/components/si
 // Served at valetto.tech/ (rewritten from /valetto in next.config.ts).
 export const metadata: Metadata = valettoMeta('/', VALETTO_TITLE, VALETTO_DESCRIPTION);
 
-
 /** Splits a line into words that snap in one after another (the n-th word gets --i: from + n). */
 function Words({ text, from = 0 }: { text: string; from?: number }) {
   return text.split(' ').map((word, i) => (
@@ -30,152 +29,57 @@ function Words({ text, from = 0 }: { text: string; from?: number }) {
   ));
 }
 
-const CONTROL: { h: string; p: string; frag: ReactNode; wide?: boolean }[] = [
+const OUTCOMES: { h: string; p: string }[] = [
   {
-    wide: true,
-    h: 'Requests come in with the details you need',
-    p: 'Each job has a short form you set up, with choices, numbers and an optional notes field. You get what you need the first time, and Valetto asks the customer to fix anything that doesn’t fit.',
-    frag: (
-      <div className="vt-mini">
-        <span className="vt-f">
-          <span className="vt-l">Metal</span>
-          <span className="vt-v vt-pick">18k yellow gold</span>
-        </span>
-        <span className="vt-f">
-          <span className="vt-l">Ring size</span>
-          <span className="vt-v vt-bad">banana</span>
-        </span>
-        <span className="vt-err">Ring size takes a number from 3 to 13.</span>
-      </div>
-    ),
+    h: 'Save up to 7 hours a week',
+    p: 'The replies you type by hand, handled.',
   },
   {
-    h: 'Customers see only the jobs you allow',
-    p: 'Maya’s page shows Render my ring and Check order status. Jobs you leave off stay hidden from her and won’t run.',
-    frag: (
-      <ul className="vt-grants">
-        <li className="on">
-          <span>Render my ring</span>
-          <i className="vt-tog" aria-label="granted" />
-        </li>
-        <li className="on">
-          <span>Check order status</span>
-          <i className="vt-tog" aria-label="granted" />
-        </li>
-        <li>
-          <span>Supplier price list</span>
-          <i className="vt-tog" aria-label="not granted" />
-        </li>
-      </ul>
-    ),
+    h: 'Protect your reputation',
+    p: 'Reviews and messages get an answer.',
   },
   {
-    h: 'A daily limit for each customer',
-    p: 'You pick how many requests each customer can send in a day. Past that, Valetto turns their requests away until the next day.',
-    frag: (
-      <div className="vt-cap">
-        <div className="vt-cap-row">
-          <span>Maya today</span>
-          <b>Your cap</b>
-        </div>
-        <div className="vt-cap-bar" aria-hidden="true">
-          <i />
-        </div>
-      </div>
-    ),
-  },
-  {
-    h: 'Cut off access in one click',
-    p: 'Click Revoke and Maya’s link stops working. Her next request gets a polite no.',
-    frag: (
-      <div className="vt-revoke">
-        <span>valetto.tech/c/k7Qm…</span>
-        <span className="vt-revoke-btn">Revoke</span>
-      </div>
-    ),
-  },
-  {
-    h: 'All your requests in one place',
-    p: 'You can read each request next to the answer your bot sent, without digging through your inbox.',
-    frag: (
-      <ul className="vt-log">
-        <li>
-          <span>Maya · Render my ring</span>
-          <span className="vt-ok">answered</span>
-        </li>
-        <li>
-          <span>Tom · Check order status</span>
-          <span className="vt-ok">answered</span>
-        </li>
-        <li>
-          <span>Maya · Render my ring</span>
-          <span className="vt-run">working</span>
-        </li>
-      </ul>
-    ),
-  },
-  {
-    wide: true,
-    h: 'Check replies before they go out, or let your bot answer',
-    p: 'Pick auto-approve or review first. With review first, you approve each new request before your bot starts on it, and you release each answer before your customer sees it. Valetto emails you when something is waiting, and only you can approve.',
-    frag: (
-      <div className="vt-review">
-        <div className="vt-review-mode">
-          <span>Auto-approve</span>
-          <span className="on">Review first</span>
-        </div>
-        <div className="vt-review-row">
-          <span>
-            <small>New request</small>Maya · Render my ring
-          </span>
-          <span className="vt-review-btn vt-approve">Approve</span>
-        </div>
-        <div className="vt-review-row">
-          <span>
-            <small>Answer ready</small>Tom · Check order status
-          </span>
-          <span className="vt-review-btn vt-release">Release</span>
-        </div>
-      </div>
-    ),
+    h: 'Stop losing jobs',
+    p: 'Slow replies send the work next door.',
   },
 ];
 
-const JOBS = [
+const CHANNELS: { k: string; h: string; p: string; them: string; bot: string }[] = [
   {
-    who: 'A jeweller',
-    job: 'Render my ring',
-    p: 'A client picks the metal, the stone and the size, and sees a render of the ring before you spend time on a call.',
+    k: 'Website',
+    h: 'On your site, and off it.',
+    p: 'A question on your page. A review on Google. Both get a reply.',
+    them: 'Can you fit a new tap this week?',
+    bot: 'Thursday morning is open.',
   },
   {
-    who: 'A contractor or manufacturer',
-    job: 'Get a quote',
-    p: 'Customers enter the material, the quantity and a deadline. Your bot prices it from your rate sheet and sends a quote with a total, so you don’t write it by hand.',
+    k: 'Phone',
+    h: 'Picks up when you’re on a job.',
+    p: 'You’re with a customer. The next person who calls still gets an answer.',
+    them: 'The kitchen sink is leaking.',
+    bot: 'We can be there today, 2 to 4.',
   },
   {
-    who: 'A consultant',
-    job: 'Where’s my project at?',
-    p: 'Clients ask for a status update whenever they want. Your bot answers from its project notes, and you write fewer Friday update emails.',
-  },
-  {
-    who: 'An agency',
-    job: 'Pull this week’s report',
-    p: 'A client pulls this week’s numbers on a Tuesday night without emailing your account manager.',
+    k: 'Email',
+    h: 'Replies from what your business already knows.',
+    p: 'Hours, prices, what’s in the shop. It answers like you would.',
+    them: 'Is the oak table still in?',
+    bot: 'Yes. Saturday delivery is open.',
   },
 ];
 
-const STEPS: { h: string; p: ReactNode }[] = [
+const STEPS: { h: string; p: string }[] = [
   {
-    h: 'Tell your bot what customers can ask for.',
-    p: 'Describe each job in plain words, like “ask for the metal and ring size, reply with a price range”, and Valetto turns it into a short form for your customers.',
+    h: 'Bring your shop in.',
+    p: 'Hours, services, prices, and how you like to talk. It learns the business.',
   },
   {
-    h: 'Send customers your link.',
-    p: 'Use one link for everyone, or approve each customer by email. Customers open it on any phone with nothing to install, and the page shows your logo and colors.',
+    h: 'Connect your phone, site, and email.',
+    p: 'One bot on all three. Nothing for your customers to install.',
   },
   {
-    h: 'Your bot answers, and you see each request.',
-    p: 'Your bot starts on a request as soon as it comes in. If the answer takes a few minutes, the page shows your bot at work and Valetto emails the customer when it’s ready.',
+    h: 'It answers while you work.',
+    p: 'It picks up when you can’t. You see what it said, and you step in when you want.',
   },
 ];
 
@@ -194,10 +98,7 @@ export default function ValettoPage() {
         <nav aria-label="Main">
           <ul>
             <li>
-              <a href="#control">Control</a>
-            </li>
-            <li>
-              <a href="#jobs">Jobs</a>
+              <a href="#channels">Channels</a>
             </li>
             <li>
               <a href="#how">How it works</a>
@@ -220,25 +121,21 @@ export default function ValettoPage() {
       <main id="main">
         <section className="vt-hero" id="top" aria-labelledby="h1">
           <div className="vt-hero-copy">
-            <div className="vt-badges">
-              <p className="vt-badge">
-                <span className="vt-badge-dot" aria-hidden="true" />
-                Works with Grok Bot
-              </p>
-              <Link className="vt-badge vt-badge-link" href={AGENT_TO_AGENT}>
-                Valetto for agents
-                <span aria-hidden="true">→</span>
-              </Link>
-            </div>
+            <p className="vt-badge">
+              <span className="vt-badge-dot" aria-hidden="true" />
+              Works with Grok Bot
+            </p>
             <h1 id="h1">
               <span className="l">
                 <Words text="Answer every customer." />
               </span>{' '}
               <span className="l vt-dim vt-h1-2">
-                <Words text="Even when you’re on a job." from={3} />
+                <Words text="On the web. On the phone. In their inbox." from={3} />
               </span>
             </h1>
-            <p className="vt-sub">A smart bot for your business. It answers from your website and content, and passes anything it can’t answer to you.</p>
+            <p className="vt-sub">
+              One smart bot for your shop. It picks up when you can’t — so you save up to 7 hours a week, protect your reputation, and stop losing jobs to whoever answers first.
+            </p>
             <div className="vt-cta">
               <Link className="btn vt-btn" href={EARLY_ACCESS}>
                 Ask for early access
@@ -254,45 +151,32 @@ export default function ValettoPage() {
         </section>
 
         <section className="vt-key" aria-label="What you get" data-play>
-          <p className="vt-key-a">
-            <Words text="Your customers get answers without waiting for you." />
-          </p>
-          <p className="vt-key-b">
-            <Words text="You get their requests with the details filled in." from={8} />
-          </p>
-          <p className="vt-key-c">
-            <Words text="You can check anything you want before it goes out." from={17} />
-          </p>
-        </section>
-
-        <section className="vt-sec" id="control" aria-labelledby="control-h">
-          <p className="vt-kicker">You stay in charge</p>
-          <h2 id="control-h">You decide what your bot does for customers</h2>
-          <p className="vt-lede">Let in anyone with the link, or only the customers you approve.</p>
-          <div className="vt-control">
-            {CONTROL.map((c) => (
-              <article className={c.wide ? 'vt-cell wide-cell' : 'vt-cell'} key={c.h}>
-                <div className="frag" data-ui aria-hidden="true">
-                  {c.frag}
-                </div>
-                <div>
-                  <h3>{c.h}</h3>
-                  <p>{c.p}</p>
-                </div>
-              </article>
+          <ol className="vt-outcomes">
+            {OUTCOMES.map((o) => (
+              <li key={o.h}>
+                <h2>
+                  <Words text={o.h} />
+                </h2>
+                <p>{o.p}</p>
+              </li>
             ))}
-          </div>
+          </ol>
         </section>
 
-        <section className="vt-sec" id="jobs" aria-labelledby="jobs-h">
-          <h2 id="jobs-h">Jobs your bot can do for you</h2>
-          <p className="vt-lede">Each job is one button on your customer’s page.</p>
-          <ul className="vt-jobgrid">
-            {JOBS.map((j) => (
-              <li className="vt-jobcard" key={j.job}>
-                <span className="vt-who">{j.who}</span>
-                <span className="vt-job vt-job-big">{j.job}</span>
-                <p>{j.p}</p>
+        <section className="vt-sec" id="channels" aria-labelledby="channels-h">
+          <p className="vt-kicker">Website, phone, email</p>
+          <h2 id="channels-h">One bot, wherever they reach you</h2>
+          <p className="vt-lede">Same answers, wherever the customer wrote.</p>
+          <ul className="vt-channels">
+            {CHANNELS.map((c) => (
+              <li className="vt-channel" key={c.k}>
+                <span className="vt-ch-k">{c.k}</span>
+                <h3>{c.h}</h3>
+                <p>{c.p}</p>
+                <p className="vt-moment">
+                  <span className="them">{c.them}</span>
+                  <span className="bot">{c.bot}</span>
+                </p>
               </li>
             ))}
           </ul>
@@ -316,14 +200,11 @@ export default function ValettoPage() {
         </section>
 
         <section className="close vt-close" aria-label="Get early access">
-          <p className="say">Start with the request you answer most.</p>
+          <p className="say">Be the shop that answers first.</p>
           <p className="vt-close-sub">Valetto is in early access and runs on Grok&nbsp;Bot. No bot yet? You can still ask.</p>
           <Link className="btn vt-btn" href={EARLY_ACCESS}>
             Ask for early access
           </Link>
-          <p className="vt-soon">
-            <span>Coming soon</span> Telegram, WhatsApp and SMS. For now, customers use the chat page.
-          </p>
         </section>
       </main>
 

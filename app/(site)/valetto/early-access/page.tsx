@@ -12,7 +12,7 @@ import { valettoMeta } from '@/components/site/valetto/seo';
 export const metadata: Metadata = valettoMeta(
   '/early-access',
   'Ask for early access · Valetto',
-  'Tell us about your business and what your customers would ask your bot.',
+  'Tell us about your shop. Early access for one bot on the web, phone, and email.',
 );
 
 export default function EarlyAccessPage() {
@@ -32,8 +32,8 @@ export default function EarlyAccessPage() {
       <main id="main" className="vt-ea">
         <h1>Ask for early access</h1>
         <p className="vt-ea-lead">
-          Valetto is opening to a small group of Grok Bot owners. Tell us about your business and the jobs your customers
-          would send your bot. It takes about two minutes.
+          Valetto is opening to a small group of shops. Tell us about your business and where customers reach you. It takes
+          about two minutes.
         </p>
         <EarlyAccessForm />
       </main>

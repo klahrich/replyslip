@@ -16,20 +16,13 @@
 /* hero */
 .vt-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:clamp(32px,5vw,72px);align-items:center;padding:clamp(36px,7vh,72px) var(--m) 0}
 .vt-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 12px 5px 10px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:999px;font-size:.75rem;font-variation-settings:"wdth" 87.5;letter-spacing:-.02em;color:var(--accent);background:color-mix(in srgb,var(--bg) 60%,transparent)}
-.vt-badges{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-/* the agent guide as a second, quieter mono chip beside the badge */
-.vt-badge-link{gap:6px;padding:5px 12px;border-color:color-mix(in srgb,var(--ink) 18%,transparent);color:var(--muted);text-decoration:none;white-space:nowrap;transition:color 150ms ease,border-color 150ms ease}
-@media (hover:hover) and (pointer:fine){.vt-badge-link:hover{color:var(--ink);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}}
-.vt-badge-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-/* phones: tighter chips and no arrow, so both stay on one line at 390 */
-@media (max-width:420px){.vt-badges{gap:6px}.vt-badges .vt-badge{padding:5px 10px 5px 9px}.vt-badges .vt-badge-link{padding:5px 10px}.vt-badge-link span{display:none}}
 .vt-badge-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
 .vt-hero h1{margin-top:22px;font-family:var(--vt-mono);font-stretch:87.5%;font-variation-settings:"wdth" 87.5;font-size:clamp(2.375rem,1.2rem + 4.2vw,4.25rem);line-height:1.04;letter-spacing:-.05em;font-weight:450}
 .vt-hero h1 .l{display:block}
 .vt-hero h1 .vt-dim{color:var(--accent)}
-/* the second sentence: a medium sage line in the text face, so only the first sentence reads big */
-.vt-hero h1 .vt-h1-2{margin-top:14px;font-family:var(--font);font-stretch:normal;font-variation-settings:"opsz" 48;font-size:clamp(1.375rem,1.1rem + 1.1vw,1.875rem);line-height:1.2;font-weight:500;letter-spacing:-.02em}
-.vt-sub{margin-top:18px;font-size:clamp(.9375rem,.9rem + .2vw,1.0625rem);line-height:1.5;max-width:30em;letter-spacing:-.01em;text-wrap:balance;color:color-mix(in srgb,var(--ink) 78%,var(--muted))}
+/* the supporting line: a medium sage line in the text face, held to two beats so it doesn't match the headline's size */
+.vt-hero h1 .vt-h1-2{margin-top:14px;max-width:16em;font-family:var(--font);font-stretch:normal;font-variation-settings:"opsz" 48;font-size:clamp(1.25rem,1rem + .9vw,1.7rem);line-height:1.25;font-weight:500;letter-spacing:-.02em}
+.vt-sub{margin-top:18px;font-size:clamp(.9375rem,.9rem + .2vw,1.0625rem);line-height:1.5;max-width:34em;letter-spacing:-.01em;text-wrap:balance;color:color-mix(in srgb,var(--ink) 78%,var(--muted))}
 .vt-cta{margin-top:28px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 24px}
 .vt-btn{display:inline-flex;align-items:center;text-decoration:none}
 .vt-cta-2{font-size:var(--s-small);font-weight:500}
@@ -93,6 +86,16 @@
 .vt-pick::after{content:"⌄";font-size:.875rem;line-height:0;margin-top:-6px;color:var(--brand-accent)}
 .vt-num-in::after{content:"–  +";white-space:pre;font-size:.75rem;color:var(--n-400)}
 .vt-send{display:flex;align-items:center;justify-content:center;height:38px;margin-top:4px;border-radius:8px;background:var(--brand-main);color:#fff;font-weight:600;font-size:.8125rem;box-shadow:0 1px 2px rgb(0 0 0 / .15)}
+/* channel moments: the rising sheet is the customer's words, not a form */
+.vt-event{align-items:flex-start}
+.vt-event b{display:block;font-weight:600;letter-spacing:-.01em}
+.vt-event small{display:block;margin-top:1px;font-size:.6875rem;font-weight:400;color:var(--n-500)}
+.vt-job-ic svg{display:block}
+.vt-event .vt-job-ic{width:16px;margin-top:1px}
+.vt-live{width:7px;height:7px;border-radius:50%;background:#3d9a62;box-shadow:0 0 0 3px rgb(61 154 98 / .28)}
+.vt-say{gap:2px}
+.vt-line{display:block;height:auto;min-height:0;padding:1px 0;border:0;border-radius:0;background:transparent;box-shadow:none;font-size:.8125rem;line-height:1.35;justify-content:flex-start}
+.vt-stars{letter-spacing:.14em;color:var(--brand-accent);font-size:.75rem}
 @keyframes vt-dot{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-3px);opacity:1}}
 
 /* Scene deck. Each scene is a card in .vt-deck; the active card plays its exchange once, in seconds from the swap:
@@ -136,6 +139,7 @@
   .is-on .vt-form{animation:vt-sheet-in .4s var(--ease-out) .95s both,vt-sheet-out .35s cubic-bezier(.5,0,.75,0) 3.25s forwards}
   .is-on .vt-v{animation:vt-fill .5s var(--ease-out) both}
   .is-on .vt-v1{animation-delay:1.4s}.is-on .vt-v2{animation-delay:1.7s}.is-on .vt-v3{animation-delay:2s}.is-on .vt-v4{animation-delay:2.3s}.is-on .vt-v5{animation-delay:2.6s}
+  .is-on .vt-line{animation-name:vt-line-in}
   .is-on .vt-send{animation:vt-send .3s var(--ease-out) 3s both}
   .is-on .vt-after{animation:vt-after 3.4s step-end both}
   .is-on .vt-ask{animation:vt-ask .4s var(--ease-out) 3.4s both;transform-origin:right top}
@@ -152,6 +156,7 @@
 @keyframes vt-sheet-in{from{opacity:1;transform:translateY(100%)}to{opacity:1;transform:none}}
 @keyframes vt-sheet-out{from{opacity:1;transform:none}to{opacity:1;transform:translateY(105%)}}
 @keyframes vt-fill{0%{color:transparent;border-color:var(--n-200);box-shadow:none}1%{color:var(--n-900);border-color:var(--brand-accent);box-shadow:0 0 0 3px var(--accent-ring)}100%{color:var(--n-900);border-color:var(--n-200);box-shadow:0 1px 2px rgb(0 0 0 / .04)}}
+@keyframes vt-line-in{0%{color:transparent;transform:translateY(6px)}100%{color:var(--n-900);transform:none}}
 @keyframes vt-send{0%{transform:none}50%{transform:scale(.96);filter:brightness(.85)}100%{transform:none}}
 @keyframes vt-after{0%{visibility:hidden}100%{visibility:visible}}
 @keyframes vt-ask{from{opacity:0;transform:translateY(20px) scale(.9)}to{opacity:1;transform:none}}
@@ -164,18 +169,19 @@
   .vt-hero h1 .vt-dim .w{animation-delay:calc(var(--i) * 55ms + 350ms)}
 }
 
-/* the "what customers get" band: three big lines snap in once, one after another */
-.vt-key{margin-top:clamp(80px,10vw,128px);background:var(--field);padding:clamp(72px,10vw,128px) var(--m);text-align:center;
+/* three outcomes under the hero: short headlines snap in, one card after another */
+.vt-key{margin-top:clamp(80px,10vw,128px);background:var(--field);padding:clamp(56px,8vw,96px) var(--m);
   background-image:radial-gradient(60% 120% at 50% 0%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 70%)}
-.vt-key p{margin-inline:auto;max-width:20em;font-size:clamp(1.75rem,1.1rem + 2.6vw,3.25rem);line-height:1.12;letter-spacing:-.03em;font-weight:600}
-.vt-key-b{color:var(--muted)}
-.vt-key-c{margin-top:clamp(22px,3vw,36px);font-size:clamp(1.25rem,1rem + 1.2vw,1.875rem)!important;color:var(--accent);font-weight:500!important;max-width:24em!important}
+.vt-outcomes{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:36px 32px}
+.vt-outcomes h2{margin:0;font-size:clamp(1.5rem,1.05rem + 1.2vw,2rem);line-height:1.15;letter-spacing:-.03em;font-weight:600;max-width:11em}
+.vt-outcomes p{margin-top:12px;color:var(--muted);line-height:1.5;max-width:22em}
 .vt-key .w{display:inline-block}
+@media (max-width:719px){.vt-outcomes{grid-template-columns:1fr;gap:28px}}
 @media (prefers-reduced-motion:no-preference){
   .vt-key.anim:not(.play) .w{opacity:0}
-  .vt-key.play .w{animation:snap 380ms cubic-bezier(.2,.9,.2,1) both;animation-delay:calc(var(--i) * 60ms + var(--b,0ms))}
-  .vt-key.play .vt-key-b{--b:500ms}
-  .vt-key.play .vt-key-c{--b:1000ms}
+  .vt-key.play .w{animation:snap 380ms cubic-bezier(.2,.9,.2,1) both;animation-delay:calc(var(--i) * 55ms + var(--b,0ms))}
+  .vt-key.play .vt-outcomes li:nth-child(2){--b:380ms}
+  .vt-key.play .vt-outcomes li:nth-child(3){--b:760ms}
 }
 
 /* sections */
@@ -185,44 +191,18 @@
 .vt-kicker::before{content:"";width:10px;height:10px;background:var(--accent)}
 .vt-lede{margin-top:12px;color:var(--muted)}
 
-/* control */
-.vt-control{margin-top:40px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.vt-cell{background:var(--surface);border-radius:2px;padding:20px 22px 24px}
-.vt-cell:nth-child(2),.vt-cell:nth-child(5){background:#22332a}
-.vt-cell.wide-cell{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;align-items:center}
-.vt-cell.wide-cell .frag{margin:0;order:2}
-.vt-cell .vt-mini{--n-200:#d4d4d8;--n-400:#a1a1aa;--n-500:#71717a;--n-900:#18181b;--brand-accent:var(--dash-accent);display:flex;flex-direction:column;gap:10px;font-family:Inter,ui-sans-serif,system-ui,sans-serif}
-.vt-mini .vt-f{font-size:.8125rem}
-.vt-mini .vt-l{color:var(--paper-ink)}
-.vt-mini .vt-v{background:var(--well)}
-.vt-mini .vt-bad{border-color:var(--err);color:var(--err);box-shadow:0 0 0 3px color-mix(in srgb,var(--err) 18%,transparent)}
-.vt-mini .vt-err{font-size:.75rem;color:var(--err);margin-top:-4px}
-.vt-cell .frag{margin:0 0 20px;min-height:112px;display:flex;flex-direction:column;justify-content:center}
-.vt-cell h3{font-size:var(--s-body);font-weight:600;letter-spacing:-.01em}
-.vt-cell p{margin-top:8px;color:var(--muted);line-height:1.5}
-.vt-grants li{align-items:center;padding:6px}
-.vt-tog{width:30px;height:18px;border-radius:9px;background:var(--paper-line);position:relative;flex:0 0 30px}
-.vt-tog::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform 200ms}
-.vt-grants li.on .vt-tog{background:var(--dash-accent)}
-.vt-grants li.on .vt-tog::after{transform:translateX(12px)}
-.vt-grants li:not(.on){color:var(--paper-muted)}
-.vt-cap-row{display:flex;justify-content:space-between}
-.vt-cap-bar{margin-top:10px;height:10px;border-radius:5px;background:var(--paper-2);overflow:hidden}
-.vt-cap-bar i{display:block;height:100%;width:70%;background:var(--dash-accent);border-radius:5px}
-.vt-revoke{display:flex;justify-content:space-between;align-items:center;gap:12px;font-family:var(--vt-mono);font-size:.8125rem}
-.vt-revoke-btn{font-family:var(--font);font-weight:600;padding:7px 14px;border-radius:var(--r);border:1.5px solid var(--err);color:var(--err)}
-.vt-log li{padding:6px}
-.vt-log li:first-child{background:var(--paper-2)}
-.vt-ok{color:var(--ok);font-weight:600}.vt-run{color:var(--info);font-weight:600}
-@media (max-width:719px){.vt-control{grid-template-columns:1fr;gap:6px}.vt-cell.wide-cell{grid-template-columns:1fr;gap:0}.vt-cell.wide-cell .frag{order:0;margin-bottom:20px}.vt-cell:nth-child(n){background:var(--surface)}.vt-cell:nth-child(even){background:#22332a}}
-
-/* jobs */
-.vt-jobgrid{list-style:none;margin:36px 0 0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px 32px}
-.vt-jobcard{padding-top:20px;border-top:1px solid var(--surface-2)}
-.vt-who{display:block;font-size:var(--s-small);color:var(--muted)}
-.vt-job-big{display:inline-flex;margin-top:10px;padding:10px 16px;font-size:var(--s-body);color:var(--paper-ink);background:var(--paper);border-color:transparent;box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
-.vt-jobcard p{margin-top:14px;line-height:1.5;max-width:30em}
-@media (max-width:719px){.vt-jobgrid{grid-template-columns:1fr}}
+/* channels */
+.vt-channels{list-style:none;margin:40px 0 0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.vt-channel{background:var(--surface);border-radius:2px;padding:22px 22px 24px;display:flex;flex-direction:column;min-width:0}
+.vt-channel:nth-child(2){background:#22332a}
+.vt-ch-k{font-family:var(--vt-mono);font-size:.75rem;font-variation-settings:"wdth" 87.5;letter-spacing:-.02em;color:var(--accent)}
+.vt-channel h3{margin:14px 0 0;font-size:var(--s-lead);line-height:1.25;letter-spacing:-.018em;font-weight:500}
+.vt-channel>p{margin-top:10px;color:var(--muted);line-height:1.5}
+.vt-channel .vt-moment{margin-top:auto;padding-top:18px;display:flex;flex-direction:column;gap:6px}
+.vt-moment span{display:block;padding:10px 12px;border-radius:2px;font-size:var(--s-small);line-height:1.4}
+.vt-moment .them{background:var(--paper);color:var(--paper-muted)}
+.vt-moment .bot{background:color-mix(in srgb,var(--accent) 28%,var(--paper));color:var(--paper-ink);font-weight:600}
+@media (max-width:719px){.vt-channels{grid-template-columns:1fr}}
 
 /* steps */
 .vt-steps{list-style:none;margin:36px 0 0;padding:0;display:flex;flex-direction:column;gap:clamp(28px,4vw,44px)}
@@ -244,24 +224,20 @@
 .vt-close .say{font-size:clamp(1.625rem,1.1rem + 2vw,2.5rem)!important;font-weight:600!important}
 .vt-close-sub{margin-top:12px;color:var(--muted)}
 .vt-close .btn{margin-top:28px}
-.vt-soon{margin-top:36px;font-size:var(--s-small);color:var(--muted)}
-.vt-soon span{display:inline-block;margin-right:8px;padding:2px 8px;border-radius:999px;border:1px solid var(--surface-2);color:var(--ink);font-weight:600;font-size:.75rem}
 
 /* footer: the agent-to-agent guide link, then Privacy and Terms */
 .vt-foot .foot-legal{display:flex;flex-wrap:wrap;gap:8px 20px;margin:0;justify-self:center}
 @media (max-width:719px){.vt-foot{grid-template-columns:1fr}.vt-foot .yr,.vt-foot .foot-legal{justify-self:start}}
 
-/* personality below the fold: soft sage light behind the jobs and the close, a dotted spine through the steps */
+/* personality below the fold: soft sage light behind the channels and the close, a dotted spine through the steps */
 .vt-sec{position:relative}
-#jobs::before{content:"";position:absolute;z-index:-1;inset:-140px -24vw -80px;pointer-events:none;
+#channels::before{content:"";position:absolute;z-index:-1;inset:-140px -24vw -80px;pointer-events:none;
   background:radial-gradient(40% 50% at 18% 45%,rgb(96 156 112 / .16),transparent 70%),radial-gradient(35% 45% at 88% 70%,rgb(176 196 146 / .1),transparent 70%)}
-.vt-job-big{background:linear-gradient(180deg,#f2f3ef,#dfe3dc)}
 .vt-steps{position:relative}
 .vt-steps::before{content:"";position:absolute;left:calc(clamp(3rem,2rem + 3vw,4.75rem) * .3);top:1.2em;bottom:2.4em;border-left:2px dotted color-mix(in srgb,var(--accent) 45%,transparent);z-index:-1}
 .vt-num{background:var(--bg);padding-bottom:6px}
 .vt-close{background-image:radial-gradient(50% 90% at 92% 100%,rgb(96 156 112 / .22),transparent 70%)}
 .vt-hero{padding-bottom:24px}
-@media (max-width:719px){.vt-cell .frag{min-height:0}}
 .vt{overflow-x:clip}
 .vt-steps::before{bottom:3.6em}
 
@@ -325,16 +301,3 @@ fieldset.vt-ea-f[aria-invalid=true] .vt-ea-pills label:not(.on){border-color:var
 .vt-tbd{padding:1px 6px;border-radius:4px;background:#e8b04a;color:#1c1f22;font-weight:600;font-size:.92em;box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .vt-ea-f [aria-invalid=true]:focus-visible{border-color:var(--err-on-bg);box-shadow:0 0 0 3px color-mix(in srgb,var(--err-on-bg) 30%,transparent)}
 .vt-ea-done:focus{outline:none}
-
-/* review-first card: the second wide cell, visual on the left */
-.vt-cell.wide-cell:last-child .frag{order:0}
-.vt-review{display:flex;flex-direction:column;gap:6px;font-size:.8125rem;color:var(--paper-ink)}
-.vt-review-mode{align-self:flex-start;display:inline-flex;padding:3px;border-radius:999px;background:var(--paper-2);font-size:.75rem;margin-bottom:6px}
-.vt-review-mode span{padding:4px 12px;border-radius:999px;color:var(--paper-muted)}
-.vt-review-mode span.on{background:var(--paper);color:var(--paper-ink);font-weight:600;box-shadow:0 1px 2px rgb(0 0 0 / .15)}
-.vt-review-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px}
-.vt-review-row:nth-child(2){background:var(--paper-2)}
-.vt-review-row small{display:block;font-size:.6875rem;color:var(--paper-muted);margin-bottom:1px}
-.vt-review-btn{flex:none;font-weight:600;font-size:.75rem;padding:6px 12px;border-radius:var(--r)}
-.vt-approve{background:var(--dash-accent);color:#fff}
-.vt-release{border:1.5px solid var(--dash-accent);color:var(--dash-accent)}
