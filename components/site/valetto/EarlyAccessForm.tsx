@@ -253,12 +253,12 @@ export function EarlyAccessForm() {
       {pills('teamSize', 'Team size', TEAM)}
       {pills('usesGrokBot', 'Do you already use a Grok bot?', GROK)}
       <div className="vt-ea-f">
-        <label htmlFor="customerJobs">What would your customers ask your bot to do?</label>
+        <label htmlFor="customerJobs">What do customers ask you most?</label>
         <textarea
           id="customerJobs"
           name="customerJobs"
           rows={4}
-          placeholder="For example: check an order’s status, or quote a custom size."
+          placeholder="For example: can you come today, or do you still have this in stock?"
           value={v.customerJobs}
           onChange={(e) => set('customerJobs', e.target.value)}
           {...aria('customerJobs')}

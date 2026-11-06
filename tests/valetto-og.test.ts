@@ -8,23 +8,30 @@ import { VALETTO_DESCRIPTION, VALETTO_OG_IMAGE, VALETTO_PATHS, VALETTO_TITLE, va
 const ROOT = join(__dirname, '..');
 
 describe('Valetto social image', () => {
-  it('share text leads with the pain and matches the hero lines', () => {
+  it('share text matches the shop-owner hero', () => {
     const page = readFileSync(join(ROOT, 'app/(site)/valetto/page.tsx'), 'utf8');
-    const sub = page.match(/<p className="vt-sub">([\s\S]*?)<\/p>/)?.[1] ?? '';
-    expect(VALETTO_TITLE).toBe('Customers wait while you’re on a job. Valetto answers.');
+    const phone = readFileSync(join(ROOT, 'components/site/valetto/PhoneChat.tsx'), 'utf8');
+    const sub = (page.match(/<p className="vt-sub">([\s\S]*?)<\/p>/)?.[1] ?? '').replace(/\s+/g, ' ');
+    expect(VALETTO_TITLE).toBe('Answer every customer. Web, phone, and email.');
     expect(VALETTO_TITLE.length).toBeLessThanOrEqual(60);
     expect(VALETTO_TITLE.startsWith('Valetto')).toBe(false);
     expect(VALETTO_DESCRIPTION).toBe(
-      'Answer every customer, even when you’re on a job. It answers from your website and content, and passes anything it can’t answer to you.',
+      'One smart bot for your shop. It answers on the web, by phone, and by email, so you save up to 7 hours a week and stop losing jobs.',
     );
     expect(VALETTO_DESCRIPTION.length).toBeLessThanOrEqual(155);
     expect(VALETTO_DESCRIPTION).not.toMatch(/approv|review first/i);
-    expect(VALETTO_OG_IMAGE.alt).toBe('Valetto: Answer every customer. Even when you’re on a job.');
+    expect(VALETTO_OG_IMAGE.alt).toBe('Valetto: Answer every customer. On the web. On the phone. In their inbox.');
     expect(page).toContain('text="Answer every customer."');
-    expect(page).toContain('text="Even when you’re on a job."');
-    expect(sub).toContain('answers from your website and content');
-    expect(sub).toContain('passes anything it can’t answer to you');
+    expect(page).toContain('text="On the web. On the phone. In their inbox."');
+    expect(sub).toContain('One smart bot for your shop.');
+    expect(sub).toContain('save up to 7 hours a week');
+    expect(sub).toContain('protect your reputation');
+    expect(sub).toContain('stop losing jobs to whoever answers first');
     expect(sub).not.toMatch(/approv|review first/i);
+    // The homepage body is the shop story. Guest links, revoke, and job-form demos stay off it.
+    const home = `${page}\n${phone}`;
+    expect(home).not.toMatch(/valetto\.tech\/c\/|Private page|You decide what your bot does|Jobs your bot can do|Render my ring|daily limit/i);
+    expect(home.replace('In their inbox.', '')).not.toMatch(/\binbox\b|\bfiles\b/i);
   });
 
   it('is a 1200x630 PNG in public at the path the metadata uses', () => {

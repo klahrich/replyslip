@@ -1,135 +1,172 @@
 'use client';
 /**
- * Hero visual for the Valetto preview: a customer's private page on a phone, for three example businesses.
- * Each scene plays once (tap a job, fill its form, send, "working on it", the answer), then the next card swipes in.
- * The progress fill on the active dot is the scene timer: its animationend moves the deck on, so pausing the page's
- * animations pauses the rotation too. With reduced motion the phone rests on scene 1's answer; the dots still switch.
+ * Hero visual: three channel moments on a phone (a call, a Google review, an email).
+ * Each scene plays once (tap the moment, the customer's words fill in, send, "working", the reply), then the next
+ * card swipes in. The progress fill on the active dot is the scene timer: its animationend moves the deck on, so
+ * pausing the page's animations pauses the rotation too. With reduced motion the phone rests on scene 1's reply;
+ * the dots still switch.
+ *
+ * Class names (.vt-job-tap, .vt-form, .vt-v, .vt-send, .vt-after, .vt-ask, .vt-work, .vt-ans) are the animation beats.
  */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { MarkIcon } from '../Mark';
-import { endSentence } from '@/app/(customer)/_lib/sentence';
 
-/** The owner's branding: a main colour and an optional accent (falls back to the main colour). */
+/** The shop's branding: a main colour and an optional accent (falls back to the main colour). */
 type Brand = { name: string; main: string; accent?: string; logo: ReactNode };
-type Field = { label: string; value: string; kind?: 'pick' | 'num'; optional?: boolean };
 type Scene = {
   label: string;
   brand: Brand;
-  customer: string;
-  link: string;
-  jobs: [string, string];
-  /** Form rows; a nested pair renders side by side. */
-  fields: (Field | [Field, Field])[];
+  /** Which chrome the status row uses. */
+  channel: 'phone' | 'google' | 'email';
+  bar: string;
+  primary: { title: string; detail: string };
+  secondary: string;
+  sheetTitle: string;
+  sheetNote: string;
+  lines: string[];
+  send: string;
+  hello: string;
+  from: string;
   summary: string;
   working: string;
   answer: ReactNode;
 };
 
+function PhoneIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        d="M8 4h2.2l1.2 3.2-1.8 1.1a12 12 0 0 0 6.1 6.1l1.1-1.8 3.2 1.2V16a2 2 0 0 1-2.2 2A14 14 0 0 1 6 6.2 2 2 0 0 1 8 4Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function StarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path d="m12 3.5 2.4 5.2 5.6.7-4.1 3.8 1.1 5.6L12 16.2 6.9 18.8l1.1-5.6L4 9.4l5.6-.7L12 3.5Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function MailIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <rect x="3.5" y="6" width="17" height="12" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="m4.5 7.2 7.5 5.6 7.5-5.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 const SCENES: Scene[] = [
   {
-    label: 'Ring render',
+    label: 'Phone call',
+    channel: 'phone',
     brand: {
-      name: 'Acme Jewellers',
-      main: '#6e1f3f',
-      accent: '#c9962e',
+      name: 'Harbor Plumbing',
+      main: '#1a3f66',
+      accent: '#e0b15a',
       logo: (
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <path d="M7 4h10l3 4-8 12L4 8z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-          <path d="M4 8h16M9.5 4 12 20M14.5 4 12 20" fill="none" stroke="currentColor" strokeWidth="1.1" />
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M12 3s5 5.2 5 9.2A5 5 0 0 1 7 12.2C7 8.2 12 3 12 3Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+          <path d="M10 19h4M12 14.5V19" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
       ),
     },
-    customer: 'Maya',
-    link: 'k7Qm2xR9vTb4',
-    jobs: ['Render my ring', 'Check order status'],
-    fields: [
-      { label: 'Metal', value: '18k yellow gold', kind: 'pick' },
-      { label: 'Stone', value: 'Oval sapphire', kind: 'pick' },
-      { label: 'Ring size', value: '6.5', kind: 'num' },
-      { label: 'Notes', value: 'Thin band', optional: true },
-    ],
-    summary: '18k yellow gold · Oval sapphire · Size 6.5 · Thin band',
-    working: 'Working on it. We’ll email you too.',
+    bar: 'Live call',
+    primary: { title: 'Answer the call', detail: 'Kitchen leak · just now' },
+    secondary: 'Call them back',
+    sheetTitle: 'What they’re saying',
+    sheetNote: 'Harbor Plumbing picks up',
+    lines: ['The sink is leaking.', 'Under the kitchen cabinet.', 'Can you come today?'],
+    send: 'Answer',
+    hello: 'Call coming in.',
+    from: 'Caller',
+    summary: 'The sink is leaking. Can you come today?',
+    working: 'Picking up…',
     answer: (
-      <div className="vt-b vt-bot vt-ans vt-ans-img">
-        <RingRender />
-        <p>Here’s your ring: oval sapphire on a 1.8 mm yellow gold band.</p>
+      <div className="vt-b vt-bot vt-ans vt-card">
+        <span className="vt-tag vt-tag-go">Answered</span>
+        <b className="vt-card-h">Today, between 2 and 4.</b>
+        <span className="vt-card-s">I’ll text you to confirm.</span>
       </div>
     ),
   },
   {
-    label: 'Window quote',
+    label: 'Google review',
+    channel: 'google',
     brand: {
       name: 'Northline Windows',
-      main: '#1d4e89',
-      accent: '#e8a33d',
+      main: '#245046',
+      accent: '#e2b15a',
       logo: (
-        <svg viewBox="0 0 24 24" width="20" height="20">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
           <rect x="5" y="4" width="14" height="16" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
           <path d="M12 4v16M5 12h14" fill="none" stroke="currentColor" strokeWidth="1.3" />
         </svg>
       ),
     },
-    customer: 'Dan',
-    link: 'p3Lw8sN2qHe6',
-    jobs: ['Get a window quote', 'Book a measuring visit'],
-    fields: [
-      { label: 'Window type', value: 'Casement', kind: 'pick' },
-      [
-        { label: 'Width (in)', value: '36', kind: 'num' },
-        { label: 'Height (in)', value: '48', kind: 'num' },
-      ],
-      { label: 'Frame', value: 'White vinyl', kind: 'pick' },
-      { label: 'Quantity', value: '4', kind: 'num' },
-    ],
-    summary: 'Casement · 36 × 48 in · White vinyl · 4 windows',
-    working: 'Working on it.',
+    bar: 'Google reviews',
+    primary: { title: 'Reply to this review', detail: 'Five stars · Dan' },
+    secondary: 'Read it later',
+    sheetTitle: 'The review',
+    sheetNote: 'Dan, on Google',
+    lines: ['Five stars.', 'Fair price, and on time.', 'They cleaned up too.'],
+    send: 'Post reply',
+    hello: 'New review on Google.',
+    from: 'Dan',
+    summary: 'Five stars. Fair price, on time, and they cleaned up.',
+    working: 'Writing the reply…',
     answer: (
       <div className="vt-b vt-bot vt-ans vt-card">
-        <span className="vt-tag">Estimate</span>
-        <b className="vt-card-h">4 casement windows</b>
-        <span className="vt-card-s">36 × 48 in · White vinyl · Double pane</span>
-        <span className="vt-price">$3,100 to $3,600</span>
-        <span className="vt-card-s">Supply and install. We confirm the price after a free measuring visit.</span>
+        <span className="vt-tag">Posted</span>
+        <span className="vt-stars" aria-hidden="true">
+          ★★★★★
+        </span>
+        <b className="vt-card-h">Thanks, Dan. Glad we got there before the rain.</b>
       </div>
     ),
   },
   {
-    label: 'Delivery status',
+    label: 'Email reply',
+    channel: 'email',
     brand: {
       name: 'Fernwood Furniture',
-      main: '#9a3d22',
+      main: '#8a3d28',
       accent: '#3f7f6e',
       logo: (
-        <svg viewBox="0 0 24 24" width="20" height="20">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
           <path d="M7 4v16M17 12v8M7 12h10M7 4h3v8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
         </svg>
       ),
     },
-    customer: 'Priya',
-    link: 'f9Tc4mV7xRa1',
-    jobs: ['Where’s my delivery?', 'Change my delivery date'],
-    fields: [
-      { label: 'Order number', value: 'FW-20418' },
-      { label: 'Notes', value: 'Side door, please', optional: true },
-    ],
-    summary: 'Order FW-20418 · Side door, please',
-    working: 'Checking your order.',
+    bar: 'Email',
+    primary: { title: 'Reply to Priya', detail: 'Oak table · Saturday' },
+    secondary: 'Answer it later',
+    sheetTitle: 'What they wrote',
+    sheetNote: 'To Fernwood Furniture',
+    lines: ['The oak dining table.', 'Is it still in the shop?', 'Can you deliver Saturday?'],
+    send: 'Send reply',
+    hello: 'New email.',
+    from: 'Priya',
+    summary: 'Is the oak table still in the shop? Can you deliver Saturday?',
+    working: 'Checking the shop…',
     answer: (
       <div className="vt-b vt-bot vt-ans vt-card">
-        <span className="vt-tag vt-tag-go">Out for delivery</span>
-        <b className="vt-card-h">Arriving today between 2 and 4 pm.</b>
-        <span className="vt-card-s">Oak dining table · Order FW-20418. The driver knows to use the side door.</span>
-        <ol className="vt-track" aria-label="Delivery progress">
-          <li className="done">Packed</li>
-          <li className="done">Shipped</li>
-          <li className="now">Today</li>
-          <li>Delivered</li>
-        </ol>
+        <span className="vt-tag vt-tag-go">Sent</span>
+        <b className="vt-card-h">Yes. The oak table is in the shop.</b>
+        <span className="vt-card-s">Saturday delivery is open.</span>
       </div>
     ),
   },
 ];
+
+const CHANNEL_ICON = { phone: <PhoneIcon />, google: <StarIcon />, email: <MailIcon /> };
 
 export function PhoneChat() {
   const [on, setOn] = useState(0);
@@ -153,7 +190,7 @@ export function PhoneChat() {
   };
 
   return (
-    <figure ref={ref} className={`vt-phone${idle ? ' vt-idle' : ''}`} aria-label="Examples: three businesses’ customer pages on a phone">
+    <figure ref={ref} className={`vt-phone${idle ? ' vt-idle' : ''}`} aria-label="Examples: a phone call, a Google review, and an email reply">
       <div className="vt-device" key={`d${on}`} data-swap={out === null ? undefined : ''}>
         <div className="vt-deck">
           {SCENES.map((s, i) => (
@@ -186,21 +223,8 @@ export function PhoneChat() {
 
 function SceneScreen({ s, n, state }: { s: Scene; n: number; state: 'on' | 'out' | 'off' }) {
   const vars = { '--brand-main': s.brand.main, '--brand-accent': s.brand.accent ?? s.brand.main } as CSSProperties;
-  const order = s.fields.flat();
-  const field = (f: Field) => {
-    const cls = `vt-v vt-v${order.indexOf(f) + 1}${f.kind === 'pick' ? ' vt-pick' : f.kind === 'num' ? ' vt-num-in' : ''}`;
-    return (
-      <span className="vt-f" key={f.label}>
-        <span className="vt-l">
-          {f.label}
-          {f.optional ? <small>Optional</small> : null}
-        </span>
-        <span className={cls}>{f.value}</span>
-      </span>
-    );
-  };
   return (
-    <div className={`vt-screen vt-s${n + 1} is-${state}`} style={vars} aria-hidden={state === 'on' ? undefined : true}>
+    <div className={`vt-screen vt-s${n + 1} vt-ch-${s.channel} is-${state}`} style={vars} aria-hidden={state === 'on' ? undefined : true}>
       <div className="vt-status" aria-hidden="true">
         <span>9:41</span>
         <span className="vt-notch" />
@@ -211,10 +235,14 @@ function SceneScreen({ s, n, state }: { s: Scene; n: number; state: 'on' | 'out'
         </span>
       </div>
       <div className="vt-url">
-        <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">
-          <path d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7h1Zm2 0h4V5a2 2 0 0 0-4 0v2Z" fill="currentColor" />
-        </svg>
-        valetto.tech/c/{s.link}…
+        {s.channel === 'phone' ? (
+          <span className="vt-live" aria-hidden="true" />
+        ) : (
+          <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">
+            <path d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7h1Zm2 0h4V5a2 2 0 0 0-4 0v2Z" fill="currentColor" />
+          </svg>
+        )}
+        {s.bar}
       </div>
       <header className="vt-biz">
         <span className="vt-logo" aria-hidden="true">
@@ -222,24 +250,31 @@ function SceneScreen({ s, n, state }: { s: Scene; n: number; state: 'on' | 'out'
         </span>
         <span>
           <b>{s.brand.name}</b>
-          <small>Private page for {s.customer}</small>
+          <small>{s.channel === 'phone' ? 'Phone' : s.channel === 'google' ? 'Google reviews' : 'Email'}</small>
         </span>
       </header>
-      <ul className="vt-jobs" aria-label={`Jobs ${s.brand.name} allows`}>
-        <li className="vt-job vt-job-tap">
-          <span className="vt-job-ic" aria-hidden="true">◇</span>
-          {s.jobs[0]}
+      <ul className="vt-jobs" aria-label={`${s.brand.name}, ${s.label}`}>
+        <li className="vt-job vt-job-tap vt-event">
+          <span className="vt-job-ic" aria-hidden="true">
+            {CHANNEL_ICON[s.channel]}
+          </span>
+          <span>
+            <b>{s.primary.title}</b>
+            <small>{s.primary.detail}</small>
+          </span>
         </li>
         <li className="vt-job">
-          <span className="vt-job-ic" aria-hidden="true">▢</span>
-          {s.jobs[1]}
+          <span className="vt-job-ic" aria-hidden="true">
+            ▢
+          </span>
+          {s.secondary}
         </li>
       </ul>
       <div className="vt-chat">
-        <p className="vt-b vt-bot vt-hello">Hi {endSentence(s.customer)} Pick a job to start.</p>
+        <p className="vt-b vt-bot vt-hello">{s.hello}</p>
         <div className="vt-after">
           <p className="vt-b vt-me vt-ask">
-            <small>{s.jobs[0]}</small>
+            <small>{s.from}</small>
             {s.summary}
           </p>
           <div className="vt-slot">
@@ -255,58 +290,22 @@ function SceneScreen({ s, n, state }: { s: Scene; n: number; state: 'on' | 'out'
           </div>
         </div>
       </div>
-      <div className="vt-form" role="group" aria-label={`${s.jobs[0]} form`}>
+      <div className="vt-form" aria-hidden="true">
         <div className="vt-form-top">
-          <b>{s.jobs[0]}</b>
-          <small>Your request goes to {endSentence(s.brand.name)}</small>
+          <b>{s.sheetTitle}</b>
+          <small>{s.sheetNote}</small>
         </div>
-        {s.fields.map((f) =>
-          Array.isArray(f) ? (
-            <span className="vt-row" key={f[0].label}>
-              {field(f[0])}
-              {field(f[1])}
-            </span>
-          ) : (
-            field(f)
-          ),
-        )}
-        <span className="vt-send">Send request</span>
+        {s.lines.map((line, i) => (
+          <span className="vt-f vt-say" key={line}>
+            <span className={`vt-v vt-line vt-v${i + 1}`}>{line}</span>
+          </span>
+        ))}
+        <span className="vt-send">{s.send}</span>
       </div>
       <p className="vt-foot-note">
         <MarkIcon size={11} />
         via Valetto
       </p>
     </div>
-  );
-}
-
-function RingRender() {
-  return (
-    <svg className="vt-render" viewBox="0 0 240 120" role="img" aria-label="Render of a gold ring with an oval sapphire">
-      <defs>
-        <radialGradient id="vt-bg" cx="50%" cy="40%" r="70%">
-          <stop offset="0" stopColor="#f6f3ec" />
-          <stop offset="1" stopColor="#d9d4c7" />
-        </radialGradient>
-        <linearGradient id="vt-gold" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#f7e3a1" />
-          <stop offset=".45" stopColor="#c99a3c" />
-          <stop offset=".7" stopColor="#f2d687" />
-          <stop offset="1" stopColor="#9c7224" />
-        </linearGradient>
-        <radialGradient id="vt-gem" cx="40%" cy="35%" r="70%">
-          <stop offset="0" stopColor="#9fc3ff" />
-          <stop offset=".45" stopColor="#2b57b8" />
-          <stop offset="1" stopColor="#0c1f5c" />
-        </radialGradient>
-      </defs>
-      <rect width="240" height="120" fill="url(#vt-bg)" />
-      <ellipse cx="120" cy="108" rx="62" ry="6" fill="#000" opacity=".12" />
-      <ellipse cx="120" cy="74" rx="46" ry="30" fill="none" stroke="url(#vt-gold)" strokeWidth="5" />
-      <path d="M108 44l-4-8h32l-4 8" fill="#c99a3c" />
-      <ellipse cx="120" cy="30" rx="15" ry="11" fill="url(#vt-gem)" stroke="#d8b25a" strokeWidth="1.6" />
-      <ellipse cx="115" cy="26" rx="4" ry="2.4" fill="#fff" opacity=".7" />
-      <path d="M150 20l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#fff" opacity=".9" />
-    </svg>
   );
 }
