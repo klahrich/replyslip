@@ -1130,7 +1130,36 @@ export async function resolveSharedTask(
   };
 }
 
+export async function listExternalGrants(
+  workspaceId: string,
+): Promise<{ address: string; status: string; offers: string[] }[]> {
+  const db = getDb();
+  const shares = await db.select().from(agentShares).where(eq(agentShares.guestWorkspaceId, workspaceId));
+  const grants = [];
+  for (const share of shares) {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, share.agentId)).limit(1);
+    if (!agent) continue;
+    const [owner] = await db
+      .select({ handle: workspaces.handle })
+      .from(workspaces)
+      .where(eq(workspaces.id, agent.workspaceId))
+      .limit(1);
+    if (!owner?.handle) continue;
+    const offers = await db
+      .select({ name: agentOffers.name })
+      .from(agentShareOffers)
+      .innerJoin(agentOffers, eq(agentOffers.id, agentShareOffers.offerId))
+      .where(eq(agentShareOffers.shareId, share.id))
+      .orderBy(agentOffers.name);
+    grants.push({ address: `@${owner.handle}/${agent.name}`, status: share.status, offers: offers.map((offer) => offer.name) });
+  }
+  return grants;
+}
+
 export async function getAgentCard(caller: AgentPrincipal, to: string) {
+  if (caller.externalGrantExpired) {
+    throw new HttpError(401, 'invite_expired', 'This invite has expired. Ask the owner for a new one.');
+  }
   const address = parseRecipient(to);
   if (address.kind !== 'shared') {
     throw new HttpError(400, 'invalid_address', 'get_agent_card takes a shared address, @handle/agentname.');

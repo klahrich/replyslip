@@ -16,6 +16,7 @@ import {
 import type { AgentPrincipal } from './agents';
 import { MESSAGE_BODY_MAX, TASK_ANSWER_MAX } from './constants';
 import { HttpError } from './errors';
+import { assertExternalCredential } from './invites';
 import { OWN_TASKS_ONLY_MESSAGE } from './oauth/scopes';
 import { assertResultSchema, validateResult } from './validate';
 import { assertWithinLimit } from './plans';
@@ -61,6 +62,12 @@ export function taskViewFor(task: TaskRow, viewerWorkspaceId: string): TaskRow {
     heldAction: null,
     ownerNote: null,
   };
+}
+
+/** The guest's own handle is an internal id. External callers see the owner's public address only. */
+function presentTask<T extends { from_workspace_handle: string | null }>(caller: AgentPrincipal, task: T): T {
+  if (!caller.externalGuest) return task;
+  return { ...task, from_workspace_handle: null };
 }
 
 export function serializeTask(
@@ -266,7 +273,11 @@ export async function createTask(
     clientRequestId?: string;
   },
 ) {
+  assertExternalCredential(caller);
   const address = parseRecipient(input.to);
+  if (caller.externalGuest && address.kind === 'workspace') {
+    throw new HttpError(403, 'insufficient_scope', 'This link can only send tasks to the shared agent it was granted.');
+  }
   // In-workspace tasks are always free text (input_not_allowed). A shared offer decides in resolveSharedTask.
   const workspaceFields = address.kind === 'workspace' ? assertFreeTextFields(input) : null;
   const written = await getDb().transaction(async (tx) => {
@@ -354,7 +365,7 @@ export async function createTask(
     const reviewNotice = review ? await claimReviewNotice(tx, recipient) : null;
     const labels = await labelsFor(tx, [task]);
     return {
-      payload: serializeTask(task, caller.agentName, recipient.name, caller.workspaceId, labels.get(task.id)),
+      payload: presentTask(caller, serializeTask(task, caller.agentName, recipient.name, caller.workspaceId, labels.get(task.id))),
       wakeId,
       reviewNotice,
     };
@@ -410,8 +421,12 @@ function taskHeld(): HttpError {
 }
 
 export async function getTask(caller: AgentPrincipal, taskId: string) {
+  assertExternalCredential(caller);
   const db = getDb();
   const task = await loadVisibleTask(db, caller, taskId);
+  if (caller.externalGuest && task.fromAgentId !== caller.agentId) {
+    throw new HttpError(404, 'not_found', 'No task was found.');
+  }
   const names = await namesFor(db, task);
   const labels = await labelsFor(db, [task]);
   const thread = await db
@@ -424,7 +439,7 @@ export async function getTask(caller: AgentPrincipal, taskId: string) {
     [task.toAgentId, names.to],
   ]);
   return {
-    task: serializeTask(task, names.from, names.to, caller.workspaceId, labels.get(task.id)),
+    task: presentTask(caller, serializeTask(task, names.from, names.to, caller.workspaceId, labels.get(task.id))),
     messages: thread.map((message) =>
       serializeMessage(message, nameById.get(message.fromAgentId) ?? 'unknown', nameById.get(message.toAgentId) ?? 'unknown'),
     ),
@@ -469,6 +484,7 @@ export async function lockTargetAgentShared(tx: Db, agentId: string): Promise<vo
  * It does not use the daily cap: it is the same request.
  */
 export async function answerTask(caller: AgentPrincipal, taskId: string, answer: string) {
+  assertExternalCredential(caller);
   const trimmed = answer.trim();
   if (trimmed.length < 1 || trimmed.length > TASK_ANSWER_MAX) {
     throw new HttpError(400, 'validation_error', `Answer must be 1-${TASK_ANSWER_MAX} characters.`, {
@@ -513,7 +529,10 @@ export async function answerTask(caller: AgentPrincipal, taskId: string, answer:
     });
     const names = await namesFor(tx, updated);
     const labels = await labelsFor(tx, [updated]);
-    return { payload: serializeTask(updated, names.from, names.to, caller.workspaceId, labels.get(updated.id)), wakeId };
+    return {
+      payload: presentTask(caller, serializeTask(updated, names.from, names.to, caller.workspaceId, labels.get(updated.id))),
+      wakeId,
+    };
   });
   await afterWake(written.wakeId);
   return written.payload;
@@ -604,7 +623,9 @@ export async function listTasks(
   caller: AgentPrincipal,
   filter: { status?: string; role?: 'sent' | 'received' | 'any' } & TaskPage,
 ) {
-  const role = filter.role ?? 'any';
+  assertExternalCredential(caller);
+  if (caller.externalGuest && filter.role === 'received') return { tasks: [], next_cursor: null };
+  const role = caller.externalGuest ? 'sent' : (filter.role ?? 'any');
   const fromAgent = alias(agents, 'from_agent');
   const toAgent = alias(agents, 'to_agent');
   const visible = or(eq(tasks.workspaceId, caller.workspaceId), eq(tasks.fromWorkspaceId, caller.workspaceId));
@@ -638,7 +659,9 @@ export async function listTasks(
     rows.map((row) => row.task),
   );
   return {
-    tasks: rows.map((row) => serializeTask(row.task, row.fromName, row.toName, caller.workspaceId, labels.get(row.task.id))),
+    tasks: rows.map((row) =>
+      presentTask(caller, serializeTask(row.task, row.fromName, row.toName, caller.workspaceId, labels.get(row.task.id))),
+    ),
     next_cursor: nextCursor(fetched, TASK_LIST_MAX),
   };
 }

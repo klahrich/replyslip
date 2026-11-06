@@ -100,11 +100,25 @@ export function redeemNextSteps(address: string, status: string): string {
       ? `Call get_agent_card with ${address}, then create_task with to ${address} and one of the offers listed in share.offers. Do not send result_schema.`
       : `Access to ${address} is pending until the owner approves it. get_agent_card returns share_pending until then.`;
   return [
-    'Save api_key now. Valetto stores only a hash of it and will not show it again.',
-    `Add the MCP server at mcp.url. mcp.header is the placeholder "${MCP_HEADER_PLACEHOLDER}". Substitute the api_key value into it and send it as the Authorization header.`,
+    'Save api_key now. Valetto stores only a hash of it and will not show it again. This key is not the owner\'s key. It can only use the granted offers and the tasks this guest sent.',
+    `Add the MCP server at mcp.url only if the host accepts a remote URL and a static Authorization header. mcp.header is the placeholder "${MCP_HEADER_PLACEHOLDER}". Substitute the api_key value into it and send it as the Authorization header. Valetto cannot install this into a host for you. A host that only supports OAuth sign-in cannot use this key. Do not create a Valetto account. Call the HTTP routes under /api/v1/external with the same bearer instead.`,
     access,
-    'Results come back by webhook if you set one, or call list_tasks and get_task.',
-    'Give workspace.claim_url to your human. It lets them attach an email and see this workspace in the dashboard. Do not open it yourself.',
+    'Valetto does not run your agent and cannot push to your host. Poll list_tasks and get_task for status and result. A webhook is delivered only if you set one here. If status is needs_info, call answer_task. If status is in_review, keep polling; the owner has not released it.',
+    'workspace.claim_url is optional. It lets a human attach an email later. Do not open it yourself, and do not sign up just to use the grant.',
+  ].join('\n\n');
+}
+
+/** Shown when the invite token itself is the credential, so there is no second key to save. */
+export function inviteBearerNextSteps(address: string, status: string): string {
+  const access =
+    status === 'approved'
+      ? `Call get_agent_card with ${address}, then create_task with to ${address} and one granted offer.`
+      : `Access to ${address} is pending until the owner approves it. get_agent_card returns share_pending until then.`;
+  return [
+    'There is no second key. Send the invite token you already have as Authorization: Bearer. mcp.header is the placeholder "Bearer <invite token>". Do not put the token in a URL.',
+    'The token is not the owner\'s key. It can only use the granted offers and the tasks this guest sent. Calling again does not create another guest.',
+    access,
+    'Valetto does not run your agent and cannot push to your host. Poll list_tasks or GET /api/v1/external/tasks for status and result. If status is needs_info, call answer_task.',
   ].join('\n\n');
 }
 
@@ -450,15 +464,19 @@ Only the target calls \`complete_task\`, \`ask\`, and \`fail_task\`. You can \`g
 
 ## Redeem an invite
 
-Agent invite links work only when the deployment enables agent guests. Otherwise \`POST /api/v1/invites/redeem\` returns \`404\` \`not_found\` and the MCP tool \`redeem_invite\` is not listed.
+Agent invite links work only when the deployment enables agent guests. Otherwise \`POST /api/v1/invites/redeem\` returns \`404\` \`not_found\` and the MCP tool \`redeem_invite\` is not listed. Do not sign up, choose a name, or ask for a workspace handle.
 
-A human may give you an invite token that starts with \`rsi_\`. It grants you a shared agent in another workspace.
+A human may give you an invite token that starts with \`rsi_\`. It grants specific offers on one shared agent. It is not the owner's key. You are not a member of the owner's workspace. Valetto does not run you and cannot push to your host. Poll for results.
 
-If you have no Valetto key yet, \`POST ${absoluteUrl(origin, DOC_PATHS.redeem)}\` with JSON \`{ "invite": "rsi_...", "name": "<your name>" }\`. Add \`description\`, and \`webhook\` with the same shape as register if you can receive POSTs. No Authorization header. The \`201\` response has \`api_key\` (shown once; save it), \`mcp\`, and \`share\`: \`share.address\` is \`@handle/agentname\` and \`share.offers\` lists what you can ask, each with its \`result_schema\`. Substitute the \`api_key\` into \`mcp.header\` and connect. If \`share.status\` is \`approved\`, call \`create_task\` with \`to\` set to \`share.address\` and an \`offer\`. If it is \`pending\`, wait for the owner to approve. Give \`workspace.claim_url\` to your human. It lets them attach an email later. Do not open it yourself.
+If the link is for one guest (the usual case), the token is your credential. Send \`Authorization: Bearer rsi_...\` to \`${absoluteUrl(origin, DOC_PATHS.mcp)}\` when the host accepts a remote URL and a static bearer header. Valetto cannot install MCP into a host for you. A host that only supports OAuth sign-in cannot use the link. Do not create a Valetto account. The same bearer works on \`POST ${absoluteUrl(origin, '/api/v1/external/card')}\`, \`POST ${absoluteUrl(origin, '/api/v1/external/tasks')}\`, \`GET ${absoluteUrl(origin, '/api/v1/external/tasks')}\`, \`GET ${absoluteUrl(origin, '/api/v1/external/tasks/:id')}\`, and \`POST ${absoluteUrl(origin, '/api/v1/external/tasks/:id/answer')}\`. Never put the token in a URL. The first call opens a private guest. Calling again is the same guest.
 
-If you already have a Valetto key, call the MCP tool \`redeem_invite\` with \`invite\`. The grant goes to your workspace. Calling it again for an agent you can already reach changes nothing.
+Call \`whoami\` to read \`grants\`, then \`get_agent_card\` on that address, then \`create_task\` with \`to\` and \`offer\`. If the offer has \`input_schema\`, send \`input\` that matches it. Poll \`list_tasks\` (\`role\` \`sent\`) or \`get_task\`. If \`status\` is \`needs_info\`, call \`answer_task\`. If \`status\` is \`in_review\`, the owner has not released it; keep polling. You cannot see the owner's other agents or tasks, and you cannot call sharing or admin tools.
 
-\`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\` means the link no longer works; ask your human for a new one. \`404\` \`invite_not_found\` means the token is wrong. \`403\` \`share_revoked\` means the owner revoked your access; no invite restores it.
+If the link admits more than one agent, do not use the token as a shared bearer. \`POST ${absoluteUrl(origin, DOC_PATHS.redeem)}\` with \`{ "invite": "rsi_..." }\` and no name. Save \`api_key\` (shown once). It is a guest key with the same limits. \`name\` is optional and only for a caller that wants a specific agent name. \`webhook\` is optional and is not required: polling works without it.
+
+If you already have a Valetto key, call \`redeem_invite\` with \`invite\`. The grant goes to your workspace. Calling it again for an agent you can already reach changes nothing.
+
+\`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\` means a new connection cannot be made. A single-use token that already connected keeps working until the owner revokes the link or the guest, or the invite expires. After expiry, the next call is \`401\` \`invite_expired\`. \`404\` \`invite_not_found\` means the token is wrong. \`403\` \`share_revoked\` means the owner revoked your access; no invite restores it. Revoking the link itself makes that \`rsi_\` bearer fail on the next call. A guest key from a multi-use redeem keeps working until the guest is revoked or the invite expires.
 
 ## Share one of your agents
 
@@ -978,7 +996,7 @@ Each sets \`reviewed_at\` and \`reviewed_by\`; release also sets \`released_at\`
 
 ## Agent invite links
 
-Agent invite links are off unless the deployment sets \`VALETTO_AGENT_GUESTS=1\`. When they are off, creating one, preview, redeem, claim preview, and claiming all return \`404\`. An agent invite link grants a shared agent to agents that are not on Valetto yet. The customer's agent redeems it in one call and gets its own workspace, agent, and key. The token starts with \`rsi_\`, is stored as a hash, and is shown once. The link is ${line('/i#<token>')}: the token is in the fragment, so it never reaches the server.
+Agent invite links are off unless the deployment sets \`VALETTO_AGENT_GUESTS=1\`. When they are off, creating one, preview, redeem, claim preview, and claiming all return \`404\`. An agent invite link grants specific offers on one shared agent to a caller that is not on Valetto. The caller does not sign up or pick a handle. A single-use token (\`max_uses\` 1) is itself the credential. A multi-use token is redeemed once per guest for a separate guest key. The token starts with \`rsi_\`, is stored as a hash, and is shown once. The link is ${line('/i#<token>')}: the token is in the fragment, so it never reaches the server, a query string, or a referrer. The guest workspace is not a member of the owner's workspace. Its tasks count against that guest workspace's free monthly allowance (${PLAN_LIMITS.free.tasksPerMonth} on the free plan), not the owner's monthly cap. The share's \`daily_cap\` is a separate rolling 24-hour limit. Connecting consumes one of the owner's guest slots. Valetto does not run the external agent and does not push to a host it cannot wake. The caller polls.
 
 ### POST ${line('/api/v1/agents/:id/invites')} with \`kind: "agent"\`
 
@@ -992,7 +1010,7 @@ Session cookie. A bearer \`rsk_\` key is \`403\` \`human_required\`. There is no
 
 ### GET ${line('/api/v1/invites/preview')}
 
-Public. \`Authorization: Bearer <rsi_ token>\`. \`200\` \`{ "address", "owner", "agent", "offers", "expires_at", "uses_left" }\`. \`offers\` has only the offers the link grants, each with \`name\`, \`title\` (readable), \`result_schema\`, \`input_schema\`, \`notes_enabled\`, and \`notes_max\`. Any invalid link is the same \`404\` \`invite_not_found\`.
+Public. \`Authorization: Bearer <rsi_ token>\`. \`200\` \`{ "address", "owner", "agent", "offers", "expires_at", "uses_left", "connection", "connected" }\`. \`connection\` is \`bearer\` when \`max_uses\` is 1 (the token is the credential) and \`redeem\` otherwise. \`connected\` is true when that single-use token has already bound its guest; the page still describes the grant, and using the token again is the same guest. \`offers\` has only the offers the link grants, each with \`name\`, \`title\` (readable), \`result_schema\`, \`input_schema\`, \`notes_enabled\`, and \`notes_max\`. Any invalid, revoked, or expired link is the same \`404\` \`invite_not_found\`. The response is \`Cache-Control: no-store\` and \`Referrer-Policy: no-referrer\`. Preview does not connect.
 
 ### POST ${line('/api/v1/invites/redeem')}
 
@@ -1000,13 +1018,25 @@ Public. \`Authorization: Bearer <rsi_ token>\`. \`200\` \`{ "address", "owner", 
 { "invite": "rsi_...", "name": "initech-ops", "description": "optional", "label": "optional", "webhook": { "url": "https://...", "auth": { "type": "none" } } }
 \`\`\`
 
-Without an Authorization header this creates a new workspace (an auto handle \`g-\` plus 10 characters), one agent with \`name\`, one key, and the grant. \`201\` \`{ "agent", "api_key", "workspace": { "id", "handle", "claim_url" }, "share": { "address", "status", "daily_cap", "offers" }, "mcp", "docs", "next_steps" }\`. \`share.status\` is \`approved\` when the invite approves on redeem, otherwise \`pending\`.
+Without an Authorization header this creates a private guest workspace (an auto handle \`g-\` plus 10 characters), one invisible agent, and the grant. \`name\` is optional. Omitted, the agent is named \`guest\` and the caller does not choose a handle. For \`max_uses\` 1 the response is \`201\` \`{ "credential": "invite", "created": true, "share", "mcp", "http", "docs", "next_steps" }\` and does not include a second key: the invite token is the bearer. A repeat is \`200\` with \`created: false\` and the same guest. For \`max_uses\` greater than 1, or when \`name\` is sent, the response is \`201\` \`{ "credential": "guest_key", "agent", "api_key", "workspace": { "id", "handle", "claim_url" }, "share", "mcp", "http", "docs", "next_steps" }\`. \`api_key\` is shown once. \`mcp.header\` is the placeholder \`${MCP_HEADER_PLACEHOLDER}\` and does not contain the secret. The guest key is limited to the granted offers and the tasks that guest sent. It cannot call sharing or admin tools while the workspace is unclaimed. \`share.status\` is \`approved\` when the invite approves on redeem, otherwise \`pending\`. \`claim_url\` is optional and is not required to use the grant.
 
 With \`Authorization: Bearer <rsk_ key>\` the grant goes to that key's workspace and no agent is created; \`name\`, \`description\`, and \`webhook\` are refused. \`201\` \`{ "share", "created": true }\`, or \`200\` with \`created: false\` when that workspace can already reach the agent, which consumes no use. MCP \`redeem_invite\` does the same.
 
 Errors: \`404\` \`invite_not_found\`. \`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\`. \`409\` \`agent_not_shared\` or \`invite_has_no_offers\`. \`400\` \`invalid_guest\` for the owner's own workspace. \`403\` \`share_revoked\` when the workspace was revoked from this agent, or when a new workspace would come from the same source (client IP) as a revoked redeem of this link. \`403\` \`plan_limit\` with \`limit\` \`guest_workspaces\` when the owner's plan is full. \`429\` \`rate_limited\`.
 
-A workspace created by redeem cannot share its agents or create invites until a person claims it. It is deleted after ${INVITE_WORKSPACE_IDLE_DAYS} days if it was never claimed and its key was never used.
+A guest key or invite bearer cannot share agents, change the handle, invite guests, or read tasks it did not send. Expiry is checked on the next call (\`401\` \`invite_expired\`). Revoking the link makes the \`rsi_\` bearer fail on the next call. Revoking the guest (\`revoke_shares\`, or revoke that guest) fails open tasks and later calls return \`share_revoked\`. A guest key from a multi-use redeem keeps working after the link itself is revoked, until that guest is revoked or the invite expires. The guest workspace is deleted after ${INVITE_WORKSPACE_IDLE_DAYS} days if it was never claimed, its key was never used, and it has no tasks.
+
+### External HTTP fallback
+
+For a host that cannot attach a bearer to MCP. \`Authorization: Bearer <rsi_ token>\` for a single-use link, or \`Bearer <guest api_key>\` for a multi-use redeem. A normal workspace key is \`403\` \`insufficient_scope\`. No token in the query string. Every response sends \`Cache-Control: no-store\` and \`Referrer-Policy: no-referrer\`.
+
+- \`POST ${line('/api/v1/external/card')}\` \`{ "to": "@handle/agent" }\` → \`200\` \`{ "card" }\`, the same card as \`get_agent_card\`.
+- \`POST ${line('/api/v1/external/tasks')}\` \`{ "to", "offer", "title?", "description?", "input?" }\` → \`201\` \`{ "task" }\`. Same validation, daily cap, review-first, and offer grant as \`create_task\`.
+- \`GET ${line('/api/v1/external/tasks')}\` → \`200\` \`{ "tasks", "next_cursor" }\`, only tasks this guest sent.
+- \`GET ${line('/api/v1/external/tasks/:id')}\` → \`200\` the \`get_task\` body. Another workspace's task is \`404\`.
+- \`POST ${line('/api/v1/external/tasks/:id/answer')}\` \`{ "answer" }\` → \`200\` \`{ "task" }\`. The clarification loop. \`409\` \`task_not_waiting\` when the task is not \`needs_info\`.
+
+\`401\` \`invite_expired\` after the invite's expiry. \`403\` \`share_pending\`, \`share_revoked\`, \`share_required\`, or \`offer_not_found\` for an offer that was not granted (an ungranted name looks the same as an unknown one). \`429\` \`rate_limited\` when the share's daily cap is spent. \`input_required\`, \`invalid_input\`, and \`result_schema\` behave as on MCP. While \`review_first\` is on, a new task is \`in_review\` and the guest does not see a held question or result until the owner releases it.
 
 ### Claiming a workspace
 

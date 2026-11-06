@@ -17,6 +17,7 @@ import { HttpError, isUniqueViolation } from './errors';
 import { deleteLogoQuietly } from './logo-store';
 import { oauthEnabled } from './oauth/config';
 import { revokeAgentGrants } from './oauth/grants';
+import { guestCredentialState } from './invites';
 import { deliverWakeIds, failGuestTasks } from './sharing';
 import { clientIp } from './origin';
 import { assertWithinLimit } from './plans';
@@ -27,6 +28,13 @@ export type AgentPrincipal = {
   agentId: string;
   agentName: string;
   keyId: string;
+  /**
+   * True for a key that belongs to an unclaimed invite workspace. That caller may use only the
+   * granted offers and the tasks it sent. Claiming the workspace clears this.
+   */
+  externalGuest?: boolean;
+  /** The invite that minted this guest has expired. Later calls must fail. */
+  externalGrantExpired?: boolean;
 };
 
 type WorkspaceUser = SessionUser & { workspace: NonNullable<SessionUser['workspace']> };
@@ -299,11 +307,13 @@ export async function authenticateAgentKey(
   if (options?.recordUse !== false) {
     await db.update(agentKeys).set({ lastUsedAt: new Date() }).where(eq(agentKeys.id, key.id));
   }
+  const guest = await guestCredentialState(agent.workspaceId);
   return {
     workspaceId: agent.workspaceId,
     agentId: agent.id,
     agentName: agent.name,
     keyId: key.id,
+    ...(guest.external ? { externalGuest: true, externalGrantExpired: guest.expired } : {}),
   };
 }
 

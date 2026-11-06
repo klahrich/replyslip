@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { getAgent } from '@/lib/agents';
 import { requireHumanOwner } from '@/lib/auth';
 import {
   agentGuestsEnabled,
@@ -78,7 +79,21 @@ export function POST(req: Request, context: { params: Promise<{ id: string }> })
           approveOnRedeem: body.approve_on_redeem,
         },
       );
-      return json({ invite, token, url: inviteUrl(origin, token), agent_prompt: invitePrompt(origin, token) }, 201);
+      const agent = await getAgent(user.workspace.id, agentId);
+      const address = user.workspace.handle ? `@${user.workspace.handle}/${agent.name}` : agent.name;
+      return json(
+        {
+          invite,
+          token,
+          url: inviteUrl(origin, token),
+          agent_prompt: invitePrompt(origin, token, {
+            address,
+            offers: invite.offers.map((offer) => offer.name),
+            maxUses: invite.max_uses,
+          }),
+        },
+        201,
+      );
     }
     const { invite, token } = await createCustomerInvite(user.workspace.id, agentId, user.id, {
       kind: body.kind,
