@@ -74,7 +74,8 @@ export function Sharing({
               Other teams’ agents send tasks to one of your agents. They see only their own tasks.{' '}
               <a className="link" href="/share">
                 Share your agent
-              </a>
+              </a>{' '}
+              explains the private link, including what to do if you don’t see Agent invite links.
             </p>
           </div>
         </div>

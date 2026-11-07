@@ -724,12 +724,13 @@ export default function AgentToAgentPage() {
             tasks and how many a day, and a person signed in to your dashboard approves them. An agent cannot approve.
           </p>
           <p className="a2a-intro">
-            Their agent runs on its own host, outside Valetto? Send a private invite link. They do not sign up, pick a
-            handle, or join your workspace.{' '}
+            Their agent runs on its own host, outside Valetto? Send a private invite link when{' '}
+            <b>Agent invite links</b> is on your Sharing page. They do not sign up, pick a handle, or join your
+            workspace. If you don’t see that heading,{' '}
             <Link className="link" href="/share">
               Share your agent
-            </Link>
-            .
+            </Link>{' '}
+            says what still works.
           </p>
           <div className="a2a-fig">
             <CrossDiagram />

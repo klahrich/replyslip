@@ -61,7 +61,7 @@ export default function ShareGuidePage() {
       </a>
       <ValettoTop>
         <ul>
-          <li>
+          <li className="vt-nav-in">
             <Link href="/sign-in">Sign in</Link>
           </li>
           <li>
@@ -106,7 +106,10 @@ export default function ShareGuidePage() {
           </article>
           <article>
             <h2>The link is the access</h2>
-            <p>Anyone holding the message can use it. Send it privately, and revoke it when you want it to stop.</p>
+            <p>
+              Anyone holding the message can use it. Send it privately. Revoking the link stops that message. When more
+              than one agent can use it, keys already handed out keep working until you revoke those guests.
+            </p>
           </article>
         </div>
 
@@ -121,6 +124,20 @@ export default function ShareGuidePage() {
               </p>
             </div>
             <span className="sg-tag">You control access</span>
+          </div>
+
+          <div className="sg-callout">
+            <p>
+              <strong>If you don’t see Agent invite links,</strong> this private link isn’t on your Valetto right now.
+              Sharing the agent does not add that heading. You can’t create one, and a link from somewhere else won’t open.
+            </p>
+            <p>
+              You can still invite a team that already has a Valetto workspace. After <strong>Share this agent</strong>,
+              under <strong>Guests</strong>, use <strong>Invite a workspace by handle</strong>. They keep their own
+              workspace, and you approve them. A person who uses your bot in the browser uses <strong>Customer links</strong>{' '}
+              on the same page and signs in with an email code. An outside agent that stays on its own host needs the{' '}
+              <strong>Agent invite links</strong> heading. Signing them up does not stand in for it.
+            </p>
           </div>
 
           <div className="sg-split">
@@ -138,8 +155,8 @@ export default function ShareGuidePage() {
               </Step>
               <Step title="Choose the tasks they can send">
                 <p>
-                  Find <strong>Agent invite links</strong>. Under <strong>Tasks they can send</strong>, tick the tasks you
-                  want to allow.
+                  When <strong>Agent invite links</strong> is on the page, tick the tasks under{' '}
+                  <strong>Tasks they can send</strong>.
                 </p>
                 <p>
                   With one task, it is already selected. With several, none are selected until you tick them. With none, ask
@@ -234,8 +251,8 @@ export default function ShareGuidePage() {
           <div className="sg-callout sg-callout-warn">
             <p>
               <strong>Send the message only to the person it’s for.</strong> Anyone who has it can connect until the link is
-              used up, expires, or you revoke it. A customer email-signup link is a different control, for a person using your
-              bot in the browser.
+              used up, expires, or you revoke it. A key already handed to another agent is stopped by revoking that guest.
+              A customer email-signup link is a different control, for a person using your bot in the browser.
             </p>
           </div>
 
@@ -269,9 +286,14 @@ export default function ShareGuidePage() {
               </p>
               <p>
                 On a link that is already expired, used up, or revoked, and still has guests, the button is{' '}
-                <strong>Revoke guests…</strong>. <strong>Stop sharing</strong> on the agent stops every guest at once, and
-                their open tasks fail the same way.
+                <strong>Revoke guests…</strong>.
               </p>
+                <p>
+                  <strong>Stop sharing</strong> is a pause, not a removal. Open tasks from guests fail with “access
+                  revoked”, and they can’t send a new one while sharing is off. The guests stay listed. Press{' '}
+                  <strong>Share this agent</strong> again and those same guests can send new tasks. Tasks that already
+                  failed stay failed. Revoke a guest under <strong>Guests</strong> when you want that guest gone.
+                </p>
             </div>
           </div>
 
@@ -593,7 +615,10 @@ export default function ShareGuidePage() {
                     </tr>
                     <tr>
                       <td>The link preview will not open</td>
-                      <td>Ask the owner to check the link. Signing up does not repair an invalid, expired, or revoked invite.</td>
+                      <td>
+                        Ask the owner to check the link. If their Sharing page has no Agent invite links heading, this
+                        kind of link isn’t available there. Signing up does not repair it.
+                      </td>
                     </tr>
                     <tr>
                       <td>

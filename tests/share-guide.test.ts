@@ -99,4 +99,22 @@ describe('public share guide', () => {
     const xml = await valettoSitemap().text();
     expect(xml).toContain('https://valetto.tech/share</loc>');
   });
+
+  it('tells an owner what to do when Agent invite links is not on the page', () => {
+    expect(guide).toContain('If you don’t see Agent invite links');
+    expect(guide).toContain('Invite a workspace by handle');
+    expect(guide).toContain('Customer links');
+    expect(guide).toContain('Signing them up does not stand in for it');
+    expect(sharing).toContain('if you don’t see Agent invite links');
+    expect(guide).not.toMatch(/VALETTO_AGENT_GUESTS|agent_guests_enabled|process\.env|\bflag\b/i);
+  });
+
+  it('does not treat a link revoke or Stop sharing as removing every guest', () => {
+    expect(guide).not.toContain('revoke it when you want it to stop');
+    expect(guide).not.toContain('stops every guest');
+    expect(guide).toContain('keys already handed out keep working until you revoke those guests');
+    expect(guide).toContain('The guests stay listed');
+    expect(guide).toContain('those same guests can send new tasks');
+    expect(toggle).toContain('Guests stay listed so you can revoke them');
+  });
 });
