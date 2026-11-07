@@ -377,7 +377,11 @@ function AgentInviteLinks({
                 <div className="dash-actions">
                   {confirming?.id === inv.id ? (
                     <div className="dash-confirm" role="group" aria-label={`Revoke link ${inv.prefix}`}>
-                      <p>Revoke this link? Nobody new can join with it.</p>
+                      <p>
+                        {inv.max_uses === 1
+                          ? 'Revoke this link? It stops working on the next call, including for the guest already using it as their credential. Their open tasks stay open unless you also revoke them below.'
+                          : 'Revoke this link? Nobody new can join. Guest keys already issued keep working until you revoke those guests, or until this link expires.'}
+                      </p>
                       {inv.uses > 0 ? (
                         <label className="dash-invite-check">
                           <input

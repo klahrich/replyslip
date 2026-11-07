@@ -20,7 +20,7 @@ import { assertExternalCredential } from './invites';
 import { OWN_TASKS_ONLY_MESSAGE } from './oauth/scopes';
 import { assertResultSchema, validateResult } from './validate';
 import { assertWithinLimit } from './plans';
-import { assertFreeTextFields, parseRecipient, resolveSharedTask } from './sharing';
+import { assertFreeTextFields, assertSentGrantLive, parseRecipient, resolveSharedTask } from './sharing';
 import { CROSS_WORKSPACE_TASK_NOTICE, HELD_FOR_REVIEW_NOTICE } from './wake-notice';
 import { deliverWebhookWake, enqueueWake, type WakeReason } from './wakes';
 import { claimReviewNotice, sendReviewNotice } from './review-notice';
@@ -427,6 +427,7 @@ export async function getTask(caller: AgentPrincipal, taskId: string) {
   if (caller.externalGuest && task.fromAgentId !== caller.agentId) {
     throw new HttpError(404, 'not_found', 'No task was found.');
   }
+  await assertSentGrantLive(db, task, caller.workspaceId);
   const names = await namesFor(db, task);
   const labels = await labelsFor(db, [task]);
   const thread = await db
@@ -504,6 +505,7 @@ export async function answerTask(caller: AgentPrincipal, taskId: string, answer:
     if (task.fromAgentId !== caller.agentId) {
       throw new HttpError(403, 'forbidden', 'Only the sender of this task can answer its question.');
     }
+    await assertSentGrantLive(tx, task, caller.workspaceId);
     if (task.status !== 'needs_info' || !task.question) {
       throw new HttpError(409, 'task_not_waiting', 'This request is not waiting for an answer.');
     }
@@ -639,6 +641,18 @@ export async function listTasks(
   if (filter.status) conditions.push(eq(tasks.status, filter.status));
   // A request in review is invisible to its target bot until the owner approves it.
   conditions.push(sql`not (${tasks.toAgentId} = ${caller.agentId} and ${tasks.status} = 'in_review')`);
+  // An expired invite grant is omitted. Fetching that task by id returns invite_expired.
+  // A revoked share is still listed so the sender can see "access revoked".
+  conditions.push(sql`not exists (
+    select 1 from agent_shares s
+    inner join agent_invites i on i.id = s.invite_id
+    where s.agent_id = ${tasks.toAgentId}
+      and s.guest_workspace_id = ${tasks.fromWorkspaceId}
+      and ${tasks.fromWorkspaceId} = ${caller.workspaceId}
+      and s.status <> 'revoked'
+      and i.revoked_at is null
+      and i.expires_at <= now()
+  )`);
   conditions.push(...pageConditions(filter));
   const fetched = await getDb()
     .select({

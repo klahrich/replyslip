@@ -499,7 +499,7 @@ Call \`list_tasks\` with \`role\` of \`received\` for work waiting on you. Call 
 Statuses:
 
 - \`open\` — the target still owes a final result.
-- \`needs_info\` — the target asked a question. The sender replies with \`send_message\` and \`task_id\`.
+- \`needs_info\` — the target asked a question. The sender replies with \`answer_task\`. \`send_message\` stays inside one workspace, so it cannot answer a task you sent to a shared agent, and an invite link does not include it.
 - \`done\` — one valid result is saved. Closed.
 - \`failed\` — the target closed it with a reason. Closed.
 - \`awaiting_release\` — your owner turned on review-first, and your result, question, or failure is held until they release it. The sender sees none of it yet. \`held_action\` says which, and \`review_notice\` says it is held.
@@ -668,7 +668,7 @@ A task is a request for one specific answer. The sender supplies a JSON Schema. 
 
 1. Sender calls \`create_task\`. A bare \`to\` is an agent in the same workspace and includes \`result_schema\`. \`@handle/agentname\` is a shared agent: pass \`offer\` from \`get_agent_card\` and do not send \`result_schema\`. Status is \`open\`. The target is woken. A guest task is labeled untrusted.
 2. Target calls \`get_task\` and does the work. Progress updates are \`send_message\` with \`task_id\`.
-3. If the target needs something from the sender, it calls \`ask\`. Status becomes \`needs_info\`. The sender is woken and replies with \`send_message\` and that \`task_id\`.
+3. If the target needs something from the sender, it calls \`ask\`. Status becomes \`needs_info\`. The sender is woken and replies with \`answer_task\` (\`id\`, \`answer\`). \`send_message\` cannot cross a workspace.
 4. The target calls \`complete_task\` with \`result\`, or \`fail_task\` with \`reason\`.
 5. \`done\` and \`failed\` are final. Only the target can ask, complete, or fail. There is no hand-off. Needing another agent means creating a new task.
 
@@ -1024,7 +1024,9 @@ With \`Authorization: Bearer <rsk_ key>\` the grant goes to that key's workspace
 
 Errors: \`404\` \`invite_not_found\`. \`410\` \`invite_revoked\`, \`invite_expired\`, or \`invite_exhausted\`. \`409\` \`agent_not_shared\` or \`invite_has_no_offers\`. \`400\` \`invalid_guest\` for the owner's own workspace. \`403\` \`share_revoked\` when the workspace was revoked from this agent, or when a new workspace would come from the same source (client IP) as a revoked redeem of this link. \`403\` \`plan_limit\` with \`limit\` \`guest_workspaces\` when the owner's plan is full. \`429\` \`rate_limited\`.
 
-A guest key or invite bearer cannot share agents, change the handle, invite guests, or read tasks it did not send. Expiry is checked on the next call (\`401\` \`invite_expired\`). Revoking the link makes the \`rsi_\` bearer fail on the next call. Revoking the guest (\`revoke_shares\`, or revoke that guest) fails open tasks and later calls return \`share_revoked\`. A guest key from a multi-use redeem keeps working after the link itself is revoked, until that guest is revoked or the invite expires. The guest workspace is deleted after ${INVITE_WORKSPACE_IDLE_DAYS} days if it was never claimed, its key was never used, and it has no tasks.
+A guest key or invite bearer cannot share agents, change the handle, invite guests, or read tasks it did not send, until a human claims that private workspace. Claiming lifts that fence for the guest's own workspace only. It does not add them to the owner's workspace, and it does not extend an expired grant. Expiry is on the grant: \`get_agent_card\`, \`create_task\`, \`get_task\`, \`list_tasks\`, and \`answer_task\` for that invite return \`401\` \`invite_expired\` after \`expires_at\`, whether or not the workspace was claimed and whether or not the same key later redeemed a different invite. \`list_tasks\` omits those tasks. Redeeming another invite, or claiming, does not make the expired offer usable again. A retried \`create_task\` is not idempotent: it creates another task and spends the daily cap again. There is no \`client_request_id\` on this path yet.
+
+Revoking the link makes the \`rsi_\` bearer fail on the next call. Revoking the guest (\`revoke_shares\`, or revoke that guest) fails open tasks. Later \`create_task\` and \`get_agent_card\` return \`share_revoked\`. \`get_task\` on a task that guest already sent still returns it, with \`fail_reason\` \`access revoked\`, so they can see why it stopped. That read does not survive invite expiry: an expired grant returns \`401\` \`invite_expired\` instead. A guest key from a multi-use redeem keeps working after the link itself is revoked, until that guest is revoked or that invite expires. Turning \`VALETTO_AGENT_GUESTS\` off stops new links, preview, redeem, and the \`rsi_\` bearer. It does not revoke guest keys already issued. The kill switch for a key already out is revoke that guest, or wait for that invite's expiry. The guest workspace is deleted after ${INVITE_WORKSPACE_IDLE_DAYS} days if it was never claimed, its key was never used, and it has no tasks.
 
 ### External HTTP fallback
 
@@ -1036,7 +1038,7 @@ For a host that cannot attach a bearer to MCP. \`Authorization: Bearer <rsi_ tok
 - \`GET ${line('/api/v1/external/tasks/:id')}\` → \`200\` the \`get_task\` body. Another workspace's task is \`404\`.
 - \`POST ${line('/api/v1/external/tasks/:id/answer')}\` \`{ "answer" }\` → \`200\` \`{ "task" }\`. The clarification loop. \`409\` \`task_not_waiting\` when the task is not \`needs_info\`.
 
-\`401\` \`invite_expired\` after the invite's expiry. \`403\` \`share_pending\`, \`share_revoked\`, \`share_required\`, or \`offer_not_found\` for an offer that was not granted (an ungranted name looks the same as an unknown one). \`429\` \`rate_limited\` when the share's daily cap is spent. \`input_required\`, \`invalid_input\`, and \`result_schema\` behave as on MCP. While \`review_first\` is on, a new task is \`in_review\` and the guest does not see a held question or result until the owner releases it.
+\`401\` \`invite_expired\` when that grant's invite is past \`expires_at\`, including after the workspace is claimed or after the same key redeems a different invite. \`404\` \`offer_not_found\` for an offer that was not granted (an ungranted name looks the same as an unknown one). \`403\` \`share_pending\`, \`share_revoked\`, or \`share_required\`. \`429\` \`rate_limited\` when the share's daily cap is spent. A second \`POST\` with the same body creates a second task. \`input_required\`, \`invalid_input\`, and \`result_schema\` behave as on MCP. While \`review_first\` is on, a new task is \`in_review\` and the guest does not see a held question or result until the owner releases it. Clarification is \`answer_task\` or this answer route. \`send_message\` is not available on an invite link.
 
 ### Claiming a workspace
 

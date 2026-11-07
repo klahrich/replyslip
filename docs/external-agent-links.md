@@ -30,15 +30,18 @@ Valetto does not run the external agent and does not push to a host it cannot wa
 - `daily_cap` is a rolling 24 hours on that share. A rejected input does not spend it.
 - Connecting spends one of the owner's guest slots (`guest_workspaces` on the free plan).
 - Tasks the guest sends count on the guest workspace's monthly allowance (1,000 on the free plan), not on the owner's monthly cap.
-- Revoking the link makes the `rsi_` bearer fail on the next call. It does not by itself fail open tasks or kill a guest key that a multi-use redeem already returned.
-- Revoking the guest fails open tasks and the next call returns `share_revoked`.
-- After `expires_at`, the next call is `401` `invite_expired`, for both the bearer and the guest key.
+- Revoking the link makes the `rsi_` bearer fail on the next call. It does not by itself fail open tasks or kill a guest key that a multi-use redeem already returned. The dashboard says so: a one-guest link stops the person already using it; a multi-guest link does not.
+- Revoking the guest fails open tasks. The next `create_task` or `get_agent_card` returns `share_revoked`. `get_task` on a task they already sent still returns it, with `fail_reason` `access revoked`, so they can see why it stopped.
+- After `expires_at`, that grant is dead. `get_agent_card`, `create_task`, `get_task`, and `answer_task` return `401` `invite_expired`. `list_tasks` leaves those tasks out. Claiming the workspace does not bring the grant back. Redeeming a second, live invite with the same key does not bring it back either. The new invite works. The old one does not.
+- A retried `create_task` is not idempotent. It opens another task and spends the daily cap again. This path does not take a `client_request_id` yet.
 - A revoked guest cannot redeem that invite again from the same client address, and an invite never undoes a revoke.
 
 ## Rollout
 
 No migration. The tables are the ones already used for agent invites.
 
-Set `VALETTO_AGENT_GUESTS=1` on the deployment that should offer the links. Leave it unset and every create, preview, redeem, and `rsi_` bearer is `404`, which is the current production default. Do not flip it as part of a code deploy until you mean to. Guest keys that were already issued keep working if the flag is later turned off. New links do not.
+Set `VALETTO_AGENT_GUESTS=1` on the deployment that should offer new links. Leave it unset and create, preview, redeem, and the `rsi_` bearer are `404`. That is the current production default. Do not flip it as part of a code deploy until you mean to.
 
-Claiming the guest workspace (`claim_url`) stays optional. It attaches an email to that private workspace. It does not add the person to the owner's workspace. The invite token stays least-privilege even after a claim. A key issued at redeem becomes a normal key only after that claim, because the human then owns the guest workspace.
+The flag is not a kill switch. Turning it off does not revoke guest keys (`rsk_`) already issued, and it does not expire grants. Those keys keep working until you revoke that guest or the invite's `expires_at` passes. Revoke the guest to stop a key that is already out. Expiry stops that grant even if the guest workspace has been claimed.
+
+Claiming the guest workspace (`claim_url`) stays optional. It attaches an email to that private workspace. It does not add the person to the owner's workspace. After a claim, that key can manage its own workspace (a handle, sharing its own agent). That is ordinary post-claim access. It does not revive an invite that has expired, and the invite token itself stays limited to the grant.

@@ -1066,6 +1066,9 @@ export async function resolveSharedTask(
   if (fresh.status !== 'approved') {
     throw new HttpError(403, 'share_pending', `Access to ${shown} is not approved yet.`);
   }
+  // Expiry belongs to this grant, not to the guest workspace. Claiming the workspace or
+  // redeeming a different invite must not make this offer usable again.
+  await assertShareInviteLive(tx, fresh.inviteId);
   // One lookup through the grant: an offer the owner has but did not grant looks exactly like an unknown name,
   // so a guest cannot probe which offers exist.
   const [menu] = await tx
@@ -1130,6 +1133,44 @@ export async function resolveSharedTask(
   };
 }
 
+const INVITE_EXPIRED_MESSAGE = 'This invite has expired. Ask the owner for a new one.';
+
+/**
+ * A share created from an invite dies when that invite's expires_at passes.
+ * Revoking the link is separate: a guest key keeps working until the guest is revoked or this expiry.
+ * A missing invite row fails closed. Shares with no invite (handle or customer) are unchanged.
+ */
+export async function assertShareInviteLive(db: Db, inviteId: string | null): Promise<void> {
+  if (!inviteId) return;
+  const [invite] = await db
+    .select({ revokedAt: agentInvites.revokedAt, expiresAt: agentInvites.expiresAt })
+    .from(agentInvites)
+    .where(eq(agentInvites.id, inviteId))
+    .limit(1);
+  if (!invite || invite.revokedAt) {
+    if (!invite) throw new HttpError(401, 'invite_expired', INVITE_EXPIRED_MESSAGE);
+    return;
+  }
+  if (invite.expiresAt.getTime() <= Date.now()) throw new HttpError(401, 'invite_expired', INVITE_EXPIRED_MESSAGE);
+}
+
+/**
+ * The sender's read or answer of a task they sent through an invite grant.
+ * A revoked share stays readable so they can see the task fail with "access revoked".
+ * An expired invite does not: get, list, and answer stop for that grant only.
+ */
+export async function assertSentGrantLive(db: Db, task: { toAgentId: string; fromWorkspaceId: string | null; workspaceId: string }, callerWorkspaceId: string): Promise<void> {
+  if (!task.fromWorkspaceId || task.fromWorkspaceId !== callerWorkspaceId) return;
+  if (task.workspaceId === callerWorkspaceId) return;
+  const [share] = await db
+    .select({ inviteId: agentShares.inviteId, status: agentShares.status })
+    .from(agentShares)
+    .where(and(eq(agentShares.agentId, task.toAgentId), eq(agentShares.guestWorkspaceId, callerWorkspaceId)))
+    .limit(1);
+  if (!share || share.status === 'revoked') return;
+  await assertShareInviteLive(db, share.inviteId);
+}
+
 export async function listExternalGrants(
   workspaceId: string,
 ): Promise<{ address: string; status: string; offers: string[] }[]> {
@@ -1145,6 +1186,14 @@ export async function listExternalGrants(
       .where(eq(workspaces.id, agent.workspaceId))
       .limit(1);
     if (!owner?.handle) continue;
+    if (share.inviteId) {
+      const [invite] = await db
+        .select({ revokedAt: agentInvites.revokedAt, expiresAt: agentInvites.expiresAt })
+        .from(agentInvites)
+        .where(eq(agentInvites.id, share.inviteId))
+        .limit(1);
+      if (invite && !invite.revokedAt && invite.expiresAt.getTime() <= Date.now()) continue;
+    }
     const offers = await db
       .select({ name: agentOffers.name })
       .from(agentShareOffers)
@@ -1157,9 +1206,6 @@ export async function listExternalGrants(
 }
 
 export async function getAgentCard(caller: AgentPrincipal, to: string) {
-  if (caller.externalGrantExpired) {
-    throw new HttpError(401, 'invite_expired', 'This invite has expired. Ask the owner for a new one.');
-  }
   const address = parseRecipient(to);
   if (address.kind !== 'shared') {
     throw new HttpError(400, 'invalid_address', 'get_agent_card takes a shared address, @handle/agentname.');
@@ -1185,6 +1231,7 @@ export async function getAgentCard(caller: AgentPrincipal, to: string) {
   if (!share) throw new HttpError(403, 'share_required', `This workspace does not have access to ${shown}.`);
   if (share.status === 'revoked') throw new HttpError(403, 'share_revoked', `Access to ${shown} was revoked.`);
   if (share.status !== 'approved') throw new HttpError(403, 'share_pending', `Access to ${shown} is not approved yet.`);
+  await assertShareInviteLive(db, share.inviteId);
   const offers = await db
     .select({
       name: agentOffers.name,

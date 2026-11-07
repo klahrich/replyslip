@@ -670,6 +670,120 @@ describe('external agent link', () => {
     expect(answered.data.task.status).toBe('open');
   });
 
+  it('does not revive an expired grant when the guest workspace is claimed', async () => {
+    const o = await owner();
+    const made = await createInvite(o, { max_uses: 2 });
+    const redeemed = await redeemNew(made.token);
+    const key = redeemed.data.api_key as string;
+    const claimToken = (redeemed.data.workspace.claim_url as string).split('#')[1]!;
+    const address = `@${o.handle}/Grok`;
+    const before = await mcpTool(key, 'create_task', {
+      to: address,
+      offer: 'draft',
+      title: 'Before',
+      description: 'Still open.',
+    });
+    expect(before.isError).toBe(false);
+    const asked = await mcpTool(o.agentKey, 'ask', { id: before.payload.task.id, question: 'Which?' });
+    expect(asked.isError).toBe(false);
+    await getDb().update(agentInvites).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(agentInvites.id, made.invite.id));
+
+    const blocked = await mcpTool(key, 'create_task', {
+      to: address,
+      offer: 'draft',
+      title: 'After',
+      description: 'Expired.',
+    });
+    expect(blocked.payload.error).toBe('invite_expired');
+    const answered = await mcpTool(key, 'answer_task', { id: before.payload.task.id, answer: 'Too late.' });
+    expect(answered.payload.error).toBe('invite_expired');
+
+    const email = emailAddress('claimexpire');
+    await call(requestCode, 'http://localhost/api/v1/auth/request-code', { body: { email } });
+    const claimed = await call(verifyCode, 'http://localhost/api/v1/auth/verify-code', {
+      body: { email, code: latestCode(email), claim_token: claimToken },
+    });
+    expect(claimed.status).toBe(200);
+
+    const again = await mcpTool(key, 'create_task', {
+      to: address,
+      offer: 'draft',
+      title: 'Claimed',
+      description: 'Still expired.',
+    });
+    expect(again.payload.error).toBe('invite_expired');
+    expect((await mcpTool(key, 'get_agent_card', { address })).payload.error).toBe('invite_expired');
+    expect((await mcpTool(key, 'get_task', { id: before.payload.task.id })).payload.error).toBe('invite_expired');
+    const listed = await mcpTool(key, 'list_tasks', {});
+    expect(listed.isError).toBe(false);
+    expect(listed.payload.tasks.map((task: { id: string }) => task.id)).not.toContain(before.payload.task.id);
+
+    const named = await mcpTool(key, 'set_workspace_handle', { handle: handleName('c') });
+    expect(named.isError).toBe(false);
+    const tools = (await mcpListTools(key)).map((tool) => tool.name);
+    expect(tools).toContain('set_workspace_handle');
+    expect(tools).toContain('set_agent_sharing');
+  });
+
+  it('does not revive an expired grant when the same key redeems a live invite for another agent', async () => {
+    const o = await owner();
+    const other = await createAgent(o.cookie, 'Other');
+    const offer = await call(postOffer, `http://localhost/api/v1/agents/${other.id}/offers`, {
+      cookie: o.cookie,
+      params: { id: other.id },
+      body: { name: 'draft', description: 'Other draft.', result_schema: offerSchema },
+    });
+    expect(offer.status).toBe(201);
+    const shared = await call(putSharing, `http://localhost/api/v1/agents/${other.id}/sharing`, {
+      method: 'PUT',
+      cookie: o.cookie,
+      params: { id: other.id },
+      body: { shared: true },
+    });
+    expect(shared.status).toBe(200);
+
+    const inviteA = await createInvite(o, { max_uses: 2 });
+    const redeemed = await redeemNew(inviteA.token);
+    const key = redeemed.data.api_key as string;
+    const grok = `@${o.handle}/Grok`;
+    const otherAddress = `@${o.handle}/Other`;
+    const first = await mcpTool(key, 'create_task', { to: grok, offer: 'draft', title: 'A', description: 'On Grok.' });
+    expect(first.isError).toBe(false);
+    await getDb().update(agentInvites).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(agentInvites.id, inviteA.invite.id));
+    expect(
+      (await mcpTool(key, 'create_task', { to: grok, offer: 'draft', title: 'Dead', description: 'No.' })).payload.error,
+    ).toBe('invite_expired');
+
+    const inviteB = await call(postInvite, `http://localhost/api/v1/agents/${other.id}/invites`, {
+      cookie: o.cookie,
+      params: { id: other.id },
+      body: { kind: 'agent', offers: ['draft'], approve_on_redeem: true, max_uses: 2 },
+    });
+    expect(inviteB.status).toBe(201);
+    const joined = await call(redeemRoute, 'http://localhost/api/v1/invites/redeem', {
+      bearer: key,
+      body: { invite: inviteB.data.token },
+    });
+    expect(joined.status).toBe(201);
+
+    expect(
+      (await mcpTool(key, 'create_task', { to: grok, offer: 'draft', title: 'Bypass', description: 'No.' })).payload.error,
+    ).toBe('invite_expired');
+    expect((await mcpTool(key, 'get_agent_card', { address: grok })).payload.error).toBe('invite_expired');
+    expect((await mcpTool(key, 'get_task', { id: first.payload.task.id })).payload.error).toBe('invite_expired');
+    const live = await mcpTool(key, 'create_task', {
+      to: otherAddress,
+      offer: 'draft',
+      title: 'Live',
+      description: 'On Other.',
+    });
+    expect(live.isError).toBe(false);
+    const tools = (await mcpListTools(key)).map((tool) => tool.name);
+    expect(tools).not.toContain('set_agent_sharing');
+    expect(tools).not.toContain('redeem_invite');
+    expect(tools).not.toContain('invite_guest');
+  });
+
   it('still requires an existing Valetto key for redeem_invite, and leaves customer links alone', async () => {
     const o = await owner();
     const { token } = await createInvite(o, { max_uses: 3 });

@@ -141,7 +141,11 @@ export function invitePrompt(
   ].join('\n');
 }
 
-/** Unclaimed invite workspaces are external guests. A claimed one is a normal workspace. */
+/**
+ * Unclaimed invite workspaces are external guests. Claiming lifts that tool fence
+ * (the human then owns this private workspace) and does not revive an expired grant.
+ * Grant expiry is checked on the share's own invite, not here.
+ */
 export async function guestCredentialState(workspaceId: string): Promise<{ external: boolean; expired: boolean }> {
   const db = getDb();
   const [workspace] = await db
@@ -150,15 +154,7 @@ export async function guestCredentialState(workspaceId: string): Promise<{ exter
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
   if (!workspace || workspace.origin !== 'invite' || workspace.claimedAt) return { external: false, expired: false };
-  const shares = await db
-    .select({ inviteId: agentShares.inviteId })
-    .from(agentShares)
-    .where(eq(agentShares.guestWorkspaceId, workspaceId));
-  const inviteIds = shares.map((share) => share.inviteId).filter((id): id is string => id != null);
-  if (inviteIds.length === 0) return { external: true, expired: false };
-  const rows = await db.select().from(agentInvites).where(inArray(agentInvites.id, inviteIds));
-  const expired = rows.length > 0 && rows.every((row) => inviteStatus(row) === 'expired');
-  return { external: true, expired };
+  return { external: true, expired: false };
 }
 
 export function assertExternalCredential(caller: AgentPrincipal): void {
@@ -169,7 +165,6 @@ export function assertExternalCredential(caller: AgentPrincipal): void {
 async function principalForInvite(db: Db, inviteId: string): Promise<AgentPrincipal | null> {
   const [share] = await db.select().from(agentShares).where(eq(agentShares.inviteId, inviteId)).limit(1);
   if (!share) return null;
-  const [invite] = await db.select().from(agentInvites).where(eq(agentInvites.id, inviteId)).limit(1);
   const [agent] = await db
     .select()
     .from(agents)
@@ -189,7 +184,7 @@ async function principalForInvite(db: Db, inviteId: string): Promise<AgentPrinci
     agentName: agent.name,
     keyId: key.id,
     externalGuest: true,
-    externalGrantExpired: invite ? inviteStatus(invite) === 'expired' : false,
+    externalGrantExpired: false,
   };
 }
 

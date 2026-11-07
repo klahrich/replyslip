@@ -220,8 +220,9 @@ POST /api/mcp`}</pre>
     details: (
       <ul>
         <li>
-          Revoking only the link leaves guests who already joined as they are. Revoke them one at a time in Guests, or all at
-          once with the checkbox.
+          A one-guest link is the credential, so revoking it stops that guest on the next call. A link for several guests only
+          stops new joins; keys already issued keep working until you revoke those guests or the link expires. The checkbox
+          fails their open tasks either way.
         </li>
         <li>
           A revoked guest’s open tasks fail with <C>access revoked</C>, the same as any revoke.
