@@ -201,7 +201,7 @@ function redactSecrets(text) {
 }
 
 // packages/cli/src/process-identity.ts
-import { execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { promisify } from "node:util";
 
@@ -273,14 +273,45 @@ function linuxStartMs(statLine, btimeSec, clkTck = 100) {
   if (!Number.isFinite(ticks) || clkTck <= 0) return null;
   return Math.round(btimeSec * 1e3 + ticks / clkTck * 1e3);
 }
-function parsePsIdentity(stdout) {
-  const line = stdout.trim();
-  if (!line) return null;
-  const match = line.match(/^(\d+)\s+([\s\S]+)$/);
+var DARWIN_MONTHS = {
+  Jan: 0,
+  Feb: 1,
+  Mar: 2,
+  Apr: 3,
+  May: 4,
+  Jun: 5,
+  Jul: 6,
+  Aug: 7,
+  Sep: 8,
+  Oct: 9,
+  Nov: 10,
+  Dec: 11
+};
+function darwinLstartMs(text) {
+  const match = text.trim().match(/^[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/);
   if (!match) return null;
-  const elapsed = Number(match[1]);
-  if (!Number.isFinite(elapsed) || elapsed < 0) return null;
-  return { cmdline: match[2].trim(), startedAtMs: Date.now() - elapsed * 1e3 };
+  const month = DARWIN_MONTHS[match[1] ?? ""];
+  if (month == null) return null;
+  const day = Number(match[2]);
+  const hour = Number(match[3]);
+  const minute = Number(match[4]);
+  const second = Number(match[5]);
+  const year = Number(match[6]);
+  if (day < 1 || hour > 23 || minute > 59 || second > 59) return null;
+  const ms = new Date(year, month, day, hour, minute, second).getTime();
+  if (Number.isNaN(ms)) return null;
+  const check = new Date(ms);
+  if (check.getFullYear() !== year || check.getMonth() !== month || check.getDate() !== day) return null;
+  return ms;
+}
+function parseDarwinIdentity(stdout) {
+  const line = stdout.trim();
+  const match = line.match(/^[A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}/);
+  if (!match) return null;
+  const startedAtMs = darwinLstartMs(match[0]);
+  const cmdline = line.slice(match[0].length).trim();
+  if (startedAtMs == null || !cmdline) return null;
+  return { cmdline, startedAtMs };
 }
 function parseWindowsIdentity(jsonText, now = Date.now()) {
   let parsed;
@@ -330,24 +361,76 @@ function cimCreationMs(text) {
   }
   return localAsUtc - offsetMin * 6e4;
 }
+var PROCESS_START_TIMEOUT_MS = 1e3;
 var ownStart;
 function ownProcessStartedAtMs() {
   if (ownStart === void 0) ownStart = processStartedAtMs(process.pid);
   return ownStart;
 }
-function processStartedAtMs(pid) {
+function processStartedAtMs(pid, options = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
+  const platform = options.platform ?? process.platform;
   try {
-    if (process.platform === "linux") {
-      const stat3 = readFileSync(`/proc/${pid}/stat`, "utf8");
-      const procStat = readFileSync("/proc/stat", "utf8");
-      const btime = Number(procStat.match(/^btime\s+(\d+)/m)?.[1]);
-      return linuxStartMs(stat3, btime);
+    if (platform === "linux") {
+      const row = (options.readLinux ?? readLinuxStart)(pid);
+      if (!row) return null;
+      return linuxStartMs(row.stat, row.btimeSec);
+    }
+    const run = options.run ?? runProcessStart;
+    if (platform === "darwin") {
+      const stdout = run("ps", ["-p", String(pid), "-o", "lstart="], PROCESS_START_TIMEOUT_MS);
+      if (!stdout) return null;
+      return darwinLstartMs(stdout);
+    }
+    if (platform === "win32") {
+      const stdout = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", windowsStartScript(pid)], PROCESS_START_TIMEOUT_MS);
+      if (!stdout) return null;
+      return parseWindowsStartStdout(stdout);
     }
   } catch {
     return null;
   }
   return null;
+}
+function readLinuxStart(pid) {
+  try {
+    const stat3 = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const procStat = readFileSync("/proc/stat", "utf8");
+    const btimeSec = Number(procStat.match(/^btime\s+(\d+)/m)?.[1]);
+    if (!Number.isFinite(btimeSec)) return null;
+    return { stat: stat3, btimeSec };
+  } catch {
+    return null;
+  }
+}
+function runProcessStart(file, args, timeoutMs) {
+  try {
+    return execFileSync(file, args, {
+      timeout: timeoutMs,
+      windowsHide: true,
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C" }
+    });
+  } catch {
+    return null;
+  }
+}
+function windowsStartScript(pid) {
+  return `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate | ConvertTo-Json -Compress`;
+}
+function parseWindowsStartStdout(stdout) {
+  const text = stdout.trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed === "string" || typeof parsed === "number") return windowsCreationMs(parsed);
+    if (parsed && typeof parsed === "object" && "CreationDate" in parsed) {
+      return windowsCreationMs(parsed.CreationDate);
+    }
+    return null;
+  } catch {
+    return windowsCreationMs(text);
+  }
 }
 async function identifyProcess(pid, platform = process.platform) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
@@ -370,8 +453,12 @@ function identifyLinux(pid) {
   return { cmdline: text, startedAtMs: linuxStartMs(stat3, btime) };
 }
 async function identifyDarwin(pid) {
-  const { stdout } = await execFile("ps", ["-p", String(pid), "-ww", "-o", "etimes=,command="], { timeout: 5e3, windowsHide: true });
-  return parsePsIdentity(String(stdout));
+  const { stdout } = await execFile("ps", ["-p", String(pid), "-ww", "-o", "lstart=,command="], {
+    timeout: 5e3,
+    windowsHide: true,
+    env: { ...process.env, LC_ALL: "C" }
+  });
+  return parseDarwinIdentity(String(stdout));
 }
 async function identifyWindows(pid) {
   const script = `Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" | Select-Object CommandLine,CreationDate | ConvertTo-Json -Compress`;
@@ -476,10 +563,9 @@ function decideSupervision(input) {
 
 // packages/cli/src/file-lock.ts
 import { randomBytes } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readFileSync as readFileSync2, statSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync as readFileSync2, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import path2 from "node:path";
 var FILE_LOCK_WAIT_MS = 2e3;
-var FILE_LOCK_PUBLISH_GRACE_MS = 50;
 var FileLockError = class extends Error {
   constructor(message) {
     super(message);
@@ -488,7 +574,7 @@ var FileLockError = class extends Error {
 };
 var heldTokens = /* @__PURE__ */ new Set();
 function acquireFileLockSync(file, options = {}) {
-  const held = acquireFileLockLoop(file, options, (ms) => {
+  const held = runLock(file, options, (ms) => {
     if (ms <= 0) return;
     const gate = new Int32Array(new SharedArrayBuffer(4));
     Atomics.wait(gate, 0, 0, ms);
@@ -497,7 +583,7 @@ function acquireFileLockSync(file, options = {}) {
   return held;
 }
 async function acquireFileLock(file, options = {}) {
-  const held = acquireFileLockLoop(file, options, (ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const held = runLock(file, options, (ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   return held instanceof Promise ? held : held;
 }
 function releaseFileLock(held) {
@@ -513,107 +599,182 @@ function releaseFileLock(held) {
   } catch {
   }
 }
-function acquireFileLockLoop(file, options, sleep) {
+function runLock(file, options, sleep) {
   const waitMs = options.waitMs ?? FILE_LOCK_WAIT_MS;
   const now = options.now ?? Date.now;
   const deadline = now() + waitMs;
+  const processStart = startReader(options);
   mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
-  const run = () => {
-    const step = oneAttempt(file, options, now());
-    if (step.held) return step.held;
-    if (now() >= deadline) throw new FileLockError(busyMessage(file, step.text, waitMs));
-    const pause = Math.min(10, Math.max(0, deadline - now()));
-    const slept = sleep(pause);
-    if (slept && typeof slept.then === "function") {
-      return slept.then(run);
+  const turn = () => {
+    const draft = beginPublish(file, options);
+    const finish = () => {
+      const held = commitPublish(draft, file);
+      if (held) return held;
+      const seen = observe(file, options, processStart);
+      if (seen.kind === "stale") {
+        options.beforeReclaim?.(seen.text);
+        if (reclaimSnapshot(file, seen.text)) return null;
+      }
+      if (now() >= deadline) throw new FileLockError(busyMessage(file, seen.text, waitMs));
+      return pause(Math.min(10, Math.max(0, deadline - now())));
+    };
+    const pause = (ms) => {
+      const slept = sleep(ms);
+      if (slept && typeof slept.then === "function") return slept.then(turn);
+      return turn();
+    };
+    if (!options.beforePublish) return finish() ?? turn();
+    let hooked;
+    try {
+      hooked = options.beforePublish(draft.temp);
+    } catch (err) {
+      abortPublish(draft);
+      throw err;
     }
-    return run();
+    if (hooked && typeof hooked.then === "function") {
+      return hooked.then(
+        () => finish() ?? turn(),
+        (err) => {
+          abortPublish(draft);
+          throw err;
+        }
+      );
+    }
+    return finish() ?? turn();
   };
-  return run();
+  return turn();
 }
-function oneAttempt(file, options, nowMs) {
-  const created = tryCreate(file, options);
-  if (created) return { held: created };
-  let text = "";
-  let mtime = 0;
-  try {
-    const info = statSync(file);
-    mtime = info.mtimeMs;
-    text = readFileSync2(file, "utf8");
-  } catch {
-    return { text: "" };
-  }
-  const kind = classify(text, mtime, nowMs, options);
-  if (kind !== "stale") return { text };
-  options.beforeReclaim?.(text);
-  unlinkIfUnchanged(file, text);
-  return { text };
-}
-function tryCreate(file, options) {
+function beginPublish(file, options) {
   const self = options.self ?? { pid: process.pid, startedAtMs: ownProcessStartedAtMs() };
-  let fd;
+  const token = randomBytes(8).toString("hex");
+  const temp = `${file}.${token}.tmp`;
+  const fd = openSync(temp, "wx", 384);
+  const body = `${JSON.stringify({ pid: self.pid, token, startedAtMs: self.startedAtMs })}
+`;
+  const draft = { fd, temp, token, body, closed: false };
   try {
-    fd = openSync(file, "wx", 384);
+    const written = writeSync(fd, body);
+    if (written !== Buffer.byteLength(body)) throw new FileLockError(`Could not write the owner record for ${file}.`);
+    fsyncSync(fd);
   } catch (err) {
+    abortPublish(draft);
+    throw err;
+  }
+  return draft;
+}
+function commitPublish(draft, file) {
+  let onDisk = "";
+  try {
+    onDisk = readFileSync2(draft.temp, "utf8");
+  } catch (err) {
+    abortPublish(draft);
+    throw err;
+  }
+  if (onDisk !== draft.body) {
+    abortPublish(draft);
+    return null;
+  }
+  try {
+    linkSync(draft.temp, file);
+  } catch (err) {
+    abortPublish(draft);
     if (err.code === "EEXIST") return null;
     throw err;
   }
-  const token = randomBytes(8).toString("hex");
-  const body = `${JSON.stringify({ pid: self.pid, token, startedAtMs: self.startedAtMs })}
-`;
+  const mine = fstatSync(draft.fd);
+  let linked;
   try {
-    writeSync(fd, body);
-  } catch (err) {
-    try {
-      closeSync(fd);
-    } catch {
-    }
-    try {
-      unlinkSync(file);
-    } catch {
-    }
-    throw err;
+    linked = statSync(file);
+  } catch {
+    abortPublish(draft);
+    return null;
   }
-  heldTokens.add(token);
-  return { fd, file, token };
+  if (mine.ino !== linked.ino || mine.dev !== linked.dev) {
+    abortPublish(draft);
+    return null;
+  }
+  try {
+    unlinkSync(draft.temp);
+  } catch {
+  }
+  heldTokens.add(draft.token);
+  draft.closed = true;
+  return { fd: draft.fd, file, token: draft.token };
 }
-function classify(text, mtimeMs, nowMs, options) {
+function abortPublish(draft) {
+  closeDraft(draft);
+  try {
+    unlinkSync(draft.temp);
+  } catch {
+  }
+}
+function closeDraft(draft) {
+  if (draft.closed) return;
+  draft.closed = true;
+  try {
+    closeSync(draft.fd);
+  } catch {
+  }
+}
+function observe(file, options, processStart) {
+  let text = "";
+  try {
+    text = readFileSync2(file, "utf8");
+  } catch {
+    return { kind: "absent", text: "" };
+  }
+  return { kind: classify(text, options, processStart), text };
+}
+function reclaimSnapshot(file, snapshot) {
+  const aside = `${file}.${randomBytes(8).toString("hex")}.aside`;
+  try {
+    renameSync(file, aside);
+  } catch {
+    return false;
+  }
+  let text = "";
+  try {
+    text = readFileSync2(aside, "utf8");
+  } catch {
+    return false;
+  }
+  if (text !== snapshot) {
+    try {
+      linkSync(aside, file);
+      unlinkSync(aside);
+    } catch {
+    }
+    return false;
+  }
+  try {
+    unlinkSync(aside);
+  } catch {
+  }
+  return true;
+}
+function classify(text, options, processStart) {
   const owner = parseOwner(text);
-  if (!owner) return nowMs - mtimeMs < FILE_LOCK_PUBLISH_GRACE_MS ? "publishing" : "stale";
+  if (!owner) return "stale";
   if (heldTokens.has(owner.token)) return "live";
   const self = options.self ?? { pid: process.pid, startedAtMs: ownProcessStartedAtMs() };
   const alive = options.isAlive ?? pidIsAlive;
   if (owner.pid === self.pid && owner.startedAtMs === self.startedAtMs) return "stale";
   if (!alive(owner.pid)) return "stale";
   if (owner.startedAtMs == null) return "unproven";
-  const start = (options.processStart ?? processStartedAtMs)(owner.pid);
+  const start = processStart(owner.pid);
   if (start == null) return "unproven";
   if (start !== owner.startedAtMs) return "stale";
   return "live";
 }
-function unlinkIfUnchanged(file, snapshot) {
-  let text = "";
-  let first;
-  try {
-    const opened = statSync(file);
-    text = readFileSync2(file, "utf8");
-    first = opened;
-  } catch {
-    return false;
-  }
-  if (text !== snapshot) return false;
-  try {
-    const again = statSync(file);
-    if (again.ino !== first.ino || again.dev !== first.dev || again.size !== first.size) return false;
-  } catch {
-    return false;
-  }
-  try {
-    unlinkSync(file);
-    return true;
-  } catch {
-    return false;
-  }
+function startReader(options) {
+  if (options.processStart) return options.processStart;
+  const cache = /* @__PURE__ */ new Map();
+  return (pid) => {
+    if (cache.has(pid)) return cache.get(pid) ?? null;
+    const value = processStartedAtMs(pid);
+    cache.set(pid, value);
+    return value;
+  };
 }
 function parseOwner(text) {
   let parsed;
@@ -650,7 +811,7 @@ import { mkdirSync as mkdirSync3 } from "node:fs";
 import path4 from "node:path";
 
 // packages/cli/src/watcher-progress.ts
-import { chmodSync, closeSync as closeSync2, mkdirSync as mkdirSync2, openSync as openSync2, readFileSync as readFileSync3, renameSync, unlinkSync as unlinkSync2, writeSync as writeSync2 } from "node:fs";
+import { chmodSync, closeSync as closeSync2, mkdirSync as mkdirSync2, openSync as openSync2, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync2, writeSync as writeSync2 } from "node:fs";
 import path3 from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
 function emptySuperviseState() {
@@ -692,7 +853,7 @@ function writePrivate(file, body) {
     chmodSync(temp, 384);
   } catch {
   }
-  renameSync(temp, file);
+  renameSync2(temp, file);
 }
 function readJson(file) {
   try {
@@ -1041,7 +1202,7 @@ function systemdEnv(value) {
 
 // packages/cli/src/watcher-lock.ts
 import { createHash, randomBytes as randomBytes3 } from "node:crypto";
-import { chmodSync as chmodSync2, closeSync as closeSync3, lstatSync, mkdirSync as mkdirSync4, openSync as openSync3, readdirSync, readFileSync as readFileSync4, renameSync as renameSync2, unlinkSync as unlinkSync3, writeSync as writeSync3 } from "node:fs";
+import { chmodSync as chmodSync2, closeSync as closeSync3, lstatSync, mkdirSync as mkdirSync4, openSync as openSync3, readdirSync, readFileSync as readFileSync4, renameSync as renameSync3, unlinkSync as unlinkSync3, writeSync as writeSync3 } from "node:fs";
 import { hostname, homedir as homedir2, uptime } from "node:os";
 import path6 from "node:path";
 var LOCK_NAME = /^watcher-[0-9a-f]{16}\.lock$/;
@@ -1300,7 +1461,7 @@ function writeAliases(home, file, identity, options, self, isAlive) {
     }
     const temp = writeTemp(path6.dirname(target), alias);
     try {
-      renameSync2(temp, target);
+      renameSync3(temp, target);
       written.push(target);
     } catch {
     } finally {
@@ -1431,7 +1592,7 @@ function refuseReclaim(info, self, isAlive, file) {
 }
 function publish(temp, file, self, isAlive, force, reclaim) {
   try {
-    renameSync2(temp, file);
+    renameSync3(temp, file);
     return "placed";
   } catch (err) {
     if (!isRenameConflict(err)) throw err;
@@ -1445,7 +1606,7 @@ function publish(temp, file, self, isAlive, force, reclaim) {
   } else if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid, origin: held.origin };
   removeLock(file);
   try {
-    renameSync2(temp, file);
+    renameSync3(temp, file);
     return "placed";
   } catch (err) {
     if (!isRenameConflict(err)) throw err;

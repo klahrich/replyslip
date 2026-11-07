@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { execFile as execFileCb } from 'node:child_process';
+import { execFile as execFileCb, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { PID_START_SKEW_MS } from './supervise-constants.ts';
@@ -98,6 +98,54 @@ export function linuxStartMs(statLine: string, btimeSec: number, clkTck = 100): 
   return Math.round(btimeSec * 1000 + (ticks / clkTck) * 1000);
 }
 
+const DARWIN_MONTHS: Record<string, number> = {
+  Jan: 0,
+  Feb: 1,
+  Mar: 2,
+  Apr: 3,
+  May: 4,
+  Jun: 5,
+  Jul: 6,
+  Aug: 7,
+  Sep: 8,
+  Oct: 9,
+  Nov: 10,
+  Dec: 11,
+};
+
+/**
+ * `ps -o lstart=` in the C locale: `Sat Nov  7 16:33:01 2026`.
+ * The value is local time and stable for the life of the process, unlike `etimes`.
+ */
+export function darwinLstartMs(text: string): number | null {
+  const match = text.trim().match(/^[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/);
+  if (!match) return null;
+  const month = DARWIN_MONTHS[match[1] ?? ''];
+  if (month == null) return null;
+  const day = Number(match[2]);
+  const hour = Number(match[3]);
+  const minute = Number(match[4]);
+  const second = Number(match[5]);
+  const year = Number(match[6]);
+  if (day < 1 || hour > 23 || minute > 59 || second > 59) return null;
+  const ms = new Date(year, month, day, hour, minute, second).getTime();
+  if (Number.isNaN(ms)) return null;
+  const check = new Date(ms);
+  if (check.getFullYear() !== year || check.getMonth() !== month || check.getDate() !== day) return null;
+  return ms;
+}
+
+/** `ps -o lstart=,command=` with a C locale. The start time is the same clock as {@link darwinLstartMs}. */
+export function parseDarwinIdentity(stdout: string): ProcessIdentity | null {
+  const line = stdout.trim();
+  const match = line.match(/^[A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}/);
+  if (!match) return null;
+  const startedAtMs = darwinLstartMs(match[0]);
+  const cmdline = line.slice(match[0].length).trim();
+  if (startedAtMs == null || !cmdline) return null;
+  return { cmdline, startedAtMs };
+}
+
 export function parsePsIdentity(stdout: string): ProcessIdentity | null {
   const line = stdout.trim();
   if (!line) return null;
@@ -171,6 +219,16 @@ function cimCreationMs(text: string): number | null {
   return localAsUtc - offsetMin * 60_000;
 }
 
+/** A start-time probe that does not finish within this bound is treated as unknown. */
+export const PROCESS_START_TIMEOUT_MS = 1_000;
+
+export type ProcessStartOptions = {
+  platform?: NodeJS.Platform;
+  /** Run `ps` or PowerShell. Return stdout, or null on timeout, missing tool, or any other failure. */
+  run?: (file: string, args: string[], timeoutMs: number) => string | null;
+  readLinux?: (pid: number) => { stat: string; btimeSec: number } | null;
+};
+
 let ownStart: number | null | undefined;
 
 /** OS start time of this process. Null when this host cannot report it. */
@@ -179,20 +237,80 @@ export function ownProcessStartedAtMs(): number | null {
   return ownStart;
 }
 
-/** OS start time of `pid`. Null when it cannot be read. The same pid is not cached: reuse must be visible. */
-export function processStartedAtMs(pid: number): number | null {
+/**
+ * OS start time of `pid`.
+ * Linux reads `/proc`. macOS parses `ps -o lstart=`. Windows parses CIM `CreationDate`.
+ * Null means unknown: callers must not treat the pid as a proved owner or as proved stale.
+ * A pid is not cached, so a reused pid is visible on the next call.
+ */
+export function processStartedAtMs(pid: number, options: ProcessStartOptions = {}): number | null {
   if (!Number.isInteger(pid) || pid <= 0) return null;
+  const platform = options.platform ?? process.platform;
   try {
-    if (process.platform === 'linux') {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-      const procStat = readFileSync('/proc/stat', 'utf8');
-      const btime = Number(procStat.match(/^btime\s+(\d+)/m)?.[1]);
-      return linuxStartMs(stat, btime);
+    if (platform === 'linux') {
+      const row = (options.readLinux ?? readLinuxStart)(pid);
+      if (!row) return null;
+      return linuxStartMs(row.stat, row.btimeSec);
+    }
+    const run = options.run ?? runProcessStart;
+    if (platform === 'darwin') {
+      const stdout = run('ps', ['-p', String(pid), '-o', 'lstart='], PROCESS_START_TIMEOUT_MS);
+      if (!stdout) return null;
+      return darwinLstartMs(stdout);
+    }
+    if (platform === 'win32') {
+      const stdout = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', windowsStartScript(pid)], PROCESS_START_TIMEOUT_MS);
+      if (!stdout) return null;
+      return parseWindowsStartStdout(stdout);
     }
   } catch {
     return null;
   }
   return null;
+}
+
+function readLinuxStart(pid: number): { stat: string; btimeSec: number } | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const procStat = readFileSync('/proc/stat', 'utf8');
+    const btimeSec = Number(procStat.match(/^btime\s+(\d+)/m)?.[1]);
+    if (!Number.isFinite(btimeSec)) return null;
+    return { stat, btimeSec };
+  } catch {
+    return null;
+  }
+}
+
+function runProcessStart(file: string, args: string[], timeoutMs: number): string | null {
+  try {
+    return execFileSync(file, args, {
+      timeout: timeoutMs,
+      windowsHide: true,
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C' },
+    });
+  } catch {
+    return null;
+  }
+}
+
+function windowsStartScript(pid: number): string {
+  return `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate | ConvertTo-Json -Compress`;
+}
+
+export function parseWindowsStartStdout(stdout: string): number | null {
+  const text = stdout.trim();
+  if (!text) return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed === 'string' || typeof parsed === 'number') return windowsCreationMs(parsed);
+    if (parsed && typeof parsed === 'object' && 'CreationDate' in parsed) {
+      return windowsCreationMs((parsed as { CreationDate?: unknown }).CreationDate);
+    }
+    return null;
+  } catch {
+    return windowsCreationMs(text);
+  }
 }
 
 export async function identifyProcess(pid: number, platform: NodeJS.Platform = process.platform): Promise<ProcessIdentity | null> {
@@ -218,8 +336,12 @@ function identifyLinux(pid: number): ProcessIdentity | null {
 }
 
 async function identifyDarwin(pid: number): Promise<ProcessIdentity | null> {
-  const { stdout } = await execFile('ps', ['-p', String(pid), '-ww', '-o', 'etimes=,command='], { timeout: 5_000, windowsHide: true });
-  return parsePsIdentity(String(stdout));
+  const { stdout } = await execFile('ps', ['-p', String(pid), '-ww', '-o', 'lstart=,command='], {
+    timeout: 5_000,
+    windowsHide: true,
+    env: { ...process.env, LC_ALL: 'C' },
+  });
+  return parseDarwinIdentity(String(stdout));
 }
 
 async function identifyWindows(pid: number): Promise<ProcessIdentity | null> {
