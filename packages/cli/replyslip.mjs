@@ -190,7 +190,7 @@ async function readAgentCredentials(name, options = {}) {
 }
 
 // packages/cli/src/supervise.ts
-import { spawn as spawn2 } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
 import { accessSync, appendFileSync, chmodSync as chmodSync3, closeSync as closeSync4, mkdirSync as mkdirSync5, openSync as openSync4, readFileSync as readFileSync4, unlinkSync as unlinkSync3, writeFileSync } from "node:fs";
 import path7 from "node:path";
@@ -491,27 +491,64 @@ function decideSupervision(input) {
 }
 
 // packages/cli/src/file-lock.ts
-import { spawn, spawnSync } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import path2 from "node:path";
+import { Worker } from "node:worker_threads";
 var FILE_LOCK_WAIT_MS = 2e3;
+var PENDING = 0;
+var HELD = 1;
+var BUSY = 2;
+var LOST = 3;
+var RELEASED = 4;
+var FAILED = 5;
+var CMD_RELEASE = 1;
+var CMD_ABORT = 2;
 var FileLockError = class extends Error {
   constructor(message) {
     super(message);
     this.name = "FileLockError";
   }
 };
-var tools = { perl: false, flock: false, powershell: false, known: false };
-function lockHelperFor(platform, available) {
-  if (platform === "win32") return available.powershell ? "powershell" : null;
-  if (available.perl) return "perl";
-  if (available.flock) return "flock";
+function lookupExecutable(names, pathEnv, exists, platform) {
+  const delimiter = platform === "win32" ? ";" : ":";
+  const join = platform === "win32" ? path2.win32.join : path2.posix.join;
+  for (const entry of (pathEnv ?? "").split(delimiter)) {
+    const dir = entry.trim().replaceAll(/^"|"$/g, "");
+    if (!dir) continue;
+    for (const name of names) {
+      const fileNames = platform === "win32" && !name.toLowerCase().endsWith(".exe") ? [`${name}.exe`, name] : [name];
+      for (const fileName of fileNames) {
+        const candidate = join(dir, fileName);
+        if (exists(candidate)) return candidate;
+      }
+    }
+  }
   return null;
+}
+function lockHeld(held) {
+  return !held.released && Atomics.load(held.view, 0) === HELD;
+}
+function lockLoss(held) {
+  const fail = () => lossError(held.file);
+  if (Atomics.load(held.view, 0) === LOST) return Promise.reject(fail());
+  return new Promise((_, reject) => {
+    const timer = setInterval(() => {
+      if (Atomics.load(held.view, 0) === LOST) {
+        clearInterval(timer);
+        reject(fail());
+      }
+    }, 10);
+    const previous = held.stopWatch;
+    held.stopWatch = () => {
+      clearInterval(timer);
+      previous();
+    };
+  });
 }
 function acquireFileLockSync(file, options = {}) {
   const waitMs = options.waitMs ?? FILE_LOCK_WAIT_MS;
-  const helper = options.helper ?? detectHelper();
-  if (!helper) {
+  const resolved = resolveHelper(options.helper);
+  if (!resolved) {
     throw new FileLockError(
       `Could not acquire ${file}. No OS lock helper is available (perl, flock, or PowerShell). Nothing was deleted.`
     );
@@ -519,25 +556,32 @@ function acquireFileLockSync(file, options = {}) {
   mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
   const created = openSync(file, "a", 384);
   closeSync(created);
-  const child = spawnHelper(helper, file, waitMs);
-  child.stdout?.pause();
-  child.on("error", () => void 0);
-  const deadline = Date.now() + waitMs + 1e3;
-  let line = "";
-  try {
-    line = readLine(pipeFd(child.stdout), deadline);
-  } catch (err) {
-    stopHelper(child);
-    throw err;
+  const sab = new SharedArrayBuffer(16);
+  const view = new Int32Array(sab);
+  const worker = new Worker(WORKER_SOURCE, {
+    eval: true,
+    workerData: { sab, helper: resolved.helper, bin: resolved.bin, file, waitMs, perlScript: PERL_LOCK, psScript: POWERSHELL_LOCK }
+  });
+  worker.on("error", () => {
+    if (Atomics.load(view, 0) === PENDING) {
+      Atomics.store(view, 0, FAILED);
+      Atomics.notify(view, 0);
+    }
+  });
+  const deadline = Date.now() + waitMs + 1500;
+  while (Atomics.load(view, 0) === PENDING) {
+    if (Date.now() >= deadline) break;
+    Atomics.wait(view, 0, PENDING, 20);
   }
-  if (line !== "ok") {
-    stopHelper(child);
-    const why = line === "busy" || line === "" ? `within ${waitMs}ms` : `(${line})`;
+  const state = Atomics.load(view, 0);
+  if (state !== HELD) {
+    abandon(worker, view);
+    const why = state === BUSY || state === PENDING || state === FAILED ? `within ${waitMs}ms` : "because the helper failed";
     throw new FileLockError(
       `Could not acquire ${file} ${why}. The operating system lock is held, or the helper could not lock it. The file was not removed. Retry after the holder exits.`
     );
   }
-  return { file, child, released: false };
+  return { file, helperPid: Atomics.load(view, 2), view, worker, released: false, stopWatch: () => void 0 };
 }
 async function acquireFileLock(file, options = {}) {
   return acquireFileLockSync(file, options);
@@ -545,101 +589,98 @@ async function acquireFileLock(file, options = {}) {
 function releaseFileLock(held) {
   if (held.released) return;
   held.released = true;
-  closePipe(held.child.stdin);
-  const line = readLine(pipeFd(held.child.stdout), Date.now() + 2e3);
-  if (line !== "bye") stopHelper(held.child);
-}
-function detectHelper() {
-  if (!tools.known) {
-    tools.perl = toolExists("perl");
-    tools.flock = toolExists("flock");
-    tools.powershell = toolExists("powershell.exe");
-    tools.known = true;
+  held.stopWatch();
+  const current = Atomics.load(held.view, 0);
+  if (current === LOST) {
+    void held.worker.terminate();
+    throw lossError(held.file);
   }
-  return lockHelperFor(process.platform, tools);
-}
-function toolExists(name) {
-  const result = spawnSync("which", [name], { stdio: "ignore" });
-  return result.status === 0;
-}
-function spawnHelper(helper, file, waitMs) {
-  if (helper === "perl") {
-    return spawn("perl", ["-e", PERL_LOCK, file, String(waitMs)], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+  Atomics.store(held.view, 1, CMD_RELEASE);
+  const deadline = Date.now() + 2e3;
+  while (true) {
+    const state = Atomics.load(held.view, 0);
+    if (state === RELEASED) {
+      void held.worker.terminate();
+      return;
+    }
+    if (state === LOST) {
+      void held.worker.terminate();
+      throw lossError(held.file);
+    }
+    if (Date.now() >= deadline) {
+      if (held.helperPid > 0) {
+        try {
+          process.kill(held.helperPid, "SIGTERM");
+        } catch {
+        }
+      }
+      void held.worker.terminate();
+      throw new FileLockError(`Could not release ${held.file}. The helper did not confirm unlock. The kernel lock is no longer held.`);
+    }
+    Atomics.wait(held.view, 0, state, 20);
   }
-  if (helper === "flock") {
-    const seconds = waitMs <= 0 ? "0" : String(Math.max(1, Math.ceil(waitMs / 1e3)));
-    return spawn("flock", ["-w", seconds, "-x", file, "sh", "-c", 'printf "ok\\n"; IFS= read -r _; printf "bye\\n"'], {
-      stdio: ["pipe", "pipe", "ignore"],
-      windowsHide: true
-    });
-  }
-  return spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", POWERSHELL_LOCK], {
-    stdio: ["pipe", "pipe", "ignore"],
-    windowsHide: true,
-    env: { ...process.env, REPLYSLIP_LOCK_PATH: file, REPLYSLIP_LOCK_WAIT_MS: String(waitMs) }
-  });
 }
-function closePipe(stream) {
-  const fd = stream?._handle?.fd;
-  if (typeof fd === "number" && fd >= 0) {
+function lossError(file) {
+  return new FileLockError(`The lock helper for ${file} exited while the lock was held. The kernel lock is no longer held.`);
+}
+function abandon(worker, view) {
+  Atomics.store(view, 1, CMD_ABORT);
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline) {
+    const state = Atomics.load(view, 0);
+    if (state !== PENDING) break;
+    Atomics.wait(view, 0, PENDING, 20);
+  }
+  const pid = Atomics.load(view, 2);
+  if (pid > 0) {
     try {
-      closeSync(fd);
+      process.kill(pid, "SIGTERM");
     } catch {
     }
   }
+  void worker.terminate();
 }
-function pipeFd(stream) {
-  const fd = stream?._handle?.fd;
-  if (typeof fd !== "number" || fd < 0) throw new FileLockError("The lock helper pipe is not readable.");
-  return fd;
-}
-function readLine(fd, deadline) {
-  let text = "";
-  const buf = Buffer.alloc(64);
-  const gate = new Int32Array(new SharedArrayBuffer(4));
-  while (!text.includes("\n") && text.length < 512) {
-    if (Date.now() >= deadline) break;
-    try {
-      const n = readSync(fd, buf, 0, buf.length, null);
-      if (n === 0) break;
-      text += buf.toString("utf8", 0, n);
-    } catch (err) {
-      if (err.code !== "EAGAIN") throw err;
-      Atomics.wait(gate, 0, 0, 5);
-    }
+function resolveHelper(requested) {
+  const pathEnv = process.env.PATH ?? process.env.Path;
+  if (requested === "powershell" || !requested && process.platform === "win32") {
+    const bin = lookupExecutable(["powershell.exe", "pwsh.exe"], pathEnv, existsSync, "win32");
+    return bin ? { helper: "powershell", bin } : null;
   }
-  const end = text.indexOf("\n");
-  return (end === -1 ? text : text.slice(0, end)).trim();
-}
-function stopHelper(child) {
-  try {
-    child.kill("SIGTERM");
-  } catch {
+  if (requested === "flock") {
+    const bin = lookupExecutable(["flock"], pathEnv, existsSync, process.platform);
+    return bin ? { helper: "flock", bin } : null;
   }
+  if (requested === "perl" || !requested) {
+    const perl = lookupExecutable(["perl"], pathEnv, existsSync, process.platform);
+    if (perl) return { helper: "perl", bin: perl };
+    if (requested === "perl") return null;
+  }
+  const flock = lookupExecutable(["flock"], pathEnv, existsSync, process.platform);
+  return flock ? { helper: "flock", bin: flock } : null;
 }
-var PERL_LOCK = `
+var PERL_LOCK = String.raw`
 use Fcntl qw(:flock O_RDWR O_CREAT);
 use Time::HiRes qw(time sleep);
 $| = 1;
 my ($path, $wait_ms) = @ARGV;
-sysopen(my $fh, $path, O_RDWR | O_CREAT, 0600) or do { print "error open\\n"; exit 1 };
+sysopen(my $fh, $path, O_RDWR | O_CREAT, 0600) or do { print "error open\n"; exit 1 };
 my $deadline = time() + ($wait_ms / 1000);
 while (1) {
   if (flock($fh, LOCK_EX | LOCK_NB)) {
-    print "ok\\n";
+    print "ok\n";
     while (defined(my $line = <STDIN>)) {}
     flock($fh, LOCK_UN);
     close $fh;
-    print "bye\\n";
+    print "bye\n";
     exit 0;
   }
   last if time() >= $deadline;
   sleep(0.01);
 }
-print "busy\\n";
+print "busy\n";
 exit 2;
 `;
-var POWERSHELL_LOCK = `
+var POWERSHELL_LOCK = String.raw`
 $ErrorActionPreference = 'Stop'
 $path = $env:REPLYSLIP_LOCK_PATH
 $wait = [int]$env:REPLYSLIP_LOCK_WAIT_MS
@@ -682,6 +723,77 @@ Write-Output 'ok'
 [ReplySlipLock]::UnlockFileEx($handle, [uint32]0, [uint32]1, [uint32]0, [ref]$ov) | Out-Null
 [ReplySlipLock]::CloseHandle($handle) | Out-Null
 Write-Output 'bye'
+`;
+var WORKER_SOURCE = `
+import { workerData } from 'node:worker_threads';
+import { spawn } from 'node:child_process';
+const { sab, helper, bin, file, waitMs, perlScript, psScript } = workerData;
+const view = new Int32Array(sab);
+const HELD = 1, BUSY = 2, LOST = 3, RELEASED = 4, FAILED = 5;
+const CMD_RELEASE = 1, CMD_ABORT = 2;
+let settled = false;
+let timer;
+function setState(value) {
+  Atomics.store(view, 0, value);
+  Atomics.notify(view, 0);
+}
+function settle(value) {
+  if (settled) return;
+  settled = true;
+  clearInterval(timer);
+  setState(value);
+}
+timer = setInterval(() => {
+  const cmd = Atomics.load(view, 1);
+  if (!child) return;
+  if (cmd === CMD_RELEASE && !releaseRequested) {
+    releaseRequested = true;
+    try {
+      child.stdin.end();
+    } catch {
+      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+    }
+  } else if (cmd === CMD_ABORT) {
+    clearInterval(timer);
+    try { child.kill('SIGTERM'); } catch { /* already gone */ }
+  }
+}, 10);
+let child;
+if (helper === 'perl') {
+  child = spawn(bin, ['-e', perlScript, file, String(waitMs)], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+} else if (helper === 'flock') {
+  const seconds = waitMs <= 0 ? '0' : String(Math.max(1, Math.ceil(waitMs / 1000)));
+  child = spawn(bin, ['-w', seconds, '-x', file, 'sh', '-c', 'printf "ok\\n"; IFS= read -r _; printf "bye\\n"'], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+} else {
+  child = spawn(bin, ['-NoProfile', '-NonInteractive', '-Command', psScript], {
+    stdio: ['pipe', 'pipe', 'ignore'],
+    windowsHide: true,
+    env: { ...process.env, REPLYSLIP_LOCK_PATH: file, REPLYSLIP_LOCK_WAIT_MS: String(waitMs) },
+  });
+}
+Atomics.store(view, 2, child.pid ?? 0);
+let releaseRequested = false;
+let buf = '';
+child.stdout?.on('data', (chunk) => {
+  buf += chunk.toString('utf8');
+  let nl = buf.indexOf('\\n');
+  while (nl !== -1) {
+    const line = buf.slice(0, nl).trim();
+    buf = buf.slice(nl + 1);
+    if (line === 'ok' && Atomics.load(view, 0) === 0) setState(HELD);
+    else if (line === 'busy') settle(BUSY);
+    else if (line.startsWith('error')) settle(FAILED);
+    else if (line === 'bye') settle(releaseRequested ? RELEASED : LOST);
+    nl = buf.indexOf('\\n');
+  }
+});
+child.on('error', () => settle(Atomics.load(view, 0) === HELD ? LOST : FAILED));
+child.on('exit', () => {
+  const current = Atomics.load(view, 0);
+  if (current === RELEASED || current === LOST || current === BUSY || current === FAILED) return;
+  if (current === HELD) settle(releaseRequested ? RELEASED : LOST);
+  else settle(BUSY);
+});
 `;
 
 // packages/cli/src/supervise-lock.ts
@@ -858,13 +970,30 @@ async function withAgentOp(home, name, fn) {
     if (chains.get(key) === tail) chains.delete(key);
     throw err;
   }
+  const lost = lockLoss(held);
+  let primary;
+  let result;
   try {
-    return await fn();
+    result = await Promise.race([fn(), lost]);
+    if (!lockHeld(held)) {
+      primary = new FileLockError(`The lock helper for ${held.file} exited while the lock was held. The kernel lock is no longer held.`);
+    }
+  } catch (err) {
+    primary = err;
   } finally {
-    releaseFileLock(held);
-    releaseChain();
-    if (chains.get(key) === tail) chains.delete(key);
+    held.stopWatch();
   }
+  let cleanupError;
+  try {
+    releaseFileLock(held);
+  } catch (err) {
+    cleanupError = err;
+  }
+  releaseChain();
+  if (chains.get(key) === tail) chains.delete(key);
+  if (primary) throw primary;
+  if (cleanupError) throw cleanupError;
+  return result;
 }
 
 // packages/cli/src/supervise-os.ts
@@ -1623,7 +1752,7 @@ function spawnDetachedWatcher(request) {
       request.reclaim.startedAt
     );
   }
-  const child = spawn2(request.nodePath, args, {
+  const child = spawn(request.nodePath, args, {
     detached: true,
     stdio: ["ignore", fd, fd],
     windowsHide: true,
@@ -2109,7 +2238,7 @@ function checkName(name) {
   return null;
 }
 var defaultRun = (command, args) => new Promise((resolve, reject) => {
-  const child = spawn2(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (chunk) => {
@@ -2138,11 +2267,11 @@ var GUEST_WAKE_NOTICE = "This ReplySlip wake is about a task from outside your w
 var REVIEW_NEEDED_NOTICE = "A request on ReplySlip is waiting for your owner to review it. You cannot open or approve it. Ask your owner to review it at /dashboard/reviews.";
 
 // packages/cli/src/drivers/command.ts
-import { spawn as spawn3 } from "node:child_process";
+import { spawn as spawn2 } from "node:child_process";
 var COMMAND_TIMED_OUT = "command timed out";
 function runCommandWithTimeout(timeoutMs) {
   return (command, args) => new Promise((resolve, reject) => {
-    const child = spawn3(command, args, {
+    const child = spawn2(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       // Own process group on Unix so a timeout can kill this command and its children,
@@ -2182,7 +2311,7 @@ function killChild(child) {
   const pid = child.pid;
   if (!pid || pid === process.pid) return;
   if (process.platform === "win32") {
-    const killer = spawn3("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    const killer = spawn2("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
     killer.on("error", () => void 0);
     try {
       child.kill("SIGKILL");

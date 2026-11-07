@@ -2,7 +2,7 @@
 
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { acquireFileLock, FILE_LOCK_WAIT_MS, releaseFileLock, type HeldFileLock } from './file-lock.ts';
+import { acquireFileLock, FILE_LOCK_WAIT_MS, FileLockError, lockHeld, lockLoss, releaseFileLock, type HeldFileLock } from './file-lock.ts';
 import { superviseDir } from './watcher-progress.ts';
 
 const chains = new Map<string, Promise<void>>();
@@ -33,11 +33,28 @@ export async function withAgentOp<T>(home: string | undefined, name: string, fn:
     if (chains.get(key) === tail) chains.delete(key);
     throw err;
   }
+  const lost = lockLoss(held);
+  let primary: unknown;
+  let result: T | undefined;
   try {
-    return await fn();
+    result = await Promise.race([fn(), lost]);
+    if (!lockHeld(held)) {
+      primary = new FileLockError(`The lock helper for ${held.file} exited while the lock was held. The kernel lock is no longer held.`);
+    }
+  } catch (err) {
+    primary = err;
   } finally {
-    releaseFileLock(held);
-    releaseChain();
-    if (chains.get(key) === tail) chains.delete(key);
+    held.stopWatch();
   }
+  let cleanupError: unknown;
+  try {
+    releaseFileLock(held);
+  } catch (err) {
+    cleanupError = err;
+  }
+  releaseChain();
+  if (chains.get(key) === tail) chains.delete(key);
+  if (primary) throw primary;
+  if (cleanupError) throw cleanupError;
+  return result as T;
 }

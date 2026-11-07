@@ -1,10 +1,11 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { acquireFileLockSync, FileLockError, lockHelperFor, releaseFileLock } from '../packages/cli/src/file-lock';
+import { acquireFileLock, acquireFileLockSync, FileLockError, lockHeld, lockHelperFor, lookupExecutable, releaseFileLock } from '../packages/cli/src/file-lock';
+import { withAgentOp } from '../packages/cli/src/supervise-lock';
 
 async function lockPath(name: string): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), 'replyslip-flock-'));
@@ -18,6 +19,19 @@ describe('file lock ownership', () => {
     expect(lockHelperFor('linux', { perl: false, flock: true, powershell: false })).toBe('flock');
     expect(lockHelperFor('linux', { perl: false, flock: false, powershell: false })).toBeNull();
     expect(lockHelperFor('freebsd', { perl: true, flock: false, powershell: false })).toBe('perl');
+    const powershell = String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`;
+    expect(
+      lookupExecutable(
+        ['powershell.exe', 'pwsh.exe'],
+        String.raw`C:\missing;C:\Windows\System32\WindowsPowerShell\v1.0`,
+        (candidate) => candidate === powershell,
+        'win32',
+      ),
+    ).toBe(powershell);
+    expect(lookupExecutable(['pwsh'], String.raw`C:\Program Files\PowerShell\7`, (candidate) => candidate.endsWith(`${path.win32.sep}pwsh.exe`), 'win32')).toMatch(/pwsh\.exe$/);
+    expect(lookupExecutable(['perl'], '/missing:/usr/bin', (candidate) => candidate === '/usr/bin/perl', 'linux')).toBe('/usr/bin/perl');
+    expect(lookupExecutable(['perl'], '', () => true, 'linux')).toBeNull();
+    expect(lookupExecutable(['flock'], '/bin', () => false, 'darwin')).toBeNull();
   });
 
   it('premise is false: path-based read/check then destructive operation can safely reclaim/release shared ownership', async () => {
@@ -28,8 +42,10 @@ describe('file lock ownership', () => {
     readFileSync(file);
     unlinkSync(file);
     const successor = acquireFileLockSync(file, { waitMs: 1_000 });
-    expect(holder.child.exitCode).toBeNull();
-    expect(successor.child.exitCode).toBeNull();
+    expect(lockHeld(holder)).toBe(true);
+    expect(lockHeld(successor)).toBe(true);
+    expect(() => process.kill(holder.helperPid, 0)).not.toThrow();
+    expect(() => process.kill(successor.helperPid, 0)).not.toThrow();
     expect(statSync(file).ino).not.toBe(before);
     releaseFileLock(holder);
     releaseFileLock(successor);
@@ -108,5 +124,52 @@ describe('file lock ownership', () => {
       expect(readFileSync(file, 'utf8')).toBe(body);
       releaseFileLock(held);
     }
+  });
+
+  it('keeps exclusion across 40 sync and 40 async acquire/release cycles', async () => {
+    const file = await lockPath('stress.op');
+    for (let i = 0; i < 40; i += 1) {
+      const syncHold = acquireFileLockSync(file, { waitMs: 1_000 });
+      expect(lockHeld(syncHold)).toBe(true);
+      expect(() => acquireFileLockSync(file, { waitMs: 0 })).toThrow(FileLockError);
+      releaseFileLock(syncHold);
+      expect(lockHeld(syncHold)).toBe(false);
+      const asyncHold = await acquireFileLock(file, { waitMs: 1_000 });
+      expect(lockHeld(asyncHold)).toBe(true);
+      expect(() => acquireFileLockSync(file, { waitMs: 0 })).toThrow(FileLockError);
+      releaseFileLock(asyncHold);
+    }
+  });
+
+  it('a helper killed during the hold is not still owned, and a contender can take the kernel lock', async () => {
+    const file = await lockPath('killed.op');
+    const holder = acquireFileLockSync(file, { waitMs: 1_000 });
+    process.kill(holder.helperPid, 'SIGKILL');
+    const deadline = Date.now() + 1_000;
+    while (lockHeld(holder) && Date.now() < deadline) {
+      const gate = new Int32Array(new SharedArrayBuffer(4));
+      Atomics.wait(gate, 0, 0, 10);
+    }
+    expect(lockHeld(holder)).toBe(false);
+    const contender = acquireFileLockSync(file, { waitMs: 1_000 });
+    expect(lockHeld(contender)).toBe(true);
+    expect(() => releaseFileLock(holder)).toThrow(/no longer held/);
+    releaseFileLock(contender);
+  });
+
+  it('releases the agent queue when helper cleanup fails', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'replyslip-queue-'));
+    const file = path.join(home, '.replyslip', 'supervise', 'QueueBot.op');
+    const first = withAgentOp(home, 'QueueBot', async () => {
+      const listed = execFileSync('ps', ['-ww', '-eo', 'pid,args'], { encoding: 'utf8' });
+      const line = listed.split('\n').find((row) => row.includes(file));
+      if (!line) throw new Error('helper not found');
+      process.kill(Number(line.trim().split(/\s+/)[0]), 'SIGKILL');
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return 'kept';
+    });
+    const second = withAgentOp(home, 'QueueBot', async () => 'next');
+    await expect(first).rejects.toThrow(/no longer held/);
+    await expect(second).resolves.toBe('next');
   });
 });
