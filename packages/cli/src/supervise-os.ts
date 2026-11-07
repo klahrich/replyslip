@@ -231,17 +231,22 @@ WantedBy=timers.target
 `;
 }
 
+/** In a `.cmd` file, `%PATH%` expands even inside quotes. `%%` is the literal percent. */
+export function cmdPercent(value: string): string {
+  return value.replace(/%/g, '%%');
+}
+
 export function windowsCmd(input: InstallPlanInput): string {
   const lines = [
     '@echo off',
     'setlocal',
-    `set "PATH=${input.pathEnv.replace(/%/g, '%%')}"`,
-    `set "HOME=${input.home}"`,
-    `set "USERPROFILE=${input.home}"`,
+    `set "PATH=${cmdPercent(input.pathEnv)}"`,
+    `set "HOME=${cmdPercent(input.home)}"`,
+    `set "USERPROFILE=${cmdPercent(input.home)}"`,
     'set "REPLYSLIP_SUPERVISED=1"',
   ];
-  if (input.orcaBin) lines.push(`set "REPLYSLIP_ORCA_BIN=${input.orcaBin}"`);
-  lines.push(`"${input.nodePath}" "${input.scriptPath}" supervise --once`);
+  if (input.orcaBin) lines.push(`set "REPLYSLIP_ORCA_BIN=${cmdPercent(input.orcaBin)}"`);
+  lines.push(`"${cmdPercent(input.nodePath)}" "${cmdPercent(input.scriptPath)}" supervise --once`);
   lines.push('');
   return lines.join('\r\n');
 }

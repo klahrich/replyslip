@@ -10,11 +10,11 @@ import { runReplyslip } from '../packages/cli/src/cli';
 import { killLockAllowed, killSpawnAllowed, linuxStartMs, parseWindowsIdentity } from '../packages/cli/src/process-identity';
 import { redactSecrets } from '../packages/cli/src/redact';
 import { decideSupervision } from '../packages/cli/src/supervise-decide';
-import { buildInstallPlan } from '../packages/cli/src/supervise-os';
-import { appendSuperviseLog, installSupervision, stopSupervision, supervisedEnv, verifyDistributedScript } from '../packages/cli/src/supervise';
+import { buildInstallPlan, windowsCmd } from '../packages/cli/src/supervise-os';
+import { appendSuperviseLog, installSupervision, runSupervisionTick, stopSupervision, supervisedEnv, verifyDistributedScript } from '../packages/cli/src/supervise';
 import { watch } from '../packages/cli/src/watch';
 import { machineBootId, watcherLockPath } from '../packages/cli/src/watcher-lock';
-import { emptySuperviseState, isStopped, readHold, readProgress, writeProgress } from '../packages/cli/src/watcher-progress';
+import { emptySuperviseState, enrollAgent, isStopped, readHold, readProgress, readSuperviseState, writeProgress, writeSuperviseState } from '../packages/cli/src/watcher-progress';
 
 const KEY = 'rsk_CANARY_agent_key_do_not_print';
 const ORIGIN = 'https://relay.example';
@@ -198,6 +198,15 @@ describe('supervision decisions', () => {
     const created = parseWindowsIdentity('{"CommandLine":"node C:\\\\replyslip.mjs watch --name Bot","CreationDate":"/Date(1700000000000)/"}');
     expect(created?.startedAtMs).toBe(1_700_000_000_000);
     expect(created?.cmdline).toContain('watch');
+    const west = parseWindowsIdentity('{"CommandLine":"node replyslip.mjs watch --name Bot","CreationDate":"20261107100000.000000-480"}');
+    expect(west?.startedAtMs).toBe(Date.UTC(2026, 10, 7, 18, 0, 0, 0));
+    const east = parseWindowsIdentity('{"CommandLine":"node replyslip.mjs watch --name Bot","CreationDate":"20261107100000.000000+120"}');
+    expect(east?.startedAtMs).toBe(Date.UTC(2026, 10, 7, 8, 0, 0, 0));
+    const zulu = parseWindowsIdentity('{"CommandLine":"node replyslip.mjs watch --name Bot","CreationDate":"20261107100000.000000+000"}');
+    expect(zulu?.startedAtMs).toBe(Date.UTC(2026, 10, 7, 10, 0, 0, 0));
+    expect(parseWindowsIdentity('{"CommandLine":"node replyslip.mjs watch --name Bot","CreationDate":"20261107100000.000000"}')).toBeNull();
+    expect(parseWindowsIdentity('{"CommandLine":"node replyslip.mjs watch --name Bot","CreationDate":"20261307100000.000000+000"}')).toBeNull();
+    expect(parseWindowsIdentity('{"CommandLine":"node replyslip.mjs watch --name Bot","CreationDate":"20261107100000.000000-48"}')).toBeNull();
   });
 });
 
@@ -314,6 +323,77 @@ describe('supervision install and tick', () => {
     expect(again.out.join('\n')).toMatch(/Watcher started for Alpha/);
   });
 
+  it('replaces a watcher after a reused spawn pid and does not signal or duplicate it', async () => {
+    const home = await tempHome();
+    writeKey(home, 'Bot');
+    enrollAgent(home, 'Bot');
+    const origin = Date.parse('2026-11-07T12:00:00.000Z');
+    writeSuperviseState(home, 'Bot', {
+      ...emptySuperviseState(),
+      lastSpawnPid: 4242,
+      lastSpawnAt: new Date(origin - 130_000).toISOString(),
+      lastCheckAt: new Date(origin - 130_000).toISOString(),
+    });
+    const kills: number[] = [];
+    const spawned: number[] = [];
+    let nextPid = 9000;
+    let now = origin;
+    const sup = {
+      home,
+      platform: 'linux' as const,
+      scriptPath: '/tmp/replyslip-tick.js',
+      nodePath: '/usr/bin/node',
+      env: { PATH: '/usr/bin' },
+      now: () => now,
+      alive: (pid: number) => pid === 4242 || spawned.includes(pid),
+      identify: async (pid: number) => {
+        if (pid === 4242) return { cmdline: 'node /tmp/replyslip.mjs watch --name Other', startedAtMs: origin };
+        const spawnedAt = Date.parse(readSuperviseState(home, 'Bot').lastSpawnAt ?? '');
+        return { cmdline: 'node /tmp/replyslip.mjs watch --name Bot', startedAtMs: spawnedAt - 1000 };
+      },
+      kill: (pid: number) => {
+        kills.push(pid);
+      },
+      spawnWatcher: () => {
+        nextPid += 1;
+        spawned.push(nextPid);
+        return { pid: nextPid };
+      },
+    };
+    const first = await runSupervisionTick(sup);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.lines.join('\n')).toMatch(/started pid 9001 without signalling 4242/);
+    expect(kills).toEqual([]);
+    expect(spawned).toEqual([9001]);
+
+    now = origin + 30_000;
+    const duringGrace = await runSupervisionTick(sup);
+    expect(duringGrace.ok).toBe(true);
+    if (!duringGrace.ok) return;
+    expect(duringGrace.lines.join('\n')).toMatch(/starting/);
+    expect(spawned).toEqual([9001]);
+    expect(kills).toEqual([]);
+
+    now = origin + 130_000;
+    const later = await runSupervisionTick(sup);
+    expect(later.ok).toBe(true);
+    if (!later.ok) return;
+    expect(later.lines.join('\n')).not.toMatch(/left in place/);
+    expect(kills).toEqual([9001]);
+    expect(spawned).toEqual([9001, 9002]);
+    expect(kills).not.toContain(4242);
+    expect(readSuperviseState(home, 'Bot').lastSpawnPid).toBe(9002);
+
+    now += 10_000;
+    const noDuplicate = await runSupervisionTick(sup);
+    expect(noDuplicate.ok).toBe(true);
+    if (!noDuplicate.ok) return;
+    expect(noDuplicate.lines.join('\n')).toMatch(/starting/);
+    expect(spawned).toEqual([9001, 9002]);
+    expect(kills).toEqual([9001]);
+  });
+
   it('does not signal an unrelated pid when stopping', async () => {
     const home = await tempHome();
     const child = liveChild();
@@ -411,6 +491,19 @@ describe('supervision install and tick', () => {
     const cmd = plan.files[0]?.contents ?? '';
     expect(cmd).toContain('"C:\\Program Files\\nodejs\\node.exe"');
     expect(cmd).toContain('supervise --once');
+    const percent = windowsCmd({
+      platform: 'win32',
+      home: 'C:\\Users\\Ada%PATH%',
+      nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+      scriptPath: 'C:\\Users\\Ada%PATH%\\.replyslip\\replyslip.mjs',
+      pathEnv: 'C:\\Windows\\System32',
+      orcaBin: 'C:\\orca%PATH%\\orca.exe',
+    });
+    expect(percent).toContain('set "HOME=C:\\Users\\Ada%%PATH%%"');
+    expect(percent).toContain('set "USERPROFILE=C:\\Users\\Ada%%PATH%%"');
+    expect(percent).toContain('set "REPLYSLIP_ORCA_BIN=C:\\orca%%PATH%%\\orca.exe"');
+    expect(percent).toContain('"C:\\Users\\Ada%%PATH%%\\.replyslip\\replyslip.mjs"');
+    expect(percent).not.toMatch(/(?<!%)%PATH%/);
     expect(plan.commands[0]?.args).toEqual(expect.arrayContaining(['/IT', '/RL', 'LIMITED', '/MO', '2']));
     expect(plan.commands[0]?.args.join(' ')).not.toContain('Program Files\\nodejs\\node.exe" "');
     expect(JSON.stringify(plan)).not.toContain(KEY);

@@ -107,23 +107,54 @@ export function parseWindowsIdentity(jsonText: string, now = Date.now()): Proces
   const created = (row as { CreationDate?: unknown }).CreationDate;
   if (typeof cmdline !== 'string' || !cmdline.trim()) return null;
   const startedAtMs = windowsCreationMs(created, now);
+  if (created != null && created !== '' && startedAtMs == null) return null;
   return { cmdline: cmdline.trim(), startedAtMs };
 }
 
-function windowsCreationMs(value: unknown, now: number): number | null {
+/**
+ * CIM CreationDate is `yyyymmddHHMMSS.mmmmmm±UUU`. `UUU` is the offset in minutes.
+ * `20261107100000.000000-480` is 10:00 at UTC−8, which is 18:00Z.
+ * A stamp that looks like CIM but has no 3-digit offset, or an impossible date, is rejected.
+ */
+export function windowsCreationMs(value: unknown, now = Date.now()): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string' || !value.trim()) return null;
-  const dotted = value.match(/\/Date\((-?\d+)\)\//);
+  const text = value.trim();
+  const dotted = text.match(/^\/Date\((-?\d+)\)\/$/);
   if (dotted) return Number(dotted[1]);
-  const wmi = value.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.(\d+)/);
-  if (wmi) {
-    const [, year, month, day, hour, minute, second, fraction] = wmi;
-    const ms = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second), Number(fraction.slice(0, 3).padEnd(3, '0')));
-    return Number.isNaN(ms) ? null : ms;
-  }
-  const parsed = Date.parse(value);
+  if (/^\d{14}\./.test(text)) return cimCreationMs(text);
+  const parsed = Date.parse(text);
   if (Number.isNaN(parsed) || parsed > now + 24 * 60 * 60 * 1000) return null;
   return parsed;
+}
+
+function cimCreationMs(text: string): number | null {
+  const wmi = text.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.(\d{1,6})([+-])(\d{3})$/);
+  if (!wmi) return null;
+  const year = Number(wmi[1]);
+  const month = Number(wmi[2]);
+  const day = Number(wmi[3]);
+  const hour = Number(wmi[4]);
+  const minute = Number(wmi[5]);
+  const second = Number(wmi[6]);
+  const millis = Number(wmi[7].slice(0, 3).padEnd(3, '0'));
+  const offsetMin = Number(`${wmi[8]}${wmi[9]}`);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return null;
+  if (!Number.isInteger(offsetMin) || Math.abs(offsetMin) > 14 * 60) return null;
+  const localAsUtc = Date.UTC(year, month - 1, day, hour, minute, second, millis);
+  if (Number.isNaN(localAsUtc)) return null;
+  const check = new Date(localAsUtc);
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() !== month - 1 ||
+    check.getUTCDate() !== day ||
+    check.getUTCHours() !== hour ||
+    check.getUTCMinutes() !== minute ||
+    check.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+  return localAsUtc - offsetMin * 60_000;
 }
 
 export async function identifyProcess(pid: number, platform: NodeJS.Platform = process.platform): Promise<ProcessIdentity | null> {

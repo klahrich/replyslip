@@ -11,7 +11,13 @@ export const runCommand: CommandRunner = (command, args) => runCommandWithTimeou
 export function runCommandWithTimeout(timeoutMs: number): CommandRunner {
   return (command, args) =>
     new Promise((resolve, reject) => {
-      const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      const child = spawn(command, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        // Own process group on Unix so a timeout can kill this command and its children,
+        // and not the watcher or any herdr/Orca coding pane.
+        detached: process.platform !== 'win32',
+      });
       let stdout = '';
       let stderr = '';
       let settled = false;
@@ -45,14 +51,26 @@ export function runCommandWithTimeout(timeoutMs: number): CommandRunner {
 }
 
 function killChild(child: ReturnType<typeof spawn>): void {
-  if (process.platform === 'win32' && child.pid) {
-    const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  const pid = child.pid;
+  if (!pid || pid === process.pid) return;
+  if (process.platform === 'win32') {
+    const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
     killer.on('error', () => undefined);
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Already gone.
+    }
+    return;
   }
   try {
-    child.kill('SIGKILL');
+    process.kill(-pid, 'SIGKILL');
   } catch {
-    // Already gone.
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Already gone.
+    }
   }
 }
 

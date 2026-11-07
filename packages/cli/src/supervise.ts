@@ -41,6 +41,11 @@ export type SpawnRequest = {
   home: string;
   pathEnv: string;
   orcaBin?: string;
+  /**
+   * Take over a lock whose pid is alive but is not this watcher (the pid was reused).
+   * Never set for a process we could not identify.
+   */
+  force?: boolean;
 };
 
 export type SuperviseIo = {
@@ -115,7 +120,9 @@ export function spawnDetachedWatcher(request: SpawnRequest): { pid: number } {
   } catch {
     // Windows ignores the Unix mode.
   }
-  const child = spawn(request.nodePath, [request.scriptPath, 'watch', '--name', request.name], {
+  const args = [request.scriptPath, 'watch', '--name', request.name];
+  if (request.force) args.push('--force');
+  const child = spawn(request.nodePath, args, {
     detached: true,
     stdio: ['ignore', fd, fd],
     windowsHide: true,
@@ -248,13 +255,41 @@ async function tickAgent(name: string, io: SuperviseIo): Promise<string> {
   writeSuperviseState(io.home, name, decision.state);
   if (decision.decision.action === 'skip') return decision.decision.reason === 'hold' ? `held (${decision.decision.hold})` : decision.decision.reason;
   if (decision.decision.action === 'start') {
-    const started = await startWatcher(name, io, decision.state);
+    const started = await startWatcher(name, io, decision.state, false);
     return started.ok ? `started pid ${started.pid}` : `start failed: ${started.message}`;
   }
   const killed = await killDecision(name, decision.decision, io);
-  if (!killed.ok) return `left in place (${killed.reason})`;
-  const started = await startWatcher(name, io, { ...decision.state, lastSpawnPid: null });
+  if (!killed.ok) {
+    const recovered = await recoverWithoutSignal(name, decision.decision, decision.state, killed.reason, io);
+    if (recovered) return recovered;
+    return `left in place (${killed.reason})`;
+  }
+  const started = await startWatcher(name, io, { ...decision.state, lastSpawnPid: null }, false);
   return started.ok ? `replaced with pid ${started.pid}` : `killed, then start failed: ${started.message}`;
+}
+
+const FOREIGN_PID = new Set(['pid-reused', 'not-watcher']);
+
+/**
+ * The pid we remembered is not our watcher. Do not signal it. Drop the stale spawn
+ * record and start one watcher. A lock whose pid was reused is reclaimed with --force,
+ * which only rewrites the lock file. An unidentified pid is not signalled and is not reclaimed.
+ */
+async function recoverWithoutSignal(
+  name: string,
+  decision: Extract<SuperviseDecision, { action: 'kill-lock' | 'kill-spawn' }>,
+  state: AgentSuperviseState,
+  reason: string,
+  io: SuperviseIo,
+): Promise<string | null> {
+  const spawnWasNotOurs = decision.action === 'kill-spawn' && (FOREIGN_PID.has(reason) || reason === 'unverified-process');
+  const lockWasNotOurs = decision.action === 'kill-lock' && FOREIGN_PID.has(reason);
+  if (!spawnWasNotOurs && !lockWasNotOurs) return null;
+  const cleared: AgentSuperviseState = { ...state, lastSpawnPid: null, lastSpawnAt: null };
+  writeSuperviseState(io.home, name, cleared);
+  const started = await startWatcher(name, io, cleared, lockWasNotOurs);
+  if (!started.ok) return `start failed: ${started.message}`;
+  return `started pid ${started.pid} without signalling ${decision.pid} (${reason})`;
 }
 
 async function ensureWatcher(
@@ -281,7 +316,7 @@ async function ensureWatcher(
   } else if (lock) {
     return { ok: true, lines: [`Watcher already running for ${name} (pid ${lock.pid}).`] };
   }
-  const started = await startWatcher(name, bound, readSuperviseState(io.home, name));
+  const started = await startWatcher(name, bound, readSuperviseState(io.home, name), false);
   if (!started.ok) return { ok: false, message: started.message };
   return { ok: true, lines: [`Watcher started for ${name} (pid ${started.pid}), detached from this terminal.`] };
 }
@@ -290,6 +325,7 @@ async function startWatcher(
   name: string,
   io: SuperviseIo,
   state: AgentSuperviseState,
+  force: boolean,
 ): Promise<{ ok: true; pid: number } | { ok: false; message: string }> {
   if (!agentKeyFileExists(name, io.home)) {
     writeHold(io.home, name, 'config');
@@ -304,6 +340,7 @@ async function startWatcher(
     home: io.home ?? '',
     pathEnv: io.env?.PATH ?? process.env.PATH ?? '',
     ...(io.env?.REPLYSLIP_ORCA_BIN ? { orcaBin: io.env.REPLYSLIP_ORCA_BIN } : {}),
+    ...(force ? { force: true } : {}),
   };
   try {
     const spawnWatcher = io.spawnWatcher ?? spawnDetachedWatcher;

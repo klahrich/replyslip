@@ -13,7 +13,7 @@ async function fetchWatcherKeys(): Promise<WatcherKey[]> {
 
 /**
  * Legacy keys for the machine-wide `replyslip watch --key-file`. A key belongs to the workspace, not to one agent.
- * New setups don't need one: each local agent runs `watch --name <name>` with its own key. Existing keys stay listed
+ * New setups don't need one: each local agent runs `supervise --install --name <name>` with its own key. Existing keys stay listed
  * and revocable; creating one is tucked behind a closed "legacy" disclosure.
  */
 export function WatcherKeys() {
