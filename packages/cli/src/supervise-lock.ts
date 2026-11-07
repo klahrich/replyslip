@@ -7,13 +7,18 @@ import { superviseDir } from './watcher-progress.ts';
 
 const chains = new Map<string, Promise<void>>();
 
+/** Checked after every await, before a spawn, signal, reap, or state write. */
+export type OpGuard = {
+  assertHeld(): void;
+};
+
 /**
  * One operation at a time per agent. Same-process callers queue so a stop still
  * runs after an in-flight tick and can reap that tick's child. Cross-process
  * ownership is the kernel lock, held for at most {@link FILE_LOCK_WAIT_MS} of
  * waiting. Release unlocks. It does not delete the lock path.
  */
-export async function withAgentOp<T>(home: string | undefined, name: string, fn: () => Promise<T>): Promise<T> {
+export async function withAgentOp<T>(home: string | undefined, name: string, fn: (guard: OpGuard) => Promise<T>): Promise<T> {
   const key = `${home ?? ''}\0${name}`;
   const previous = chains.get(key) ?? Promise.resolve();
   let releaseChain = () => undefined;
@@ -33,11 +38,18 @@ export async function withAgentOp<T>(home: string | undefined, name: string, fn:
     if (chains.get(key) === tail) chains.delete(key);
     throw err;
   }
+  const guard: OpGuard = {
+    assertHeld() {
+      if (!lockHeld(held)) {
+        throw new FileLockError(`The lock helper for ${held.file} exited while the lock was held. The kernel lock is no longer held.`);
+      }
+    },
+  };
   const lost = lockLoss(held);
   let primary: unknown;
   let result: T | undefined;
   try {
-    result = await Promise.race([fn(), lost]);
+    result = await Promise.race([fn(guard), lost]);
     if (!lockHeld(held)) {
       primary = new FileLockError(`The lock helper for ${held.file} exited while the lock was held. The kernel lock is no longer held.`);
     }

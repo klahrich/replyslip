@@ -970,11 +970,18 @@ async function withAgentOp(home, name, fn) {
     if (chains.get(key) === tail) chains.delete(key);
     throw err;
   }
+  const guard = {
+    assertHeld() {
+      if (!lockHeld(held)) {
+        throw new FileLockError(`The lock helper for ${held.file} exited while the lock was held. The kernel lock is no longer held.`);
+      }
+    }
+  };
   const lost = lockLoss(held);
   let primary;
   let result;
   try {
-    result = await Promise.race([fn(), lost]);
+    result = await Promise.race([fn(guard), lost]);
     if (!lockHeld(held)) {
       primary = new FileLockError(`The lock helper for ${held.file} exited while the lock was held. The kernel lock is no longer held.`);
     }
@@ -1468,6 +1475,7 @@ function writeAliases(home, file, identity, options, self, isAlive) {
     }
     const temp = writeTemp(path6.dirname(target), alias);
     try {
+      assertMutex();
       renameSync2(temp, target);
       written.push(target);
     } catch {
@@ -1598,6 +1606,7 @@ function refuseReclaim(info, self, isAlive, file) {
   return "lost";
 }
 function publish(temp, file, self, isAlive, force, reclaim) {
+  assertMutex();
   try {
     renameSync2(temp, file);
     return "placed";
@@ -1611,7 +1620,9 @@ function publish(temp, file, self, isAlive, force, reclaim) {
       return "lost";
     }
   } else if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid, origin: held.origin };
+  assertMutex();
   removeLock(file);
+  assertMutex();
   try {
     renameSync2(temp, file);
     return "placed";
@@ -1640,6 +1651,13 @@ function isRenameConflict(err) {
   return code === "EEXIST" || code === "EPERM" || code === "ENOTEMPTY";
 }
 var acquireDepth = /* @__PURE__ */ new Map();
+var mutexHold = null;
+function assertMutex() {
+  if (!mutexHold) return;
+  if (!lockHeld(mutexHold)) {
+    throw new FileLockError(`The lock helper for ${mutexHold.file} exited while the lock was held. The kernel lock is no longer held.`);
+  }
+}
 function withAcquireMutex(home, fn) {
   const file = path6.join(replyslipHome(home), "acquire.mutex");
   const depth = acquireDepth.get(file) ?? 0;
@@ -1662,10 +1680,12 @@ function withAcquireMutex(home, fn) {
     acquireDepth.delete(file);
     throw err;
   }
+  mutexHold = held;
   try {
     return fn();
   } finally {
     acquireDepth.delete(file);
+    mutexHold = null;
     releaseFileLock(held);
   }
 }
@@ -1797,20 +1817,23 @@ async function installSupervision(name, io = {}) {
   }
   let started;
   try {
-    started = await withAgentOp(home, name, async () => {
+    started = await withAgentOp(home, name, async (op) => {
+      const bound = { ...io, op };
+      op.assertHeld();
       if (readSuperviseState(home, name).epoch !== epochAtInvoke) {
         return {
           ok: false,
           message: `Stop for ${name} won before install finished. The watcher was not started.`
         };
       }
+      op.assertHeld();
       clearStopped(home, name);
       clearHold(home, name);
       clearProgress(home, name);
       const epoch = readSuperviseState(home, name).epoch;
       writeSuperviseState(home, name, { ...emptySuperviseState(), epoch });
       enrollAgent(home, name);
-      return ensureWatcher(name, io, scriptPath, nodePath, true);
+      return ensureWatcher(name, bound, scriptPath, nodePath, true);
     });
   } catch (err) {
     const message = lockWaitMessage(err);
@@ -1825,7 +1848,7 @@ async function stopSupervision(name, io = {}) {
   const checked = checkName(name);
   if (checked) return { ok: false, message: checked };
   try {
-    return await withAgentOp(io.home, name, () => stopLocked(name, io));
+    return await withAgentOp(io.home, name, (op) => stopLocked(name, { ...io, op }));
   } catch (err) {
     const message = lockWaitMessage(err);
     if (message) return { ok: false, message };
@@ -1840,24 +1863,27 @@ async function uninstallSupervision(options, io = {}) {
     if (checked) return { ok: false, message: checked };
   }
   const lines = [];
+  let lostLock = false;
   for (const name of names) {
     let stopped;
     try {
-      stopped = await withAgentOp(io.home, name, async () => {
-        const result = await stopLocked(name, io);
+      stopped = await withAgentOp(io.home, name, async (op) => {
+        const result = await stopLocked(name, { ...io, op });
+        op.assertHeld();
         unenrollAgent(io.home, name);
         return result;
       });
     } catch (err) {
       const message = lockWaitMessage(err);
       if (!message) throw err;
+      lostLock = true;
       lines.push(message);
       continue;
     }
     if (!stopped.ok) lines.push(stopped.message);
     else lines.push(...stopped.lines);
   }
-  if (options.all) writeEnrolled(io.home, []);
+  if (options.all && !lostLock) writeEnrolled(io.home, []);
   const remaining = readEnrolled(io.home);
   if (remaining.length > 0) {
     lines.push(`Timer left in place for ${remaining.join(", ")}.`);
@@ -1886,6 +1912,7 @@ function supervisionStatus(io = {}) {
   return lines;
 }
 async function stopLocked(name, io) {
+  own(io);
   const state = readSuperviseState(io.home, name);
   writeSuperviseState(io.home, name, { ...state, epoch: state.epoch + 1 });
   writeStopped(io.home, name);
@@ -1913,7 +1940,7 @@ async function stopLocked(name, io) {
 }
 async function tickAgent(name, io) {
   try {
-    return await withAgentOp(io.home, name, () => tickLocked(name, io));
+    return await withAgentOp(io.home, name, (op) => tickLocked(name, { ...io, op }));
   } catch (err) {
     const message = lockWaitMessage(err);
     if (message) return message;
@@ -1923,7 +1950,12 @@ async function tickAgent(name, io) {
 function lockWaitMessage(err) {
   return err instanceof FileLockError ? err.message : null;
 }
+function own(io) {
+  if (!io.op) throw new FileLockError("Supervision reached a protected step without the agent lock.");
+  io.op.assertHeld();
+}
 async function tickLocked(name, io) {
+  own(io);
   if (isStopped(io.home, name)) {
     await reapOurWatchers(name, io);
     return "stopped";
@@ -1943,9 +1975,11 @@ async function tickLocked(name, io) {
     spawnAlive: !!state.lastSpawnPid && alive(state.lastSpawnPid),
     state
   });
+  own(io);
   writeSuperviseState(io.home, name, decision.state);
   if (decision.decision.action === "skip") return decision.decision.reason === "hold" ? `held (${decision.decision.hold})` : decision.decision.reason;
   if (!await stopStillCurrent(io.home, name, epoch)) {
+    own(io);
     await reapOurWatchers(name, io);
     return "stopped";
   }
@@ -1953,6 +1987,7 @@ async function tickLocked(name, io) {
     const started2 = await startWatcher(name, io, decision.state, null);
     if (!started2.ok) return `start failed: ${started2.message}`;
     if (!await stopStillCurrent(io.home, name, epoch)) {
+      own(io);
       await reapExact(started2.pid, name, io);
       return "stopped";
     }
@@ -1960,9 +1995,11 @@ async function tickLocked(name, io) {
   }
   const killed = await killDecision(name, decision.decision, io);
   if (!await stopStillCurrent(io.home, name, epoch)) {
+    own(io);
     await reapOurWatchers(name, io);
     return "stopped";
   }
+  own(io);
   if (!killed.ok) {
     const recovered = await recoverWithoutSignal(name, decision.decision, decision.state, killed.reason, io, epoch);
     if (recovered) return recovered;
@@ -1971,6 +2008,7 @@ async function tickLocked(name, io) {
   const started = await startWatcher(name, io, { ...decision.state, lastSpawnPid: null }, null);
   if (!started.ok) return `killed, then start failed: ${started.message}`;
   if (!await stopStillCurrent(io.home, name, epoch)) {
+    own(io);
     await reapExact(started.pid, name, io);
     return "stopped";
   }
@@ -1989,6 +2027,7 @@ async function reapOurWatchers(name, io) {
   let signalled = false;
   let skipped = false;
   for (const pid of pids) {
+    own(io);
     const result = await reapExact(pid, name, io);
     if (result === "signalled") signalled = true;
     if (result === "skipped") skipped = true;
@@ -2002,9 +2041,11 @@ async function reapExact(pid, name, io) {
   if (!alive(pid)) return "not-running";
   const identify = io.identify ?? ((target) => identifyProcess(target, io.platform ?? process.platform));
   const identity = await identify(pid);
+  own(io);
   if (!identity?.cmdline || !watchCommandForAgent(identity.cmdline, name)) return "skipped";
   const platform = io.platform ?? process.platform;
   const kill = io.kill ?? ((target, signal) => defaultKill(target, signal, platform));
+  own(io);
   kill(pid, platform === "win32" ? "SIGKILL" : "SIGTERM");
   return "signalled";
 }
@@ -2014,15 +2055,18 @@ async function recoverWithoutSignal(name, decision, state, reason, io, epoch) {
   const lockWasNotOurs = decision.action === "kill-lock" && FOREIGN_PID.has(reason);
   if (!spawnWasNotOurs && !lockWasNotOurs) return null;
   if (!await stopStillCurrent(io.home, name, epoch)) {
+    own(io);
     await reapOurWatchers(name, io);
     return "stopped";
   }
+  own(io);
   const cleared = { ...state, lastSpawnPid: null, lastSpawnAt: null };
   writeSuperviseState(io.home, name, cleared);
   const reclaim = lockWasNotOurs ? { pid: decision.pid, token: decision.token, startedAt: decision.startedAt } : null;
   const started = await startWatcher(name, io, cleared, reclaim);
   if (!started.ok) return `start failed: ${started.message}`;
   if (!await stopStillCurrent(io.home, name, epoch)) {
+    own(io);
     await reapExact(started.pid, name, io);
     return "stopped";
   }
@@ -2037,6 +2081,7 @@ async function ensureWatcher(name, io, scriptPath, nodePath, replace) {
       { action: "kill-lock", reason: "wedge", pid: lock.pid, token: lock.token ?? "", startedAt: lock.startedAt },
       bound
     );
+    own(bound);
     if (!killed.ok) {
       return {
         ok: false,
@@ -2046,19 +2091,23 @@ async function ensureWatcher(name, io, scriptPath, nodePath, replace) {
   } else if (lock) {
     return { ok: true, lines: [`Watcher already running for ${name} (pid ${lock.pid}).`] };
   }
+  own(bound);
   const started = await startWatcher(name, bound, readSuperviseState(io.home, name), null);
   if (!started.ok) return { ok: false, message: started.message };
   return { ok: true, lines: [`Watcher started for ${name} (pid ${started.pid}), detached from this terminal.`] };
 }
 async function startWatcher(name, io, state, reclaim) {
+  own(io);
   if (isStopped(io.home, name)) return { ok: false, message: "stopped" };
   if (!agentKeyFileExists(name, io.home)) {
+    own(io);
     writeHold(io.home, name, "config");
     return { ok: false, message: `No key file for ${name}. Not started.` };
   }
   const scriptPath = path7.resolve(io.scriptPath ?? process.argv[1] ?? "");
   const nodePath = io.nodePath ?? process.execPath;
   await io.beforeSpawn?.();
+  own(io);
   if (isStopped(io.home, name) || readSuperviseState(io.home, name).epoch !== state.epoch) {
     return { ok: false, message: "stopped" };
   }
@@ -2073,8 +2122,10 @@ async function startWatcher(name, io, state, reclaim) {
   };
   try {
     const spawnWatcher = io.spawnWatcher ?? spawnDetachedWatcher;
+    own(io);
     const child = spawnWatcher(request);
     const now = (io.now ?? Date.now)();
+    own(io);
     writeSuperviseState(io.home, name, {
       ...state,
       restarts: [...state.restarts, new Date(now).toISOString()],
@@ -2089,6 +2140,7 @@ async function startWatcher(name, io, state, reclaim) {
 async function killDecision(name, decision, io) {
   const identify = io.identify ?? ((pid) => identifyProcess(pid, io.platform ?? process.platform));
   const identity = await identify(decision.pid);
+  own(io);
   const allowed = decision.action === "kill-lock" ? killLockAllowed({
     lock: currentLockIdentity(io.home, name),
     expected: { pid: decision.pid, token: decision.token, startedAt: decision.startedAt },
@@ -2113,16 +2165,22 @@ async function signalPid(pid, io, mode, recheck) {
   const alive = io.alive ?? pidIsAlive;
   const sleep = io.sleep ?? defaultSleep;
   const again = await recheck();
+  own(io);
   if (!again.ok) return again;
   if (platform === "win32" || mode === "force") {
+    own(io);
     kill(pid, "SIGKILL");
     return { ok: true };
   }
+  own(io);
   kill(pid, "SIGTERM");
   await sleep(500);
+  own(io);
   if (!alive(pid)) return { ok: true };
   const finalCheck = await recheck();
+  own(io);
   if (!finalCheck.ok) return { ok: true };
+  own(io);
   kill(pid, "SIGKILL");
   return { ok: true };
 }

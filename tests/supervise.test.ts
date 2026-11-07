@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -7,6 +7,7 @@ import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runReplyslip } from '../packages/cli/src/cli';
+import { acquireFileLockSync, releaseFileLock } from '../packages/cli/src/file-lock';
 import { killLockAllowed, killSpawnAllowed, linuxStartMs, parseWindowsIdentity } from '../packages/cli/src/process-identity';
 import { redactSecrets } from '../packages/cli/src/redact';
 import { decideSupervision } from '../packages/cli/src/supervise-decide';
@@ -18,6 +19,13 @@ import { emptySuperviseState, enrollAgent, isStopped, readEnrolled, readHold, re
 
 const KEY = 'rsk_CANARY_agent_key_do_not_print';
 const ORIGIN = 'https://relay.example';
+
+function helperPid(file: string): number {
+  const listed = execFileSync('ps', ['-ww', '-eo', 'pid,args'], { encoding: 'utf8' });
+  const line = listed.split('\n').find((row) => row.includes(file));
+  if (!line) throw new Error(`lock helper not found for ${file}`);
+  return Number(line.trim().split(/\s+/)[0]);
+}
 
 function defer() {
   let resolve: () => void = () => undefined;
@@ -400,6 +408,126 @@ describe('supervision install and tick', () => {
     expect(noDuplicate.lines.join('\n')).toMatch(/starting/);
     expect(spawned).toEqual([9001, 9002]);
     expect(kills).toEqual([9001]);
+  });
+
+  it('does not spawn, signal, or write state when the lock helper dies during identify', async () => {
+    const home = await tempHome();
+    writeKey(home, 'Bot');
+    enrollAgent(home, 'Bot');
+    const origin = Date.parse('2026-11-07T12:00:00.000Z');
+    writeSuperviseState(home, 'Bot', {
+      ...emptySuperviseState(),
+      lastSpawnPid: 4242,
+      lastSpawnAt: new Date(origin - 130_000).toISOString(),
+      lastCheckAt: new Date(origin - 130_000).toISOString(),
+    });
+    const kills: number[] = [];
+    const spawned: number[] = [];
+    const identifyEntered = defer();
+    const identifyUnblocked = defer();
+    let block = true;
+    const sup = {
+      home,
+      platform: 'linux' as const,
+      scriptPath: '/tmp/replyslip-tick.js',
+      nodePath: '/usr/bin/node',
+      env: { PATH: '/usr/bin' },
+      now: () => origin,
+      alive: (pid: number) => pid === 4242 || spawned.includes(pid),
+      identify: async (pid: number) => {
+        if (block && pid === 4242) {
+          identifyEntered.resolve();
+          await identifyUnblocked.promise;
+          block = false;
+          return { cmdline: 'node /tmp/replyslip.mjs watch --name Other', startedAtMs: origin };
+        }
+        if (pid === 4242) return { cmdline: 'node /tmp/replyslip.mjs watch --name Other', startedAtMs: origin };
+        return { cmdline: 'node /tmp/replyslip.mjs watch --name Bot', startedAtMs: origin - 1000 };
+      },
+      kill: (pid: number) => {
+        kills.push(pid);
+      },
+      spawnWatcher: () => {
+        spawned.push(9001);
+        return { pid: 9001 };
+      },
+    };
+    const op = path.join(home, '.replyslip', 'supervise', 'Bot.op');
+    const tick = runSupervisionTick(sup);
+    await identifyEntered.promise;
+    const snapshot = JSON.parse(JSON.stringify(readSuperviseState(home, 'Bot')));
+    process.kill(helperPid(op), 'SIGKILL');
+    const contender = acquireFileLockSync(op, { waitMs: 2_000 });
+    identifyUnblocked.resolve();
+    const first = await tick;
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.lines.join('\n')).toMatch(/no longer held/);
+    expect(spawned).toEqual([]);
+    expect(kills).toEqual([]);
+    expect(JSON.parse(JSON.stringify(readSuperviseState(home, 'Bot')))).toEqual(snapshot);
+    releaseFileLock(contender);
+    const second = await runSupervisionTick(sup);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.lines.join('\n')).toMatch(/started pid 9001 without signalling 4242/);
+    expect(spawned).toEqual([9001]);
+    expect(kills).toEqual([]);
+  });
+
+  it('does not signal when the helper dies during reap, and a later stop still can', async () => {
+    const home = await tempHome();
+    writeKey(home, 'Bot');
+    enrollAgent(home, 'Bot');
+    const origin = Date.parse('2026-11-07T12:00:00.000Z');
+    writeSuperviseState(home, 'Bot', { ...emptySuperviseState(), lastSpawnPid: 4242, lastSpawnAt: new Date(origin).toISOString() });
+    const kills: number[] = [];
+    const identifyEntered = defer();
+    const identifyUnblocked = defer();
+    let block = true;
+    const identify = async (pid: number) => {
+      if (block && pid === 4242) {
+        identifyEntered.resolve();
+        await identifyUnblocked.promise;
+        block = false;
+      }
+      return { cmdline: 'node /tmp/replyslip.mjs watch --name Bot', startedAtMs: origin - 1000 };
+    };
+    const op = path.join(home, '.replyslip', 'supervise', 'Bot.op');
+    const stopping = stopSupervision('Bot', {
+      home,
+      platform: 'linux',
+      alive: (pid) => pid === 4242,
+      identify,
+      kill: (pid) => {
+        kills.push(pid);
+      },
+    });
+    await identifyEntered.promise;
+    const snapshot = JSON.parse(JSON.stringify(readSuperviseState(home, 'Bot')));
+    const stopped = isStopped(home, 'Bot');
+    process.kill(helperPid(op), 'SIGKILL');
+    const contender = acquireFileLockSync(op, { waitMs: 2_000 });
+    identifyUnblocked.resolve();
+    const first = await stopping;
+    expect(first.ok).toBe(false);
+    if (first.ok) return;
+    expect(first.message).toMatch(/no longer held/);
+    expect(kills).toEqual([]);
+    expect(JSON.parse(JSON.stringify(readSuperviseState(home, 'Bot')))).toEqual(snapshot);
+    expect(isStopped(home, 'Bot')).toBe(stopped);
+    releaseFileLock(contender);
+    const second = await stopSupervision('Bot', {
+      home,
+      platform: 'linux',
+      alive: (pid) => pid === 4242,
+      identify,
+      kill: (pid) => {
+        kills.push(pid);
+      },
+    });
+    expect(second.ok).toBe(true);
+    expect(kills).toEqual([4242]);
   });
 
   it('stop during recovery reaps the replacement and does not leave it running', async () => {

@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs';
 import { hostname, homedir, uptime } from 'node:os';
 import path from 'node:path';
-import { acquireFileLockSync, FILE_LOCK_WAIT_MS, releaseFileLock, type HeldFileLock } from './file-lock.ts';
+import { acquireFileLockSync, FILE_LOCK_WAIT_MS, FileLockError, lockHeld, releaseFileLock, type HeldFileLock } from './file-lock.ts';
 import { replyslipHome } from './register.ts';
 
 export type WatcherLockInfo = {
@@ -445,6 +445,7 @@ function writeAliases(
     }
     const temp = writeTemp(path.dirname(target), alias);
     try {
+      assertMutex();
       renameSync(temp, target);
       written.push(target);
     } catch {
@@ -646,6 +647,7 @@ function publish(
   force: boolean,
   reclaim?: ReclaimLock,
 ): 'placed' | 'lost' | { pid: number; origin: string } {
+  assertMutex();
   try {
     renameSync(temp, file);
     return 'placed';
@@ -659,7 +661,9 @@ function publish(
       return 'lost';
     }
   } else if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid, origin: held.origin };
+  assertMutex();
   removeLock(file);
+  assertMutex();
   try {
     renameSync(temp, file);
     return 'placed';
@@ -691,6 +695,14 @@ function isRenameConflict(err: unknown): boolean {
 }
 
 const acquireDepth = new Map<string, number>();
+let mutexHold: HeldFileLock | null = null;
+
+function assertMutex(): void {
+  if (!mutexHold) return;
+  if (!lockHeld(mutexHold)) {
+    throw new FileLockError(`The lock helper for ${mutexHold.file} exited while the lock was held. The kernel lock is no longer held.`);
+  }
+}
 
 function withAcquireMutex<T>(home: string, fn: () => T): T {
   const file = path.join(replyslipHome(home), 'acquire.mutex');
@@ -714,10 +726,12 @@ function withAcquireMutex<T>(home: string, fn: () => T): T {
     acquireDepth.delete(file);
     throw err;
   }
+  mutexHold = held;
   try {
     return fn();
   } finally {
     acquireDepth.delete(file);
+    mutexHold = null;
     releaseFileLock(held);
   }
 }
