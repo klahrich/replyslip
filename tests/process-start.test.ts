@@ -19,6 +19,9 @@ describe('process start adapters', () => {
     const identity = parseDarwinIdentity(`${LSTART} node replyslip.mjs watch --name Bot`);
     expect(identity).toEqual({ cmdline: 'node replyslip.mjs watch --name Bot', startedAtMs: expected });
     expect(parseDarwinIdentity(LSTART)).toBeNull();
+    const sameSecond = darwinLstartMs(LSTART);
+    expect(darwinLstartMs('Sat Nov  7 16:33:01 2026')).toBe(sameSecond);
+    expect(darwinLstartMs('Sat Nov  7 16:33:02 2026')).toBe((sameSecond ?? 0) + 1000);
   });
 
   it('reads linux, macOS, and windows start times, and fails closed when the probe is unknown', () => {

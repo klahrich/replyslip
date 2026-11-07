@@ -671,18 +671,17 @@ describe('watcher lock review fixes', () => {
     expect(URL_MISSING_MESSAGE).toContain('--url needs a value');
   });
 
-  it('reclaims a stale acquire.mutex instead of waiting on pid 1, empty bytes, or this process', async () => {
+  it('does not hang on a mutex file that contains pid 1, empty bytes, or this process', async () => {
     for (const body of ['', '1\n', `${process.pid}\n`, '{']) {
       const home = await mkdtemp(path.join(tmpdir(), 'replyslip-mutex-'));
       const mutex = path.join(home, '.replyslip', 'acquire.mutex');
       mkdirSync(path.dirname(mutex), { recursive: true });
       writeFileSync(mutex, body);
-      const old = new Date(Date.now() - 60_000);
-      utimesSync(mutex, old, old);
       const started = Date.now();
       const acquired = acquireWatcherLock({ home, origin: ORIGIN, workspaceId: 'ws-mutex', watcherKey: KEY });
       expect(Date.now() - started).toBeLessThan(1_000);
       expect(acquired.ok).toBe(true);
+      expect(readFileSync(mutex, 'utf8')).toBe(body);
       if (acquired.ok) acquired.hold.release();
     }
   });

@@ -9,9 +9,9 @@ const chains = new Map<string, Promise<void>>();
 
 /**
  * One operation at a time per agent. Same-process callers queue so a stop still
- * runs after an in-flight tick and can reap that tick's child. The on-disk lock
- * waits at most {@link FILE_LOCK_WAIT_MS}, then fails without deleting a proved
- * live owner. A dead, reused, empty, or malformed record is reclaimed.
+ * runs after an in-flight tick and can reap that tick's child. Cross-process
+ * ownership is the kernel lock, held for at most {@link FILE_LOCK_WAIT_MS} of
+ * waiting. Release unlocks. It does not delete the lock path.
  */
 export async function withAgentOp<T>(home: string | undefined, name: string, fn: () => Promise<T>): Promise<T> {
   const key = `${home ?? ''}\0${name}`;

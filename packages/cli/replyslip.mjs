@@ -190,9 +190,9 @@ async function readAgentCredentials(name, options = {}) {
 }
 
 // packages/cli/src/supervise.ts
-import { spawn } from "node:child_process";
+import { spawn as spawn2 } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
-import { accessSync, appendFileSync, chmodSync as chmodSync3, closeSync as closeSync4, mkdirSync as mkdirSync5, openSync as openSync4, readFileSync as readFileSync5, unlinkSync as unlinkSync4, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, chmodSync as chmodSync3, closeSync as closeSync4, mkdirSync as mkdirSync5, openSync as openSync4, readFileSync as readFileSync4, unlinkSync as unlinkSync3, writeFileSync } from "node:fs";
 import path7 from "node:path";
 
 // packages/cli/src/redact.ts
@@ -361,77 +361,6 @@ function cimCreationMs(text) {
   }
   return localAsUtc - offsetMin * 6e4;
 }
-var PROCESS_START_TIMEOUT_MS = 1e3;
-var ownStart;
-function ownProcessStartedAtMs() {
-  if (ownStart === void 0) ownStart = processStartedAtMs(process.pid);
-  return ownStart;
-}
-function processStartedAtMs(pid, options = {}) {
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  const platform = options.platform ?? process.platform;
-  try {
-    if (platform === "linux") {
-      const row = (options.readLinux ?? readLinuxStart)(pid);
-      if (!row) return null;
-      return linuxStartMs(row.stat, row.btimeSec);
-    }
-    const run = options.run ?? runProcessStart;
-    if (platform === "darwin") {
-      const stdout = run("ps", ["-p", String(pid), "-o", "lstart="], PROCESS_START_TIMEOUT_MS);
-      if (!stdout) return null;
-      return darwinLstartMs(stdout);
-    }
-    if (platform === "win32") {
-      const stdout = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", windowsStartScript(pid)], PROCESS_START_TIMEOUT_MS);
-      if (!stdout) return null;
-      return parseWindowsStartStdout(stdout);
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-function readLinuxStart(pid) {
-  try {
-    const stat3 = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const procStat = readFileSync("/proc/stat", "utf8");
-    const btimeSec = Number(procStat.match(/^btime\s+(\d+)/m)?.[1]);
-    if (!Number.isFinite(btimeSec)) return null;
-    return { stat: stat3, btimeSec };
-  } catch {
-    return null;
-  }
-}
-function runProcessStart(file, args, timeoutMs) {
-  try {
-    return execFileSync(file, args, {
-      timeout: timeoutMs,
-      windowsHide: true,
-      encoding: "utf8",
-      env: { ...process.env, LC_ALL: "C" }
-    });
-  } catch {
-    return null;
-  }
-}
-function windowsStartScript(pid) {
-  return `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate | ConvertTo-Json -Compress`;
-}
-function parseWindowsStartStdout(stdout) {
-  const text = stdout.trim();
-  if (!text) return null;
-  try {
-    const parsed = JSON.parse(text);
-    if (typeof parsed === "string" || typeof parsed === "number") return windowsCreationMs(parsed);
-    if (parsed && typeof parsed === "object" && "CreationDate" in parsed) {
-      return windowsCreationMs(parsed.CreationDate);
-    }
-    return null;
-  } catch {
-    return windowsCreationMs(text);
-  }
-}
 async function identifyProcess(pid, platform = process.platform) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   try {
@@ -562,8 +491,8 @@ function decideSupervision(input) {
 }
 
 // packages/cli/src/file-lock.ts
-import { randomBytes } from "node:crypto";
-import { closeSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync as readFileSync2, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { closeSync, mkdirSync, openSync, readSync } from "node:fs";
 import path2 from "node:path";
 var FILE_LOCK_WAIT_MS = 2e3;
 var FileLockError = class extends Error {
@@ -572,248 +501,197 @@ var FileLockError = class extends Error {
     this.name = "FileLockError";
   }
 };
-var heldTokens = /* @__PURE__ */ new Set();
+var tools = { perl: false, flock: false, powershell: false, known: false };
+function lockHelperFor(platform, available) {
+  if (platform === "win32") return available.powershell ? "powershell" : null;
+  if (available.perl) return "perl";
+  if (available.flock) return "flock";
+  return null;
+}
 function acquireFileLockSync(file, options = {}) {
-  const held = runLock(file, options, (ms) => {
-    if (ms <= 0) return;
-    const gate = new Int32Array(new SharedArrayBuffer(4));
-    Atomics.wait(gate, 0, 0, ms);
-  });
-  if (held instanceof Promise) throw new FileLockError(`Could not acquire ${file}.`);
-  return held;
+  const waitMs = options.waitMs ?? FILE_LOCK_WAIT_MS;
+  const helper = options.helper ?? detectHelper();
+  if (!helper) {
+    throw new FileLockError(
+      `Could not acquire ${file}. No OS lock helper is available (perl, flock, or PowerShell). Nothing was deleted.`
+    );
+  }
+  mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  const created = openSync(file, "a", 384);
+  closeSync(created);
+  const child = spawnHelper(helper, file, waitMs);
+  child.stdout?.pause();
+  child.on("error", () => void 0);
+  const deadline = Date.now() + waitMs + 1e3;
+  let line = "";
+  try {
+    line = readLine(pipeFd(child.stdout), deadline);
+  } catch (err) {
+    stopHelper(child);
+    throw err;
+  }
+  if (line !== "ok") {
+    stopHelper(child);
+    const why = line === "busy" || line === "" ? `within ${waitMs}ms` : `(${line})`;
+    throw new FileLockError(
+      `Could not acquire ${file} ${why}. The operating system lock is held, or the helper could not lock it. The file was not removed. Retry after the holder exits.`
+    );
+  }
+  return { file, child, released: false };
 }
 async function acquireFileLock(file, options = {}) {
-  const held = runLock(file, options, (ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-  return held instanceof Promise ? held : held;
+  return acquireFileLockSync(file, options);
 }
 function releaseFileLock(held) {
-  heldTokens.delete(held.token);
-  try {
-    closeSync(held.fd);
-  } catch {
-  }
-  try {
-    const current = readFileSync2(held.file, "utf8");
-    const owner = parseOwner(current);
-    if (owner?.token === held.token) unlinkSync(held.file);
-  } catch {
-  }
+  if (held.released) return;
+  held.released = true;
+  closePipe(held.child.stdin);
+  const line = readLine(pipeFd(held.child.stdout), Date.now() + 2e3);
+  if (line !== "bye") stopHelper(held.child);
 }
-function runLock(file, options, sleep) {
-  const waitMs = options.waitMs ?? FILE_LOCK_WAIT_MS;
-  const now = options.now ?? Date.now;
-  const deadline = now() + waitMs;
-  const processStart = startReader(options);
-  mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
-  const turn = () => {
-    const draft = beginPublish(file, options);
-    const finish = () => {
-      const held = commitPublish(draft, file);
-      if (held) return held;
-      const seen = observe(file, options, processStart);
-      if (seen.kind === "stale") {
-        options.beforeReclaim?.(seen.text);
-        if (reclaimSnapshot(file, seen.text)) return null;
-      }
-      if (now() >= deadline) throw new FileLockError(busyMessage(file, seen.text, waitMs));
-      return pause(Math.min(10, Math.max(0, deadline - now())));
-    };
-    const pause = (ms) => {
-      const slept = sleep(ms);
-      if (slept && typeof slept.then === "function") return slept.then(turn);
-      return turn();
-    };
-    if (!options.beforePublish) return finish() ?? turn();
-    let hooked;
+function detectHelper() {
+  if (!tools.known) {
+    tools.perl = toolExists("perl");
+    tools.flock = toolExists("flock");
+    tools.powershell = toolExists("powershell.exe");
+    tools.known = true;
+  }
+  return lockHelperFor(process.platform, tools);
+}
+function toolExists(name) {
+  const result = spawnSync("which", [name], { stdio: "ignore" });
+  return result.status === 0;
+}
+function spawnHelper(helper, file, waitMs) {
+  if (helper === "perl") {
+    return spawn("perl", ["-e", PERL_LOCK, file, String(waitMs)], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+  }
+  if (helper === "flock") {
+    const seconds = waitMs <= 0 ? "0" : String(Math.max(1, Math.ceil(waitMs / 1e3)));
+    return spawn("flock", ["-w", seconds, "-x", file, "sh", "-c", 'printf "ok\\n"; IFS= read -r _; printf "bye\\n"'], {
+      stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true
+    });
+  }
+  return spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", POWERSHELL_LOCK], {
+    stdio: ["pipe", "pipe", "ignore"],
+    windowsHide: true,
+    env: { ...process.env, REPLYSLIP_LOCK_PATH: file, REPLYSLIP_LOCK_WAIT_MS: String(waitMs) }
+  });
+}
+function closePipe(stream) {
+  const fd = stream?._handle?.fd;
+  if (typeof fd === "number" && fd >= 0) {
     try {
-      hooked = options.beforePublish(draft.temp);
-    } catch (err) {
-      abortPublish(draft);
-      throw err;
-    }
-    if (hooked && typeof hooked.then === "function") {
-      return hooked.then(
-        () => finish() ?? turn(),
-        (err) => {
-          abortPublish(draft);
-          throw err;
-        }
-      );
-    }
-    return finish() ?? turn();
-  };
-  return turn();
-}
-function beginPublish(file, options) {
-  const self = options.self ?? { pid: process.pid, startedAtMs: ownProcessStartedAtMs() };
-  const token = randomBytes(8).toString("hex");
-  const temp = `${file}.${token}.tmp`;
-  const fd = openSync(temp, "wx", 384);
-  const body = `${JSON.stringify({ pid: self.pid, token, startedAtMs: self.startedAtMs })}
-`;
-  const draft = { fd, temp, token, body, closed: false };
-  try {
-    const written = writeSync(fd, body);
-    if (written !== Buffer.byteLength(body)) throw new FileLockError(`Could not write the owner record for ${file}.`);
-    fsyncSync(fd);
-  } catch (err) {
-    abortPublish(draft);
-    throw err;
-  }
-  return draft;
-}
-function commitPublish(draft, file) {
-  let onDisk = "";
-  try {
-    onDisk = readFileSync2(draft.temp, "utf8");
-  } catch (err) {
-    abortPublish(draft);
-    throw err;
-  }
-  if (onDisk !== draft.body) {
-    abortPublish(draft);
-    return null;
-  }
-  try {
-    linkSync(draft.temp, file);
-  } catch (err) {
-    abortPublish(draft);
-    if (err.code === "EEXIST") return null;
-    throw err;
-  }
-  const mine = fstatSync(draft.fd);
-  let linked;
-  try {
-    linked = statSync(file);
-  } catch {
-    abortPublish(draft);
-    return null;
-  }
-  if (mine.ino !== linked.ino || mine.dev !== linked.dev) {
-    abortPublish(draft);
-    return null;
-  }
-  try {
-    unlinkSync(draft.temp);
-  } catch {
-  }
-  heldTokens.add(draft.token);
-  draft.closed = true;
-  return { fd: draft.fd, file, token: draft.token };
-}
-function abortPublish(draft) {
-  closeDraft(draft);
-  try {
-    unlinkSync(draft.temp);
-  } catch {
-  }
-}
-function closeDraft(draft) {
-  if (draft.closed) return;
-  draft.closed = true;
-  try {
-    closeSync(draft.fd);
-  } catch {
-  }
-}
-function observe(file, options, processStart) {
-  let text = "";
-  try {
-    text = readFileSync2(file, "utf8");
-  } catch {
-    return { kind: "absent", text: "" };
-  }
-  return { kind: classify(text, options, processStart), text };
-}
-function reclaimSnapshot(file, snapshot) {
-  const aside = `${file}.${randomBytes(8).toString("hex")}.aside`;
-  try {
-    renameSync(file, aside);
-  } catch {
-    return false;
-  }
-  let text = "";
-  try {
-    text = readFileSync2(aside, "utf8");
-  } catch {
-    return false;
-  }
-  if (text !== snapshot) {
-    try {
-      linkSync(aside, file);
-      unlinkSync(aside);
+      closeSync(fd);
     } catch {
     }
-    return false;
   }
+}
+function pipeFd(stream) {
+  const fd = stream?._handle?.fd;
+  if (typeof fd !== "number" || fd < 0) throw new FileLockError("The lock helper pipe is not readable.");
+  return fd;
+}
+function readLine(fd, deadline) {
+  let text = "";
+  const buf = Buffer.alloc(64);
+  const gate = new Int32Array(new SharedArrayBuffer(4));
+  while (!text.includes("\n") && text.length < 512) {
+    if (Date.now() >= deadline) break;
+    try {
+      const n = readSync(fd, buf, 0, buf.length, null);
+      if (n === 0) break;
+      text += buf.toString("utf8", 0, n);
+    } catch (err) {
+      if (err.code !== "EAGAIN") throw err;
+      Atomics.wait(gate, 0, 0, 5);
+    }
+  }
+  const end = text.indexOf("\n");
+  return (end === -1 ? text : text.slice(0, end)).trim();
+}
+function stopHelper(child) {
   try {
-    unlinkSync(aside);
+    child.kill("SIGTERM");
   } catch {
   }
-  return true;
 }
-function classify(text, options, processStart) {
-  const owner = parseOwner(text);
-  if (!owner) return "stale";
-  if (heldTokens.has(owner.token)) return "live";
-  const self = options.self ?? { pid: process.pid, startedAtMs: ownProcessStartedAtMs() };
-  const alive = options.isAlive ?? pidIsAlive;
-  if (owner.pid === self.pid && owner.startedAtMs === self.startedAtMs) return "stale";
-  if (!alive(owner.pid)) return "stale";
-  if (owner.startedAtMs == null) return "unproven";
-  const start = processStart(owner.pid);
-  if (start == null) return "unproven";
-  if (start !== owner.startedAtMs) return "stale";
-  return "live";
-}
-function startReader(options) {
-  if (options.processStart) return options.processStart;
-  const cache = /* @__PURE__ */ new Map();
-  return (pid) => {
-    if (cache.has(pid)) return cache.get(pid) ?? null;
-    const value = processStartedAtMs(pid);
-    cache.set(pid, value);
-    return value;
-  };
-}
-function parseOwner(text) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
+var PERL_LOCK = `
+use Fcntl qw(:flock O_RDWR O_CREAT);
+use Time::HiRes qw(time sleep);
+$| = 1;
+my ($path, $wait_ms) = @ARGV;
+sysopen(my $fh, $path, O_RDWR | O_CREAT, 0600) or do { print "error open\\n"; exit 1 };
+my $deadline = time() + ($wait_ms / 1000);
+while (1) {
+  if (flock($fh, LOCK_EX | LOCK_NB)) {
+    print "ok\\n";
+    while (defined(my $line = <STDIN>)) {}
+    flock($fh, LOCK_UN);
+    close $fh;
+    print "bye\\n";
+    exit 0;
   }
-  if (!parsed || typeof parsed !== "object") return null;
-  const row = parsed;
-  if (typeof row.pid !== "number" || !Number.isInteger(row.pid) || row.pid <= 0) return null;
-  if (typeof row.token !== "string" || !/^[0-9a-f]{16}$/.test(row.token)) return null;
-  if (row.startedAtMs == null) return { pid: row.pid, token: row.token, startedAtMs: null };
-  if (typeof row.startedAtMs !== "number" || !Number.isFinite(row.startedAtMs)) return null;
-  return { pid: row.pid, token: row.token, startedAtMs: row.startedAtMs };
+  last if time() >= $deadline;
+  sleep(0.01);
 }
-function busyMessage(file, text, waitMs) {
-  const owner = parseOwner(text);
-  const who = owner ? `pid ${owner.pid}` : "an unreadable owner record";
-  return `Could not acquire ${file} within ${waitMs}ms (${who}). The file was not removed because a live owner could not be ruled out. Retry after that process finishes. If replyslip is not running, delete the file.`;
-}
-function pidIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === "EPERM";
+print "busy\\n";
+exit 2;
+`;
+var POWERSHELL_LOCK = `
+$ErrorActionPreference = 'Stop'
+$path = $env:REPLYSLIP_LOCK_PATH
+$wait = [int]$env:REPLYSLIP_LOCK_WAIT_MS
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class ReplySlipLock {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct OVERLAPPED {
+    public IntPtr Internal;
+    public IntPtr InternalHigh;
+    public uint OffsetLow;
+    public uint OffsetHigh;
+    public IntPtr Event;
   }
+  [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+  public static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  public static extern bool LockFileEx(IntPtr h, uint flags, uint reserved, uint low, uint high, ref OVERLAPPED ov);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  public static extern bool UnlockFileEx(IntPtr h, uint reserved, uint low, uint high, ref OVERLAPPED ov);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  public static extern bool CloseHandle(IntPtr h);
 }
+"@
+$handle = [ReplySlipLock]::CreateFileW($path, [uint32]3221225472, [uint32]7, [IntPtr]::Zero, [uint32]4, [uint32]0, [IntPtr]::Zero)
+if ($handle.ToInt64() -eq -1) { Write-Output 'error open'; exit 1 }
+$ov = New-Object ReplySlipLock+OVERLAPPED
+$deadline = [DateTime]::UtcNow.AddMilliseconds($wait)
+$locked = $false
+while ($true) {
+  if ([ReplySlipLock]::LockFileEx($handle, [uint32]3, [uint32]0, [uint32]1, [uint32]0, [ref]$ov)) { $locked = $true; break }
+  if ([DateTime]::UtcNow -ge $deadline) { break }
+  Start-Sleep -Milliseconds 10
+}
+if (-not $locked) { [ReplySlipLock]::CloseHandle($handle) | Out-Null; Write-Output 'busy'; exit 2 }
+Write-Output 'ok'
+[Console]::Out.Flush()
+[Console]::In.ReadLine() | Out-Null
+[ReplySlipLock]::UnlockFileEx($handle, [uint32]0, [uint32]1, [uint32]0, [ref]$ov) | Out-Null
+[ReplySlipLock]::CloseHandle($handle) | Out-Null
+Write-Output 'bye'
+`;
 
 // packages/cli/src/supervise-lock.ts
 import { mkdirSync as mkdirSync3 } from "node:fs";
 import path4 from "node:path";
 
 // packages/cli/src/watcher-progress.ts
-import { chmodSync, closeSync as closeSync2, mkdirSync as mkdirSync2, openSync as openSync2, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync2, writeSync as writeSync2 } from "node:fs";
+import { chmodSync, closeSync as closeSync2, mkdirSync as mkdirSync2, openSync as openSync2, readFileSync as readFileSync2, renameSync, unlinkSync, writeSync } from "node:fs";
 import path3 from "node:path";
-import { randomBytes as randomBytes2 } from "node:crypto";
+import { randomBytes } from "node:crypto";
 function emptySuperviseState() {
   return {
     restarts: [],
@@ -841,10 +719,10 @@ function ensureDir(dir) {
 }
 function writePrivate(file, body) {
   ensureDir(path3.dirname(file));
-  const temp = path3.join(path3.dirname(file), `.${path3.basename(file)}.${randomBytes2(6).toString("hex")}.tmp`);
+  const temp = path3.join(path3.dirname(file), `.${path3.basename(file)}.${randomBytes(6).toString("hex")}.tmp`);
   const fd = openSync2(temp, "wx", 384);
   try {
-    writeSync2(fd, body.endsWith("\n") ? body : `${body}
+    writeSync(fd, body.endsWith("\n") ? body : `${body}
 `);
   } finally {
     closeSync2(fd);
@@ -853,11 +731,11 @@ function writePrivate(file, body) {
     chmodSync(temp, 384);
   } catch {
   }
-  renameSync2(temp, file);
+  renameSync(temp, file);
 }
 function readJson(file) {
   try {
-    return JSON.parse(readFileSync3(file, "utf8"));
+    return JSON.parse(readFileSync2(file, "utf8"));
   } catch {
     return null;
   }
@@ -891,7 +769,7 @@ function writeStopped(home, name, at = /* @__PURE__ */ new Date()) {
 }
 function isStopped(home, name) {
   try {
-    readFileSync3(agentFile(home, name, ".stopped"));
+    readFileSync2(agentFile(home, name, ".stopped"));
     return true;
   } catch {
     return false;
@@ -952,7 +830,7 @@ function unenrollAgent(home, name) {
 }
 function removeFile(file) {
   try {
-    unlinkSync2(file);
+    unlinkSync(file);
   } catch (err) {
     if (err.code !== "ENOENT") throw err;
   }
@@ -1201,8 +1079,8 @@ function systemdEnv(value) {
 }
 
 // packages/cli/src/watcher-lock.ts
-import { createHash, randomBytes as randomBytes3 } from "node:crypto";
-import { chmodSync as chmodSync2, closeSync as closeSync3, lstatSync, mkdirSync as mkdirSync4, openSync as openSync3, readdirSync, readFileSync as readFileSync4, renameSync as renameSync3, unlinkSync as unlinkSync3, writeSync as writeSync3 } from "node:fs";
+import { createHash, randomBytes as randomBytes2 } from "node:crypto";
+import { chmodSync as chmodSync2, closeSync as closeSync3, lstatSync, mkdirSync as mkdirSync4, openSync as openSync3, readdirSync, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync2, writeSync as writeSync2 } from "node:fs";
 import { hostname, homedir as homedir2, uptime } from "node:os";
 import path6 from "node:path";
 var LOCK_NAME = /^watcher-[0-9a-f]{16}\.lock$/;
@@ -1284,7 +1162,7 @@ function roundedBootId(nowMs, uptimeSeconds) {
 }
 function machineBootId(now = Date.now()) {
   try {
-    const text = readFileSync4("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    const text = readFileSync3("/proc/sys/kernel/random/boot_id", "utf8").trim();
     if (text) return text;
   } catch {
   }
@@ -1293,7 +1171,7 @@ function machineBootId(now = Date.now()) {
 function readWatcherLock(file) {
   let text;
   try {
-    text = readFileSync4(file, "utf8");
+    text = readFileSync3(file, "utf8");
   } catch {
     return null;
   }
@@ -1317,7 +1195,7 @@ function readWatcherLock(file) {
     return null;
   }
 }
-function pidIsAlive2(pid) {
+function pidIsAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
@@ -1344,7 +1222,7 @@ function listLiveWatcherLocks(home = homedir2(), self) {
     bootId: self?.bootId ?? machineBootId(),
     pid: self?.pid ?? process.pid
   };
-  const isAlive = self?.isAlive ?? pidIsAlive2;
+  const isAlive = self?.isAlive ?? pidIsAlive;
   const live = [];
   for (const name of names) {
     if (!LOCK_NAME.test(name)) continue;
@@ -1366,7 +1244,7 @@ function acquireWatcherLock(options) {
     bootId: options.bootId ?? machineBootId(),
     pid
   };
-  const isAlive = options.isAlive ?? pidIsAlive2;
+  const isAlive = options.isAlive ?? pidIsAlive;
   const identity = {
     pid,
     startedAt,
@@ -1374,7 +1252,7 @@ function acquireWatcherLock(options) {
     bootId: self.bootId,
     origin,
     ...options.workspaceId ? { workspaceId: options.workspaceId } : {},
-    token: randomBytes3(8).toString("hex")
+    token: randomBytes2(8).toString("hex")
   };
   mkdirSync4(path6.dirname(file), { recursive: true, mode: 448 });
   removeStaleTemps(path6.dirname(file), isAlive);
@@ -1461,7 +1339,7 @@ function writeAliases(home, file, identity, options, self, isAlive) {
     }
     const temp = writeTemp(path6.dirname(target), alias);
     try {
-      renameSync3(temp, target);
+      renameSync2(temp, target);
       written.push(target);
     } catch {
     } finally {
@@ -1489,7 +1367,7 @@ function findLegacyWatcherLock(options) {
   const home = options.home ?? homedir2();
   const dir = replyslipHome(home);
   const self = selfOf(options);
-  const isAlive = options.isAlive ?? pidIsAlive2;
+  const isAlive = options.isAlive ?? pidIsAlive;
   let names = [];
   try {
     names = readdirSync(dir);
@@ -1514,7 +1392,7 @@ function acquireAgentWatcherLock(options) {
   const origin = normalizeOrigin(options.origin);
   const file = watcherLockPath(home, agentWatcherScopeId(options.agentId));
   const self = selfOf(options);
-  const isAlive = options.isAlive ?? pidIsAlive2;
+  const isAlive = options.isAlive ?? pidIsAlive;
   mkdirSync4(path6.dirname(file), { recursive: true, mode: 448 });
   removeStaleTemps(path6.dirname(file), isAlive);
   return withAcquireMutex(home, () => {
@@ -1527,7 +1405,7 @@ function acquireAgentWatcherLock(options) {
       bootId: self.bootId,
       origin,
       workspaceId: options.workspaceId,
-      token: randomBytes3(8).toString("hex"),
+      token: randomBytes2(8).toString("hex"),
       agentId: options.agentId,
       agentName: options.agentName
     };
@@ -1592,7 +1470,7 @@ function refuseReclaim(info, self, isAlive, file) {
 }
 function publish(temp, file, self, isAlive, force, reclaim) {
   try {
-    renameSync3(temp, file);
+    renameSync2(temp, file);
     return "placed";
   } catch (err) {
     if (!isRenameConflict(err)) throw err;
@@ -1606,7 +1484,7 @@ function publish(temp, file, self, isAlive, force, reclaim) {
   } else if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid, origin: held.origin };
   removeLock(file);
   try {
-    renameSync3(temp, file);
+    renameSync2(temp, file);
     return "placed";
   } catch (err) {
     if (!isRenameConflict(err)) throw err;
@@ -1614,10 +1492,10 @@ function publish(temp, file, self, isAlive, force, reclaim) {
   }
 }
 function writeTemp(dir, identity) {
-  const temp = path6.join(dir, `.lock-${identity.pid}-${randomBytes3(8).toString("hex")}.tmp`);
+  const temp = path6.join(dir, `.lock-${identity.pid}-${randomBytes2(8).toString("hex")}.tmp`);
   const fd = openSync3(temp, "wx", 384);
   try {
-    writeSync3(fd, `${JSON.stringify(identity)}
+    writeSync2(fd, `${JSON.stringify(identity)}
 `);
   } finally {
     closeSync3(fd);
@@ -1664,7 +1542,7 @@ function withAcquireMutex(home, fn) {
 }
 function removeLock(file) {
   try {
-    unlinkSync3(file);
+    unlinkSync2(file);
   } catch (err) {
     if (err.code !== "ENOENT") throw err;
   }
@@ -1694,7 +1572,7 @@ function verifyDistributedScript(scriptPath) {
   const checksumPath = `${scriptPath}.sha256`;
   let text;
   try {
-    text = readFileSync5(checksumPath, "utf8");
+    text = readFileSync4(checksumPath, "utf8");
   } catch {
     return {
       ok: false,
@@ -1705,7 +1583,7 @@ function verifyDistributedScript(scriptPath) {
   if (!/^[0-9a-f]{64}$/.test(expected)) {
     return { ok: false, message: `Refusing to install: ${checksumPath} is not a sha256 checksum line.` };
   }
-  const actual = createHash2("sha256").update(readFileSync5(scriptPath)).digest("hex");
+  const actual = createHash2("sha256").update(readFileSync4(scriptPath)).digest("hex");
   if (actual !== expected) {
     return { ok: false, message: `Refusing to install: ${scriptPath} does not match ${checksumPath}. Download both files again.` };
   }
@@ -1745,7 +1623,7 @@ function spawnDetachedWatcher(request) {
       request.reclaim.startedAt
     );
   }
-  const child = spawn(request.nodePath, args, {
+  const child = spawn2(request.nodePath, args, {
     detached: true,
     stdio: ["ignore", fd, fd],
     windowsHide: true,
@@ -1923,7 +1801,7 @@ async function tickLocked(name, io) {
   }
   const epoch = readSuperviseState(io.home, name).epoch;
   const now = (io.now ?? Date.now)();
-  const alive = io.alive ?? pidIsAlive2;
+  const alive = io.alive ?? pidIsAlive;
   const state = readSuperviseState(io.home, name);
   const lock = liveLock(io.home, name);
   const decision = decideSupervision({
@@ -1991,7 +1869,7 @@ async function reapOurWatchers(name, io) {
   return "none";
 }
 async function reapExact(pid, name, io) {
-  const alive = io.alive ?? pidIsAlive2;
+  const alive = io.alive ?? pidIsAlive;
   if (!alive(pid)) return "not-running";
   const identify = io.identify ?? ((target) => identifyProcess(target, io.platform ?? process.platform));
   const identity = await identify(pid);
@@ -2103,7 +1981,7 @@ async function killDecision(name, decision, io) {
 async function signalPid(pid, io, mode, recheck) {
   const platform = io.platform ?? process.platform;
   const kill = io.kill ?? ((target, signal) => defaultKill(target, signal, platform));
-  const alive = io.alive ?? pidIsAlive2;
+  const alive = io.alive ?? pidIsAlive;
   const sleep = io.sleep ?? defaultSleep;
   const again = await recheck();
   if (!again.ok) return again;
@@ -2143,7 +2021,7 @@ async function removeTimer(io) {
   const applied = await runPlan(plan.uninstallCommands, run);
   for (const file of plan.files) {
     try {
-      unlinkSync4(file.path);
+      unlinkSync3(file.path);
     } catch (err) {
       if (err.code !== "ENOENT") {
         return { ok: false, message: `Could not remove ${file.path}.` };
@@ -2231,7 +2109,7 @@ function checkName(name) {
   return null;
 }
 var defaultRun = (command, args) => new Promise((resolve, reject) => {
-  const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn2(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (chunk) => {
@@ -2260,11 +2138,11 @@ var GUEST_WAKE_NOTICE = "This ReplySlip wake is about a task from outside your w
 var REVIEW_NEEDED_NOTICE = "A request on ReplySlip is waiting for your owner to review it. You cannot open or approve it. Ask your owner to review it at /dashboard/reviews.";
 
 // packages/cli/src/drivers/command.ts
-import { spawn as spawn2 } from "node:child_process";
+import { spawn as spawn3 } from "node:child_process";
 var COMMAND_TIMED_OUT = "command timed out";
 function runCommandWithTimeout(timeoutMs) {
   return (command, args) => new Promise((resolve, reject) => {
-    const child = spawn2(command, args, {
+    const child = spawn3(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       // Own process group on Unix so a timeout can kill this command and its children,
@@ -2304,7 +2182,7 @@ function killChild(child) {
   const pid = child.pid;
   if (!pid || pid === process.pid) return;
   if (process.platform === "win32") {
-    const killer = spawn2("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    const killer = spawn3("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
     killer.on("error", () => void 0);
     try {
       child.kill("SIGKILL");
@@ -2487,7 +2365,7 @@ function createOrcaDriver(options) {
   }
   async function finishLegacy(plain, handle, target, notice, allowRelist) {
     if (isStaleResult(plain) && allowRelist) return submitReplacement(target, notice, handle, false);
-    const receipt = classify2(plain);
+    const receipt = classify(plain);
     if (legacyAccepted(plain) || receipt.delivered) {
       log(ORCA_OLD_HOST_WARNING);
       return { ok: true };
@@ -2504,7 +2382,7 @@ function createOrcaDriver(options) {
       return { ok: true };
     }
     if (isOldHostRefusal(raw)) return finishLegacy(await send(handle, notice, void 0, false), handle, target, notice, allowRelist);
-    const first = classify2(raw);
+    const first = classify(raw);
     if (first.delivered) return { ok: true };
     if (first.stale && allowRelist) return submitReplacement(target, notice, handle, true);
     if (first.ambiguous && first.retryRequest) {
@@ -2516,7 +2394,7 @@ function createOrcaDriver(options) {
         log(ORCA_OLD_HOST_WARNING);
         return { ok: true };
       }
-      const retried = classify2(retriedRaw);
+      const retried = classify(retriedRaw);
       if (retried.delivered) return { ok: true };
       if (retried.stale && allowRelist) return submitReplacement(target, notice, handle, true);
       if (!retried.down) return { ok: true };
@@ -2576,7 +2454,7 @@ function matchPane(terminals, target) {
 function isDown(result) {
   return result.stderr === "ENOENT" || result.code === 127;
 }
-function classify2(result) {
+function classify(result) {
   const text = `${result.stdout}
 ${result.stderr}`;
   const payload = parseJson(result.stdout) ?? parseJson(result.stderr);

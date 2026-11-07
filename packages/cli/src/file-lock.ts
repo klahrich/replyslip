@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { randomBytes } from 'node:crypto';
-import { closeSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { closeSync, mkdirSync, openSync, readSync } from 'node:fs';
 import path from 'node:path';
-import { ownProcessStartedAtMs, processStartedAtMs } from './process-identity.ts';
 
-/** A waiter gives up instead of sitting behind an unproved or still-live owner. */
+/**
+ * Premise that does not hold: "path-based read/check then destructive operation can
+ * safely reclaim/release shared ownership." Unlink or rename of the current path can
+ * remove a successor, or leave the previous holder on the old inode while a new file
+ * is locked at the same path. Ownership here is the kernel lock on one open file
+ * (Unix flock(2), Windows LockFileEx). Release unlocks that descriptor. It does not
+ * delete the path. A dead process drops the lock when the kernel closes its handles.
+ */
+
+/** A waiter gives up instead of sitting behind a live kernel lock. */
 export const FILE_LOCK_WAIT_MS = 2_000;
 
 export class FileLockError extends Error {
@@ -15,296 +23,213 @@ export class FileLockError extends Error {
   }
 }
 
-export type HeldFileLock = { fd: number; file: string; token: string };
+export type LockHelper = 'perl' | 'flock' | 'powershell';
 
-type OwnerRecord = { pid: number; token: string; startedAtMs: number | null };
-
-type Draft = { fd: number; temp: string; token: string; body: string; closed: boolean };
+export type HeldFileLock = { file: string; child: ChildProcess; released: boolean };
 
 export type FileLockOptions = {
   waitMs?: number;
-  now?: () => number;
-  isAlive?: (pid: number) => boolean;
-  processStart?: (pid: number) => number | null;
-  self?: { pid: number; startedAtMs: number | null };
-  /**
-   * Runs after the owner record is on a private file and before `link` publishes the lock name.
-   * The lock name does not exist yet. A throw or a partial rewrite aborts the publish.
-   */
-  beforePublish?: (temp: string) => void | Promise<void>;
-  /** Runs after a record is judged stale and before the rename that claims that directory entry. */
-  beforeReclaim?: (snapshot: string) => void;
+  /** Test override. Production picks perl, then flock(1), then PowerShell. */
+  helper?: LockHelper;
 };
 
-const heldTokens = new Set<string>();
+const tools = { perl: false, flock: false, powershell: false, known: false };
+
+export function lockHelperFor(
+  platform: NodeJS.Platform,
+  available: { perl: boolean; flock: boolean; powershell: boolean },
+): LockHelper | null {
+  if (platform === 'win32') return available.powershell ? 'powershell' : null;
+  if (available.perl) return 'perl';
+  if (available.flock) return 'flock';
+  return null;
+}
 
 export function acquireFileLockSync(file: string, options: FileLockOptions = {}): HeldFileLock {
-  const held = runLock(file, options, (ms) => {
-    if (ms <= 0) return;
-    const gate = new Int32Array(new SharedArrayBuffer(4));
-    Atomics.wait(gate, 0, 0, ms);
-  });
-  if (held instanceof Promise) throw new FileLockError(`Could not acquire ${file}.`);
-  return held;
+  const waitMs = options.waitMs ?? FILE_LOCK_WAIT_MS;
+  const helper = options.helper ?? detectHelper();
+  if (!helper) {
+    throw new FileLockError(
+      `Could not acquire ${file}. No OS lock helper is available (perl, flock, or PowerShell). Nothing was deleted.`,
+    );
+  }
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const created = openSync(file, 'a', 0o600);
+  closeSync(created);
+  const child = spawnHelper(helper, file, waitMs);
+  child.stdout?.pause();
+  child.on('error', () => undefined);
+  const deadline = Date.now() + waitMs + 1_000;
+  let line = '';
+  try {
+    line = readLine(pipeFd(child.stdout), deadline);
+  } catch (err) {
+    stopHelper(child);
+    throw err;
+  }
+  if (line !== 'ok') {
+    stopHelper(child);
+    const why = line === 'busy' || line === '' ? `within ${waitMs}ms` : `(${line})`;
+    throw new FileLockError(
+      `Could not acquire ${file} ${why}. The operating system lock is held, or the helper could not lock it. The file was not removed. Retry after the holder exits.`,
+    );
+  }
+  return { file, child, released: false };
 }
 
 export async function acquireFileLock(file: string, options: FileLockOptions = {}): Promise<HeldFileLock> {
-  const held = runLock(file, options, (ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-  return held instanceof Promise ? held : held;
+  return acquireFileLockSync(file, options);
 }
 
 export function releaseFileLock(held: HeldFileLock): void {
-  heldTokens.delete(held.token);
-  try {
-    closeSync(held.fd);
-  } catch {
-    // Already closed.
-  }
-  try {
-    const current = readFileSync(held.file, 'utf8');
-    const owner = parseOwner(current);
-    if (owner?.token === held.token) unlinkSync(held.file);
-  } catch {
-    // Already gone, or replaced by a newer owner. Leave that file alone.
-  }
+  if (held.released) return;
+  held.released = true;
+  closePipe(held.child.stdin);
+  const line = readLine(pipeFd(held.child.stdout), Date.now() + 2_000);
+  if (line !== 'bye') stopHelper(held.child);
 }
 
-function runLock(file: string, options: FileLockOptions, sleep: (ms: number) => void | Promise<void>): HeldFileLock | Promise<HeldFileLock> {
-  const waitMs = options.waitMs ?? FILE_LOCK_WAIT_MS;
-  const now = options.now ?? Date.now;
-  const deadline = now() + waitMs;
-  const processStart = startReader(options);
-  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const turn = (): HeldFileLock | Promise<HeldFileLock> => {
-    const draft = beginPublish(file, options);
-    const finish = (): HeldFileLock | Promise<HeldFileLock> | null => {
-      const held = commitPublish(draft, file);
-      if (held) return held;
-      const seen = observe(file, options, processStart);
-      if (seen.kind === 'stale') {
-        options.beforeReclaim?.(seen.text);
-        if (reclaimSnapshot(file, seen.text)) return null;
-      }
-      if (now() >= deadline) throw new FileLockError(busyMessage(file, seen.text, waitMs));
-      return pause(Math.min(10, Math.max(0, deadline - now())));
-    };
-    const pause = (ms: number): HeldFileLock | Promise<HeldFileLock> => {
-      const slept = sleep(ms);
-      if (slept && typeof (slept as Promise<void>).then === 'function') return (slept as Promise<void>).then(turn);
-      return turn();
-    };
-    if (!options.beforePublish) return finish() ?? turn();
-    let hooked: void | Promise<void>;
+function detectHelper(): LockHelper | null {
+  if (!tools.known) {
+    tools.perl = toolExists('perl');
+    tools.flock = toolExists('flock');
+    tools.powershell = toolExists('powershell.exe');
+    tools.known = true;
+  }
+  return lockHelperFor(process.platform, tools);
+}
+
+function toolExists(name: string): boolean {
+  const result = spawnSync('which', [name], { stdio: 'ignore' });
+  return result.status === 0;
+}
+
+function spawnHelper(helper: LockHelper, file: string, waitMs: number): ChildProcess {
+  if (helper === 'perl') {
+    return spawn('perl', ['-e', PERL_LOCK, file, String(waitMs)], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+  }
+  if (helper === 'flock') {
+    const seconds = waitMs <= 0 ? '0' : String(Math.max(1, Math.ceil(waitMs / 1000)));
+    return spawn('flock', ['-w', seconds, '-x', file, 'sh', '-c', 'printf "ok\\n"; IFS= read -r _; printf "bye\\n"'], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+  }
+  return spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_LOCK], {
+    stdio: ['pipe', 'pipe', 'ignore'],
+    windowsHide: true,
+    env: { ...process.env, REPLYSLIP_LOCK_PATH: file, REPLYSLIP_LOCK_WAIT_MS: String(waitMs) },
+  });
+}
+
+function closePipe(stream: NodeJS.WritableStream | null): void {
+  const fd = (stream as { _handle?: { fd?: number } } | null)?._handle?.fd;
+  if (typeof fd === 'number' && fd >= 0) {
     try {
-      hooked = options.beforePublish(draft.temp);
+      closeSync(fd);
+    } catch {
+      // Already closed.
+    }
+  }
+}
+
+function pipeFd(stream: NodeJS.ReadableStream | null): number {
+  const fd = (stream as { _handle?: { fd?: number } } | null)?._handle?.fd;
+  if (typeof fd !== 'number' || fd < 0) throw new FileLockError('The lock helper pipe is not readable.');
+  return fd;
+}
+
+function readLine(fd: number, deadline: number): string {
+  let text = '';
+  const buf = Buffer.alloc(64);
+  const gate = new Int32Array(new SharedArrayBuffer(4));
+  while (!text.includes('\n') && text.length < 512) {
+    if (Date.now() >= deadline) break;
+    try {
+      const n = readSync(fd, buf, 0, buf.length, null);
+      if (n === 0) break;
+      text += buf.toString('utf8', 0, n);
     } catch (err) {
-      abortPublish(draft);
-      throw err;
+      if ((err as NodeJS.ErrnoException).code !== 'EAGAIN') throw err;
+      Atomics.wait(gate, 0, 0, 5);
     }
-    if (hooked && typeof (hooked as Promise<void>).then === 'function') {
-      return (hooked as Promise<void>).then(
-        () => finish() ?? turn(),
-        (err: unknown) => {
-          abortPublish(draft);
-          throw err;
-        },
-      );
-    }
-    return finish() ?? turn();
-  };
-  return turn();
+  }
+  const end = text.indexOf('\n');
+  return (end === -1 ? text : text.slice(0, end)).trim();
 }
 
-/**
- * The lock name is created by `link`, which does not overwrite. The private file already
- * holds the complete owner record, so the name never appears empty or partial.
- * `link` failure means someone else owns the name. This attempt is not a holder.
- */
-function beginPublish(file: string, options: FileLockOptions): Draft {
-  const self = options.self ?? { pid: process.pid, startedAtMs: ownProcessStartedAtMs() };
-  const token = randomBytes(8).toString('hex');
-  const temp = `${file}.${token}.tmp`;
-  const fd = openSync(temp, 'wx', 0o600);
-  const body = `${JSON.stringify({ pid: self.pid, token, startedAtMs: self.startedAtMs })}\n`;
-  const draft: Draft = { fd, temp, token, body, closed: false };
+function stopHelper(child: ChildProcess): void {
   try {
-    const written = writeSync(fd, body);
-    if (written !== Buffer.byteLength(body)) throw new FileLockError(`Could not write the owner record for ${file}.`);
-    fsyncSync(fd);
-  } catch (err) {
-    abortPublish(draft);
-    throw err;
-  }
-  return draft;
-}
-
-function commitPublish(draft: Draft, file: string): HeldFileLock | null {
-  let onDisk = '';
-  try {
-    onDisk = readFileSync(draft.temp, 'utf8');
-  } catch (err) {
-    abortPublish(draft);
-    throw err;
-  }
-  if (onDisk !== draft.body) {
-    abortPublish(draft);
-    return null;
-  }
-  try {
-    linkSync(draft.temp, file);
-  } catch (err) {
-    abortPublish(draft);
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return null;
-    throw err;
-  }
-  const mine = fstatSync(draft.fd);
-  let linked: { ino: number; dev: number };
-  try {
-    linked = statSync(file);
-  } catch {
-    abortPublish(draft);
-    return null;
-  }
-  if (mine.ino !== linked.ino || mine.dev !== linked.dev) {
-    abortPublish(draft);
-    return null;
-  }
-  try {
-    unlinkSync(draft.temp);
-  } catch {
-    // The lock name still refers to this inode.
-  }
-  heldTokens.add(draft.token);
-  draft.closed = true;
-  return { fd: draft.fd, file, token: draft.token };
-}
-
-function abortPublish(draft: Draft): void {
-  closeDraft(draft);
-  try {
-    unlinkSync(draft.temp);
+    child.kill('SIGTERM');
   } catch {
     // Already gone.
   }
 }
 
-function closeDraft(draft: Draft): void {
-  if (draft.closed) return;
-  draft.closed = true;
-  try {
-    closeSync(draft.fd);
-  } catch {
-    // Already closed.
+const PERL_LOCK = `
+use Fcntl qw(:flock O_RDWR O_CREAT);
+use Time::HiRes qw(time sleep);
+$| = 1;
+my ($path, $wait_ms) = @ARGV;
+sysopen(my $fh, $path, O_RDWR | O_CREAT, 0600) or do { print "error open\\n"; exit 1 };
+my $deadline = time() + ($wait_ms / 1000);
+while (1) {
+  if (flock($fh, LOCK_EX | LOCK_NB)) {
+    print "ok\\n";
+    while (defined(my $line = <STDIN>)) {}
+    flock($fh, LOCK_UN);
+    close $fh;
+    print "bye\\n";
+    exit 0;
   }
+  last if time() >= $deadline;
+  sleep(0.01);
 }
+print "busy\\n";
+exit 2;
+`;
 
-function observe(
-  file: string,
-  options: FileLockOptions,
-  processStart: (pid: number) => number | null,
-): { kind: 'absent' | 'live' | 'stale' | 'unproven'; text: string } {
-  let text = '';
-  try {
-    text = readFileSync(file, 'utf8');
-  } catch {
-    return { kind: 'absent', text: '' };
+const POWERSHELL_LOCK = `
+$ErrorActionPreference = 'Stop'
+$path = $env:REPLYSLIP_LOCK_PATH
+$wait = [int]$env:REPLYSLIP_LOCK_WAIT_MS
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class ReplySlipLock {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct OVERLAPPED {
+    public IntPtr Internal;
+    public IntPtr InternalHigh;
+    public uint OffsetLow;
+    public uint OffsetHigh;
+    public IntPtr Event;
   }
-  return { kind: classify(text, options, processStart), text };
+  [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+  public static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  public static extern bool LockFileEx(IntPtr h, uint flags, uint reserved, uint low, uint high, ref OVERLAPPED ov);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  public static extern bool UnlockFileEx(IntPtr h, uint reserved, uint low, uint high, ref OVERLAPPED ov);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  public static extern bool CloseHandle(IntPtr h);
 }
-
-/**
- * Rename is the claim on the current directory entry. Only one caller can rename it.
- * The renamed inode is deleted only when its bytes are still the stale snapshot.
- * Anything else is linked back under the lock name when that name is free.
- */
-function reclaimSnapshot(file: string, snapshot: string): boolean {
-  const aside = `${file}.${randomBytes(8).toString('hex')}.aside`;
-  try {
-    renameSync(file, aside);
-  } catch {
-    return false;
-  }
-  let text = '';
-  try {
-    text = readFileSync(aside, 'utf8');
-  } catch {
-    return false;
-  }
-  if (text !== snapshot) {
-    try {
-      linkSync(aside, file);
-      unlinkSync(aside);
-    } catch {
-      // The lock name was taken. Leave the displaced inode beside it.
-    }
-    return false;
-  }
-  try {
-    unlinkSync(aside);
-  } catch {
-    // The name is already gone.
-  }
-  return true;
+"@
+$handle = [ReplySlipLock]::CreateFileW($path, [uint32]3221225472, [uint32]7, [IntPtr]::Zero, [uint32]4, [uint32]0, [IntPtr]::Zero)
+if ($handle.ToInt64() -eq -1) { Write-Output 'error open'; exit 1 }
+$ov = New-Object ReplySlipLock+OVERLAPPED
+$deadline = [DateTime]::UtcNow.AddMilliseconds($wait)
+$locked = $false
+while ($true) {
+  if ([ReplySlipLock]::LockFileEx($handle, [uint32]3, [uint32]0, [uint32]1, [uint32]0, [ref]$ov)) { $locked = $true; break }
+  if ([DateTime]::UtcNow -ge $deadline) { break }
+  Start-Sleep -Milliseconds 10
 }
-
-export function classifyFileLock(text: string, options: FileLockOptions = {}): 'live' | 'stale' | 'unproven' {
-  return classify(text, options, options.processStart ?? processStartedAtMs);
-}
-
-function classify(text: string, options: FileLockOptions, processStart: (pid: number) => number | null): 'live' | 'stale' | 'unproven' {
-  const owner = parseOwner(text);
-  if (!owner) return 'stale';
-  if (heldTokens.has(owner.token)) return 'live';
-  const self = options.self ?? { pid: process.pid, startedAtMs: ownProcessStartedAtMs() };
-  const alive = options.isAlive ?? pidIsAlive;
-  if (owner.pid === self.pid && owner.startedAtMs === self.startedAtMs) return 'stale';
-  if (!alive(owner.pid)) return 'stale';
-  if (owner.startedAtMs == null) return 'unproven';
-  const start = processStart(owner.pid);
-  if (start == null) return 'unproven';
-  if (start !== owner.startedAtMs) return 'stale';
-  return 'live';
-}
-
-function startReader(options: FileLockOptions): (pid: number) => number | null {
-  if (options.processStart) return options.processStart;
-  const cache = new Map<number, number | null>();
-  return (pid) => {
-    if (cache.has(pid)) return cache.get(pid) ?? null;
-    const value = processStartedAtMs(pid);
-    cache.set(pid, value);
-    return value;
-  };
-}
-
-function parseOwner(text: string): OwnerRecord | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
-  const row = parsed as { pid?: unknown; token?: unknown; startedAtMs?: unknown };
-  if (typeof row.pid !== 'number' || !Number.isInteger(row.pid) || row.pid <= 0) return null;
-  if (typeof row.token !== 'string' || !/^[0-9a-f]{16}$/.test(row.token)) return null;
-  if (row.startedAtMs == null) return { pid: row.pid, token: row.token, startedAtMs: null };
-  if (typeof row.startedAtMs !== 'number' || !Number.isFinite(row.startedAtMs)) return null;
-  return { pid: row.pid, token: row.token, startedAtMs: row.startedAtMs };
-}
-
-function busyMessage(file: string, text: string, waitMs: number): string {
-  const owner = parseOwner(text);
-  const who = owner ? `pid ${owner.pid}` : 'an unreadable owner record';
-  return `Could not acquire ${file} within ${waitMs}ms (${who}). The file was not removed because a live owner could not be ruled out. Retry after that process finishes. If replyslip is not running, delete the file.`;
-}
-
-function pidIsAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
+if (-not $locked) { [ReplySlipLock]::CloseHandle($handle) | Out-Null; Write-Output 'busy'; exit 2 }
+Write-Output 'ok'
+[Console]::Out.Flush()
+[Console]::In.ReadLine() | Out-Null
+[ReplySlipLock]::UnlockFileEx($handle, [uint32]0, [uint32]1, [uint32]0, [ref]$ov) | Out-Null
+[ReplySlipLock]::CloseHandle($handle) | Out-Null
+Write-Output 'bye'
+`;

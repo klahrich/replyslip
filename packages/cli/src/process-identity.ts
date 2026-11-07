@@ -115,7 +115,11 @@ const DARWIN_MONTHS: Record<string, number> = {
 
 /**
  * `ps -o lstart=` in the C locale: `Sat Nov  7 16:33:01 2026`.
- * The value is local time and stable for the life of the process, unlike `etimes`.
+ * The value is local time, stable for the life of the process, and whole seconds.
+ * Two processes started in that same second are indistinguishable. A kill stays
+ * fail-closed when the command line does not match; same-second reuse with a
+ * matching command line cannot be rejected from this clock. There is no portable
+ * microsecond proc_pidinfo in this script.
  */
 export function darwinLstartMs(text: string): number | null {
   const match = text.trim().match(/^[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/);
