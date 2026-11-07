@@ -78,11 +78,10 @@ export default function ShareGuidePage() {
               <span className="sg-h1-b">Keep your workspace yours.</span>
             </h1>
             <p className="sg-lead">
-              Someone else’s AI agent can send tasks to an agent you already run. You choose what it can ask for. It gets its
-              own results, and it never joins your workspace.
+              Someone else’s agent can send tasks to yours. You choose the tasks.
             </p>
             <p className="sg-hero-note">
-              Received a link? Your agent can use it with no Valetto account, email code, or handle.{' '}
+              Received a link?{' '}
               <a className="link" href="#got-a-link">
                 Got a link?
               </a>
@@ -98,18 +97,15 @@ export default function ShareGuidePage() {
         <div className="sg-essentials" aria-label="The essentials">
           <article>
             <h2>You choose the tasks</h2>
-            <p>The link carries only the tasks you tick. Anything else is refused.</p>
+            <p>Only ticked tasks are allowed.</p>
           </article>
           <article>
             <h2>They stay a guest</h2>
-            <p>Valetto opens a separate guest for them. They do not become a member of your workspace.</p>
+            <p>They are not a member of your workspace.</p>
           </article>
           <article>
             <h2>The link is the access</h2>
-            <p>
-              Anyone holding the message can use it. Send it privately. Revoking the link stops that message. When more
-              than one agent can use it, keys already handed out keep working until you revoke those guests.
-            </p>
+            <p>Anyone with the message can use it.</p>
           </article>
         </div>
 
@@ -118,25 +114,18 @@ export default function ShareGuidePage() {
             <div>
               <p className="sg-kicker">For the owner</p>
               <h2 id="owner-heading">Share your agent</h2>
-              <p className="sg-sub">
-                Start with your agent connected and running. You create the link while signed in. They paste what you send,
-                and they do not sign in.
-              </p>
+              <p className="sg-sub">You create the link while signed in. They do not sign in.</p>
             </div>
             <span className="sg-tag">You control access</span>
           </div>
 
           <div className="sg-callout">
             <p>
-              <strong>If you don’t see Agent invite links,</strong> this private link isn’t on your Valetto right now.
-              Sharing the agent does not add that heading. You can’t create one, and a link from somewhere else won’t open.
+              <strong>Don’t see Agent invite links?</strong> It isn’t on your account yet.
             </p>
             <p>
-              You can still invite a team that already has a Valetto workspace. After <strong>Share this agent</strong>,
-              under <strong>Guests</strong>, use <strong>Invite a workspace by handle</strong>. They keep their own
-              workspace, and you approve them. A person who uses your bot in the browser uses <strong>Customer links</strong>{' '}
-              on the same page and signs in with an email code. An outside agent that stays on its own host needs the{' '}
-              <strong>Agent invite links</strong> heading. Signing them up does not stand in for it.
+              Teams with a Valetto workspace: <strong>Invite a workspace by handle</strong>. People in a browser:{' '}
+              <strong>Customer links</strong>.
             </p>
           </div>
 
@@ -144,65 +133,37 @@ export default function ShareGuidePage() {
             <ol className="sg-steps">
               <Step title="Open Sharing and choose your agent">
                 <p>
-                  In the dashboard, open <strong>Sharing</strong>. Under <strong>Shared agents</strong>, use the{' '}
-                  <strong>Agent</strong> menu if you have more than one.
-                </p>
-                <p>
-                  If you have not set one yet, fill in <strong>Your handle</strong>. The field is labeled{' '}
-                  <strong>Workspace handle</strong>. Then press <strong>Share this agent</strong>. The handle is yours. The
-                  recipient does not create one.
+                  Open <strong>Sharing</strong>. Under <strong>Shared agents</strong>, use <strong>Agent</strong> if you have
+                  more than one, then press <strong>Share this agent</strong>.
                 </p>
               </Step>
               <Step title="Choose the tasks they can send">
                 <p>
-                  When <strong>Agent invite links</strong> is on the page, tick the tasks under{' '}
-                  <strong>Tasks they can send</strong>.
-                </p>
-                <p>
-                  With one task, it is already selected. With several, none are selected until you tick them. With none, ask
-                  your agent to add a task with <code>upsert_offer</code> before you make a link.
+                  Under <strong>Agent invite links</strong>, tick <strong>Tasks they can send</strong>.
                 </p>
               </Step>
-              <Step title="Set the expiry, the daily tasks, and how many agents">
+              <Step title="Set expiry, daily tasks, and how many">
                 <p>
-                  <strong>Who it’s for (optional)</strong> is only a label for you. Set <strong>Expires after (days)</strong>{' '}
-                  and <strong>Tasks per day, per guest</strong>.
-                </p>
-                <p>
-                  For one recipient, leave <strong>One customer</strong> selected under{' '}
-                  <strong>How many agents can use it</strong>. That means one connected agent, and it can send many tasks.
+                  Set <strong>Expires after (days)</strong> and <strong>Tasks per day, per guest</strong>. Leave{' '}
+                  <strong>One customer</strong> for one agent.
                 </p>
               </Step>
               <Step title="Decide when they can start">
                 <p>
-                  <strong>They can use these tasks as soon as they connect</strong> starts on. Creating the link is your
-                  approval.
-                </p>
-                <p>
-                  Uncheck it if you want each guest to wait. Come back to <strong>Guests</strong> and press{' '}
-                  <strong>Approve</strong> while you are signed in. An agent cannot approve them for you.
+                  <strong>They can use these tasks as soon as they connect</strong> starts on. Uncheck it to approve each
+                  guest under <strong>Guests</strong>.
                 </p>
               </Step>
-              <Step title="Create the link and send it privately">
+              <Step title="Create the link and send it">
                 <p>
-                  Press <strong>Create invite link</strong>. In <strong>Send this to your customer</strong>, press{' '}
-                  <strong>Copy message</strong> or <strong>Copy prompt</strong>. <strong>Copy link</strong> is there if you
-                  only want the address.
-                </p>
-                <p>
-                  Send the message in private to the person it’s for. The page says the link is shown once. If you close it,
-                  create a new one. The old one still works until it expires, runs out of agents, or you revoke it.
-                </p>
-                <p className="sg-check">
-                  After they connect, they show up under Guests. With the checkbox left on, they are already approved.
+                  Press <strong>Create invite link</strong>, then <strong>Copy message</strong> or <strong>Copy prompt</strong>.
                 </p>
               </Step>
             </ol>
 
             <aside className="sg-aside" aria-label="Defaults and what to watch">
               <div className="sg-card">
-                <p className="sg-pill">Dashboard defaults</p>
-                <h3>What the form starts with</h3>
+                <h3>Defaults</h3>
                 <dl className="sg-defaults">
                   <div>
                     <dt>Connected agents</dt>
@@ -222,27 +183,21 @@ export default function ShareGuidePage() {
                   </div>
                 </dl>
                 <p className="sg-micro">
-                  The other choice, <strong>Up to … agents</strong>, starts with 10 in the field and is not selected. You can
-                  set {MIN_DAYS}–{MAX_DAYS} days, 1–{n(MAX_USES)} agents, and 1–{n(MAX_CAP)} tasks per rolling 24 hours.
+                  <strong>Up to … agents</strong> starts at 10, not selected.
                 </p>
               </div>
               <div className="sg-card">
                 <h3>Keep your agent available</h3>
-                <p>
-                  A link does not run your agent. It has to be running, or reachable through the delivery you already set,
-                  before it can read and answer.
-                </p>
-                <p>If a task sits waiting, check the agent and any reviews still open before you ask them to try again.</p>
+                <p>A link does not run your agent. It has to be running, or already set to wake.</p>
               </div>
               <div className="sg-card">
-                <h3>Access approval is separate from answers</h3>
+                <h3>Access and answers</h3>
                 <p>
-                  The checkbox approves the guest’s access. <strong>Answers to customers</strong> is a second choice:{' '}
-                  <strong>Auto</strong> or <strong>Review first</strong>.
+                  The checkbox approves access. <strong>Answers to customers</strong> is separate: <strong>Auto</strong> or{' '}
+                  <strong>Review first</strong>.
                 </p>
                 <p>
-                  With Review first, you approve each new request and release each answer. Press <strong>Open reviews</strong>{' '}
-                  when something is waiting.
+                  <strong>Review first:</strong> approve each request and each answer in <strong>Open reviews</strong>.
                 </p>
               </div>
             </aside>
@@ -250,95 +205,100 @@ export default function ShareGuidePage() {
 
           <div className="sg-callout sg-callout-warn">
             <p>
-              <strong>Send the message only to the person it’s for.</strong> Anyone who has it can connect until the link is
-              used up, expires, or you revoke it. A key already handed to another agent is stopped by revoking that guest.
-              A customer email-signup link is a different control, for a person using your bot in the browser.
+              <strong>Send it only to the person it’s for.</strong>
             </p>
           </div>
 
-          <div className="sg-block" id="revoke">
-            <h3>Revoke the right thing</h3>
-            <p className="sg-sub">
-              In <strong>Agent invite links</strong>, press <strong>Revoke</strong> and read the confirmation. Revoking the
-              link and revoking the guest do different jobs.
-            </p>
-            <div className="sg-pair">
-              <article>
-                <h3>One customer</h3>
-                <p>
-                  Revoking the link stops its credential on the next call, including for the guest already using it. Their
-                  open tasks stay open unless you also revoke that guest.
-                </p>
-              </article>
-              <article>
-                <h3>More than one agent</h3>
-                <p>
-                  Revoking the link stops new agents from joining. Keys already issued keep working until you revoke those
-                  guests, or until the link expires.
-                </p>
-              </article>
-            </div>
-            <div className="sg-callout">
-              <p>
-                In the confirmation, tick <strong>Also revoke the guest who joined with it</strong> (or the numbered version
-                when several joined), then press <strong>Yes, revoke</strong>. You can also revoke a guest under{' '}
-                <strong>Guests</strong>. Revoking a guest fails their open tasks with “access revoked”.
-              </p>
-              <p>
-                On a link that is already expired, used up, or revoked, and still has guests, the button is{' '}
-                <strong>Revoke guests…</strong>.
-              </p>
-                <p>
-                  <strong>Stop sharing</strong> is a pause, not a removal. Open tasks from guests fail with “access
-                  revoked”, and they can’t send a new one while sharing is off. The guests stay listed. Press{' '}
-                  <strong>Share this agent</strong> again and those same guests can send new tasks. Tasks that already
-                  failed stay failed. Revoke a guest under <strong>Guests</strong> when you want that guest gone.
-                </p>
-            </div>
-          </div>
-
-          <details className="sg-more">
-            <summary>If you lose the link, or need the limits exactly</summary>
+          <details className="sg-more" id="revoke">
+            <summary>Revoke, Stop sharing, and limits</summary>
             <div>
-              <h3>The link was shown once</h3>
-              <p>
-                <strong>Send this to your customer</strong> is the only place the full link appears. Closing it does not
-                delete the link. Press <strong>Create invite link</strong> for a new one, and revoke the old one if you no
-                longer want it to work. An agent can hold up to {ACTIVE_LINKS} active invite links.
-              </p>
-              <h3>Expiry belongs to that grant</h3>
-              <p>
-                The date is fixed when you create the link, from {MIN_DAYS} to {MAX_DAYS} days, {DAYS} if you leave the
-                field. After that moment the guest cannot send a new task or read the old ones through that grant. A newer
-                link, a revoke, or someone claiming a workspace does not reopen it.
-              </p>
-              <p>
-                If you already revoked the guest, the next attempt to read the menu or send a task can fail as access
-                revoked before it fails as expired. Revoking never extends the date. After the date, reading one of their
-                old tasks fails as expired. A list of their tasks leaves expired-grant tasks out.
-              </p>
-              <h3>Three different limits</h3>
+              <h3>Revoke the link or the guest</h3>
               <ul>
                 <li>
-                  <strong>One customer</strong> is one connected agent. <strong>Up to … agents</strong> is that many
-                  separate connections. Each of those redeems the link once and gets its own key. The shared link is not a
-                  login they all use.
+                  In <strong>Agent invite links</strong>, press <strong>Revoke</strong>.
                 </li>
                 <li>
-                  <strong>Tasks per day, per guest</strong> is a rolling 24 hours, {CAP} unless you change it. A task the
-                  form rejects does not spend it. Sending the same request again creates another task and spends it again.
+                  <strong>One customer:</strong> the invite stops on the next call. Open tasks stay until you also revoke the
+                  guest.
                 </li>
                 <li>
-                  Tasks they send count on their guest allowance, {n(GUEST_MONTH)} a month on the free plan, not on your
-                  monthly cap. Connecting uses one guest slot on this agent. A free workspace allows {n(GUEST_SLOTS)} guests
-                  on one shared agent.
+                  <strong>More than one agent:</strong> new guests can’t join. Keys already handed out keep working until you
+                  revoke those guests, or until the link expires.
+                </li>
+                <li>
+                  Tick <strong>Also revoke the guest who joined with it</strong>, then <strong>Yes, revoke</strong>. Or
+                  revoke a guest under <strong>Guests</strong>. Open tasks then fail with “access revoked”.
+                </li>
+                <li>
+                  Expired, used up, or revoked, with guests left: <strong>Revoke guests…</strong>.
                 </li>
               </ul>
-              <p>
-                The dashboard checkbox starts on, and creating the link from the dashboard sends that approval. Leaving the
-                same choice off on a direct API call waits for you to press <strong>Approve</strong>. Describe the
-                dashboard, not that API default, when you tell someone what the form does.
-              </p>
+              <h3>Stop sharing is a pause</h3>
+              <ul>
+                <li>
+                  <strong>Stop sharing</strong> is a pause. Open tasks fail with “access revoked”. Guests can’t send a new
+                  task while it is off.
+                </li>
+                <li>
+                  The guests stay listed. Press <strong>Share this agent</strong> again and those same guests can send new tasks. Tasks that already failed stay failed.
+                </li>
+                <li>
+                  Revoke a guest under <strong>Guests</strong> when you want that guest gone.
+                </li>
+              </ul>
+              <h3>Limits</h3>
+              <ul>
+                <li>
+                  <strong>Who it’s for (optional)</strong> is a label. <strong>Your handle</strong> is yours. The field is{' '}
+                  <strong>Workspace handle</strong>.
+                </li>
+                <li>
+                  <strong>How many agents can use it:</strong> <strong>One customer</strong> is one agent and many tasks.{' '}
+                  <strong>Up to … agents</strong> is separate keys (1–{n(MAX_USES)}), not a shared login.
+                </li>
+                <li>
+                  One task starts ticked. Several start clear. None: add one with <code>upsert_offer</code>.
+                </li>
+                <li>
+                  Shown once in <strong>Send this to your customer</strong>. <strong>Copy link</strong> is the address. Closing
+                  it, or a new link, does not stop the old one. Up to {ACTIVE_LINKS} active.
+                </li>
+                <li>
+                  <strong>Expires after (days)</strong> is fixed ({MIN_DAYS}–{MAX_DAYS}, {DAYS} if blank). Nothing extends that
+                  date. After it, no send or read.
+                </li>
+                <li>
+                  <strong>Tasks per day, per guest</strong> rolls every 24 hours. 1–{n(MAX_CAP)}, default {CAP}. A rejected task
+                  is free. Sending again spends it.
+                </li>
+                <li>
+                  Not your monthly cap: {n(GUEST_MONTH)} tasks a month on the free plan. One slot per connection. A free
+                  workspace allows {n(GUEST_SLOTS)} guests on one shared agent.
+                </li>
+                <li>
+                  The checkbox starts on. If an API call leaves it off, press <strong>Approve</strong>. An agent cannot approve
+                  them. Describe the form, not that API default. A customer email link is separate.
+                </li>
+              </ul>
+            </div>
+          </details>
+
+          <details className="sg-more">
+            <summary>Don’t see Agent invite links?</summary>
+            <div>
+              <ul>
+                <li>
+                  Sharing does not add that heading. You can’t create one, and a link from somewhere else won’t open.
+                </li>
+                <li>Signing them up does not stand in for it.</li>
+                <li>
+                  After <strong>Share this agent</strong>, under <strong>Guests</strong>, use{' '}
+                  <strong>Invite a workspace by handle</strong>. You approve them. They keep their own workspace.
+                </li>
+                <li>
+                  <strong>Customer links</strong> use an email code.
+                </li>
+              </ul>
             </div>
           </details>
         </section>
@@ -349,8 +309,7 @@ export default function ShareGuidePage() {
               <p className="sg-kicker">For the recipient</p>
               <h2 id="guest-heading">Got a link?</h2>
               <p className="sg-sub">
-                Paste the private message or prompt into an agent you already run. It connects, sends one allowed task, and
-                the result comes back to that agent. You need no Valetto account, no email code, and no handle.
+                Paste the private message into an agent you already run. You need no Valetto account, email code, or handle.
               </p>
             </div>
             <span className="sg-tag">No Valetto signup</span>
@@ -358,62 +317,29 @@ export default function ShareGuidePage() {
 
           <div className="sg-callout">
             <p>
-              <strong>Connect via MCP with an authorization header, or through the API.</strong> Your host has to accept one
-              of those. Pasting the message does not make every host compatible. A connector that can only sign you in
-              cannot use this link, and creating a Valetto account will not change that.
+              <strong>Connect via MCP with an authorization header, or through the API.</strong>
             </p>
+            <p>A sign-in-only host cannot use this link. A Valetto account will not change that.</p>
           </div>
 
           <div className="sg-split">
             <ol className="sg-steps">
-              <Step title="Paste the private message or prompt">
+              <Step title="Paste the private message">
                 <p>
-                  The owner sends a message from <strong>Copy message</strong>, or just the prompt from{' '}
-                  <strong>Copy prompt</strong>. Paste it into your agent’s conversation.
-                </p>
-                <p>
-                  Opening the link is optional. The page names the owner and the agent, and lists{' '}
-                  <strong>What your agent can ask</strong>. You can expand <strong>What you send</strong>, when it is there,
-                  and <strong>What it returns</strong>. Opening the page does not connect you. You do not enter an email,
-                  choose a handle, or set up a workspace.
+                  Paste the owner’s <strong>Copy message</strong> or <strong>Copy prompt</strong> into your agent.
                 </p>
               </Step>
               <Step title="Let your agent connect">
                 <p>
-                  Connect via MCP with an authorization header, or through the API, using the credential in that private
-                  message. For a link made for <strong>One customer</strong>, that invite is the only credential. There is
-                  no second key. The first call opens a private guest. Later calls with the same invite are the same guest.
-                </p>
-                <p>
-                  If you opened the link, <strong>Give this to your agent</strong> has <strong>Copy instructions</strong>.
-                  A one-guest link also offers <strong>Or paste an MCP config</strong> and <strong>Copy config</strong>, for
-                  a host where you add the connection yourself. Valetto cannot install it for you.
-                </p>
-                <p>
-                  If something asks you to sign in, create a join code, or pick a handle, that is a different setup. This
-                  link does not use those. Connecting your own workspace is on{' '}
-                  <Link className="link" href={CONNECT}>
-                    Connect an AI app
-                  </Link>
-                  .
+                  Use the credential in that message. For <strong>One customer</strong>, that invite is the only key, and
+                  later calls are the same guest.
                 </p>
               </Step>
               <Step title="Send one allowed task">
-                <p>
-                  Ask for something on the menu they shared. Your agent reads that menu, sends the task, and keeps the task
-                  id. A submitted task can wait for the owner’s agent, or for the owner to review it. It is not an instant
-                  answer.
-                </p>
+                <p>Ask for one task on the shared menu and keep the task id.</p>
               </Step>
-              <Step title="Your agent receives its own result">
-                <p>
-                  It checks that same task until there is an outcome. Valetto does not run your agent, and it cannot push
-                  into a host it does not wake. The result comes back only to your agent.
-                </p>
-                <p className="sg-check">
-                  You are connected when your agent can read the granted menu and submit an allowed task, after any approval
-                  the owner still has to give.
-                </p>
+              <Step title="Read your own result">
+                <p>Your agent checks that same task. The result comes back only to it.</p>
               </Step>
             </ol>
 
@@ -421,20 +347,15 @@ export default function ShareGuidePage() {
               <div className="sg-card">
                 <h3>What you do not need</h3>
                 <ul>
-                  <li>No Valetto signup or email code.</li>
-                  <li>No handle or name to choose.</li>
+                  <li>No Valetto signup, email code, or handle.</li>
                   <li>No membership in the owner’s workspace.</li>
                   <li>No copy of the owner’s API key.</li>
                 </ul>
               </div>
               <div className="sg-card">
-                <h3>A connection, on your host</h3>
-                <p>
-                  Your existing host has to be able to connect via MCP with an authorization header, or through the API.
-                  This guide does not include a sample credential. The real address and header are only in the private
-                  message.
-                </p>
-                <p>A link for one customer keeps working for that same agent until it is revoked or it expires. It is not a one-task pass.</p>
+                <h3>On your host</h3>
+                <p>Address and header are only in the private message. No sample credential.</p>
+                <p>A one-customer link lasts until it is revoked or it expires. Not a one-task pass.</p>
               </div>
             </aside>
           </div>
@@ -467,67 +388,75 @@ export default function ShareGuidePage() {
               <h3>
                 <code>open</code>
               </h3>
-              <p>Waiting for the owner’s agent. Keep checking the same task. They have to be running, or woken, to answer.</p>
+              <p>Waiting on the owner’s agent.</p>
             </article>
             <article>
               <h3>
                 <code>needs_info</code>
               </h3>
-              <p>They asked a question. Answer it on that task. A new task would be a second request.</p>
+              <p>Answer their question on this task.</p>
             </article>
             <article>
               <h3>
                 <code>in_review</code>
               </h3>
               <p>
-                Or <code>awaiting_release</code>. The owner is reviewing the request or the answer. Keep checking. Being
-                allowed to connect does not skip Review first.
+                Or <code>awaiting_release</code>. The owner is reviewing. Connecting does not skip <strong>Review first</strong>.
               </p>
             </article>
             <article className="sg-status-done">
               <h3>
                 <code>done</code> or <code>failed</code>
               </h3>
-              <p>
-                Read the outcome. If the owner revoked the guest, a separate guest key can still read that failed task and
-                the reason “access revoked” until the link’s date. After that date, the read says the invite expired.
-                Revoking a one-customer link stops that invite on the next call.
-              </p>
+              <p>Read the outcome.</p>
             </article>
           </div>
 
           <div className="sg-callout sg-callout-warn">
             <p>
-              <strong>Send a task once.</strong> A second send creates another task and spends the daily limit again. If a
-              response seems lost, check the tasks already sent before sending anything new.
+              <strong>Send a task once.</strong> A second send is another task and spends the limit again.
             </p>
           </div>
 
           <details className="sg-more">
+            <summary>If you open the link</summary>
+            <div>
+              <ul>
+                <li>Opening the page does not connect you.</li>
+                <li>
+                  It lists <strong>What your agent can ask</strong>, <strong>What you send</strong>, and{' '}
+                  <strong>What it returns</strong>.
+                </li>
+                <li>
+                  <strong>Give this to your agent</strong> has <strong>Copy instructions</strong>. One guest also has{' '}
+                  <strong>Or paste an MCP config</strong> and <strong>Copy config</strong>.
+                </li>
+                <li>
+                  Sign-in, a join code, or a handle is a different setup.{' '}
+                  <Link className="link" href={CONNECT}>
+                    Connect an AI app
+                  </Link>{' '}
+                  is your own workspace.
+                </li>
+              </ul>
+            </div>
+          </details>
+
+          <details className="sg-more">
             <summary>If the link is for more than one agent</summary>
             <div>
-              <p>
-                The preview says each agent redeems the link once. Each agent needs its own guest key. Do not configure the
-                shared invite as everyone’s login.
-              </p>
-              <ol>
+              <ul>
+                <li>Each agent gets its own key. Don’t use the shared invite as a login.</li>
                 <li>
-                  Give your agent the <strong>Copy instructions</strong> text, or the prompt the owner sent.
+                  <code>POST /api/v1/invites/redeem</code> with the token in the JSON body. No authorization header. No name.
                 </li>
                 <li>
-                  The agent calls <code>POST /api/v1/invites/redeem</code> with the invite token in the JSON body. That
-                  request has no authorization header and no name.
+                  Save <code>api_key</code> (shown once) and send it as the authorization header.
                 </li>
                 <li>
-                  Save the returned <code>api_key</code>. It is shown once. Use that guest key, not the shared invite, as
-                  the authorization header.
+                  Redeeming again creates a different guest. The same guest every time is only for <strong>One customer</strong>.
                 </li>
-                <li>Read the granted menu, send one task, and check that same task.</li>
-              </ol>
-              <p>
-                Redeem only when you mean to create that agent’s access. Calling again after success creates a different
-                guest. The “same guest every time” behavior is only for a one-customer link.
-              </p>
+              </ul>
             </div>
           </details>
 
@@ -535,17 +464,12 @@ export default function ShareGuidePage() {
             <summary>If your agent uses the API</summary>
             <div>
               <p>
-                This is for an agent that can make HTTP requests. It is the same access as MCP with an authorization
-                header. A connector that only offers sign-in still cannot use the link.
-              </p>
-              <p>
-                Send <code>Authorization: Bearer</code> with the credential from the private message: the one-customer
-                invite, or the guest key from a multi-agent redeem. Send JSON with <code>Content-Type: application/json</code>.
-                Never put the credential in the web address.
+                Send <code>Authorization: Bearer</code> and the private credential, with{' '}
+                <code>Content-Type: application/json</code>. Never put the credential in the address.
               </p>
               <div className="sg-table-wrap">
                 <table>
-                  <caption>External API, using the granted address and offers from the private message</caption>
+                  <caption>External API from the private message</caption>
                   <thead>
                     <tr>
                       <th scope="col">Action</th>
@@ -586,10 +510,7 @@ export default function ShareGuidePage() {
                   </tbody>
                 </table>
               </div>
-              <p className="sg-micro">
-                The send body uses the granted address, one granted offer, and the menu’s input shape. Field names are in
-                the private instructions. This page has no sample token.
-              </p>
+              <p className="sg-micro">Field names are in the private instructions.</p>
             </div>
           </details>
 
@@ -598,7 +519,7 @@ export default function ShareGuidePage() {
             <div>
               <div className="sg-table-wrap">
                 <table>
-                  <caption>What to do with a common failure</caption>
+                  <caption>Common failures</caption>
                   <thead>
                     <tr>
                       <th scope="col">What you see</th>
@@ -608,55 +529,52 @@ export default function ShareGuidePage() {
                   <tbody>
                     <tr>
                       <td>The host only offers sign-in</td>
-                      <td>
-                        Stay signed out of Valetto. Use a host that can connect via MCP with an authorization header, or
-                        through the API.
-                      </td>
+                      <td>Stay signed out. Use MCP with an authorization header, or the API.</td>
                     </tr>
                     <tr>
                       <td>The link preview will not open</td>
                       <td>
-                        Ask the owner to check the link. If their Sharing page has no Agent invite links heading, this
-                        kind of link isn’t available there. Signing up does not repair it.
+                        Ask the owner. Signing up does not add <strong>Agent invite links</strong>.
                       </td>
                     </tr>
                     <tr>
                       <td>
                         <code>share_pending</code>
                       </td>
-                      <td>Ask the owner to press Approve under Guests.</td>
+                      <td>
+                        Ask the owner to press <strong>Approve</strong> under <strong>Guests</strong>.
+                      </td>
                     </tr>
                     <tr>
                       <td>
                         <code>rate_limited</code>
                       </td>
-                      <td>The daily allowance may be spent. Wait for the rolling 24 hours to recover, or ask the owner to check the limit.</td>
+                      <td>Wait 24 hours, or ask the owner.</td>
                     </tr>
                     <tr>
                       <td>
                         <code>offer_not_found</code>
                       </td>
-                      <td>Use only a task on your granted menu. An ungranted task looks the same as an unknown one.</td>
+                      <td>Not on your menu.</td>
                     </tr>
                     <tr>
                       <td>
                         <code>invite_expired</code>
                       </td>
-                      <td>That grant has ended. Ask the owner for new access. You cannot keep reading its tasks through the expired grant.</td>
+                      <td>Ask for new access.</td>
                     </tr>
                     <tr>
                       <td>
                         <code>share_revoked</code>
                       </td>
                       <td>
-                        Access was revoked. Stop sending. With a guest key that is still valid, you can read your own failed
-                        task for the reason until the invite date. After that, the read is <code>invite_expired</code>. A
-                        revoked one-customer invite no longer authenticates.
+                        Stop. A live guest key can read “access revoked” until the invite date, then{' '}
+                        <code>invite_expired</code>. A revoked <strong>One customer</strong> invite stops authenticating.
                       </td>
                     </tr>
                     <tr>
                       <td>The task stays open or in review</td>
-                      <td>Ask the owner to check their running agent or their reviews. Keep the existing task.</td>
+                      <td>Owner checks the agent. Keep this task.</td>
                     </tr>
                   </tbody>
                 </table>
@@ -667,22 +585,19 @@ export default function ShareGuidePage() {
 
         <aside className="sg-elsewhere" aria-labelledby="elsewhere-h">
           <h2 id="elsewhere-h">Other ways agents connect</h2>
-          <p>
-            This page is the private link for an agent that stays on its own host. Two other paths have their own
-            requirements, and this guide does not remove them.
-          </p>
+          <p>This page is for an agent on its own host.</p>
           <ul>
             <li>
               <Link className="link" href={CONNECT}>
                 Connect an AI app
               </Link>{' '}
-              signs an app into <em>your</em> workspace. You use your email code. An invite recipient does not.
+              is your own workspace, with your email code. An invite recipient does not.
             </li>
             <li>
               <Link className="link" href={`${AGENT_TO_AGENT}#sharing`}>
                 Share with another Valetto workspace
               </Link>{' '}
-              invites a team by its handle. They already have a workspace, and you approve them while signed in.
+              is for a team that already has a workspace. You approve them while signed in.
             </li>
           </ul>
         </aside>
