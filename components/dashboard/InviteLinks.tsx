@@ -92,7 +92,7 @@ function AgentInviteLinks({
   const [uses, setUses] = useState('10');
   const [days, setDays] = useState('30');
   const [cap, setCap] = useState('50');
-  const [approve, setApprove] = useState(false);
+  const [approve, setApprove] = useState(true);
   const chosen = picked ?? (offers.length === 1 ? [offers[0]!.name] : []);
 
   const load = useCallback(async () => {
@@ -193,8 +193,9 @@ function AgentInviteLinks({
     <section className="dash-invites" aria-labelledby={headingId}>
       <h4 id={headingId}>Agent invite links</h4>
       <p className="dash-muted">
-        For customers who aren’t on Valetto. Their agent redeems the link and gets its own key. It shows up under
-        Guests.
+        For someone whose agent runs somewhere else. Send one link. They do not sign up, pick a handle, or join this
+        workspace. Their agent can use only the tasks you tick, up to the daily cap, until the link expires or you
+        revoke them.
       </p>
 
       {made ? (
@@ -233,12 +234,15 @@ function AgentInviteLinks({
             revoke it below.
           </p>
           <ol className="dash-invite-next dash-muted">
-            <li>Their agent redeems the link and gets its own Valetto key.</li>
+            <li>They give the link to their agent, or paste the connection into a host that accepts a bearer header.</li>
             <li>
               It shows up under Guests,{' '}
               {made.invite.approve_on_redeem ? 'already approved.' : 'waiting for your approval.'}
             </li>
-            <li>Its tasks count against its own quota, not yours.</li>
+            <li>
+              Tasks they send count on their guest allowance, not your monthly cap. The daily cap above is the limit you
+              set for them. Connecting uses one guest slot on this agent.
+            </li>
           </ol>
           <div className="dash-actions">
             <button type="button" className="dash-textbtn" onClick={() => setMade(null)}>
@@ -325,8 +329,12 @@ function AgentInviteLinks({
           </fieldset>
           <label className="dash-invite-check">
             <input type="checkbox" checked={approve} onChange={(e) => setApprove(e.target.checked)} />
-            Approve guests when they redeem the link
+            They can use these tasks as soon as they connect
           </label>
+          <p className="dash-muted">
+            Leave this on. Creating the link is your approval. Uncheck it if you want each guest to wait until you
+            approve them under Guests. An agent cannot turn this on for you.
+          </p>
           <div className="dash-actions">
             <button type="submit" className="dash-btn dash-btn-ink" disabled={busy !== null}>
               {busy === 'create' ? 'Creating…' : 'Create invite link'}
@@ -369,7 +377,11 @@ function AgentInviteLinks({
                 <div className="dash-actions">
                   {confirming?.id === inv.id ? (
                     <div className="dash-confirm" role="group" aria-label={`Revoke link ${inv.prefix}`}>
-                      <p>Revoke this link? Nobody new can join with it.</p>
+                      <p>
+                        {inv.max_uses === 1
+                          ? 'Revoke this link? It stops working on the next call, including for the guest already using it as their credential. Their open tasks stay open unless you also revoke them below.'
+                          : 'Revoke this link? Nobody new can join. Guest keys already issued keep working until you revoke those guests, or until this link expires.'}
+                      </p>
                       {inv.uses > 0 ? (
                         <label className="dash-invite-check">
                           <input

@@ -23,6 +23,7 @@ import {
   agentGuestsEnabled,
   CLAIM_TOKEN_TTL_DAYS,
   DEFAULT_SHARE_DAILY_CAP,
+  EXTERNAL_GUEST_AGENT_NAME,
   INVITE_DEFAULT_TTL_DAYS,
   INVITE_HANDLE_PREFIX,
   INVITE_LABEL_MAX,
@@ -100,11 +101,119 @@ export function inviteUrl(origin: string, token: string): string {
   return `${origin}/i#${token}`;
 }
 
-export function invitePrompt(origin: string, token: string): string {
+export function invitePrompt(
+  origin: string,
+  token: string,
+  scope: { address: string; offers: string[]; maxUses: number },
+): string {
+  const offers = scope.offers.join(', ');
+  const mcp = `${origin}/api/mcp`;
+  const http = `${origin}/api/v1/external`;
+  const shared = [
+    'Do not sign up for Valetto, do not choose a name, and do not send a workspace handle.',
+    'You are not a member of the owner\'s workspace. Valetto does not run you and cannot push results to your host. Poll for status.',
+    `Granted address: ${scope.address}`,
+    `Granted offers: ${offers}`,
+    'Call get_agent_card with that address. create_task with to set to the address and offer set to one granted offer. If the card shows input_schema, send input that matches it and leave title out. Poll list_tasks with role sent, or get_task, until status is done or failed. If status is needs_info, call answer_task. If status is in_review, the owner has not released it; keep polling. There is no result yet.',
+    'Hosts that only connect with OAuth sign-in cannot use this link. Do not create a Valetto account to work around that.',
+    `HTTP fallback, same Authorization header, never put the token in the URL: POST ${http}/card {"to":"${scope.address}"}; POST ${http}/tasks {"to","offer","title","description","input"}; GET ${http}/tasks; GET ${http}/tasks/{id}; POST ${http}/tasks/{id}/answer {"answer"}.`,
+    `Further reading: ${origin}/skill.md`,
+  ];
+  if (scope.maxUses === 1) {
+    return [
+      'Connect to Valetto with this invite. The token below is the only credential. It is not the owner\'s key.',
+      'The first call opens a private guest. Calling again with the same token is the same guest, not a second one.',
+      `MCP, only if the host accepts a remote URL and a static Authorization header. Valetto cannot install this for you.`,
+      `URL: ${mcp}`,
+      `Header: Authorization: Bearer ${token}`,
+      'Transport: Streamable HTTP',
+      ...shared,
+    ].join('\n');
+  }
   return [
-    `Read ${origin}/skill.md, then redeem this Valetto invite: ${token}`,
-    'Choose a name for yourself. If you are already on Valetto, use the redeem_invite tool instead.',
+    'Connect to Valetto with this invite. This link can admit more than one agent. Do not use the invite token as a shared bearer, or every caller would be the same guest.',
+    `POST ${origin}/api/v1/invites/redeem`,
+    `{"invite":"${token}"}`,
+    'No Authorization header and no name. Save api_key from the response. It is shown once. It is a guest key, not the owner\'s key, and it can only use the granted offers.',
+    `Then connect MCP to ${mcp} with Authorization: Bearer <api_key> if the host accepts a static bearer header. Valetto cannot install this for you.`,
+    'A failed call can be retried. A successful call spends one use. Calling again after success creates a different guest.',
+    ...shared,
   ].join('\n');
+}
+
+/**
+ * Unclaimed invite workspaces are external guests. Claiming lifts that tool fence
+ * (the human then owns this private workspace) and does not revive an expired grant.
+ * Grant expiry is checked on the share's own invite, not here.
+ */
+export async function guestCredentialState(workspaceId: string): Promise<{ external: boolean; expired: boolean }> {
+  const db = getDb();
+  const [workspace] = await db
+    .select({ origin: workspaces.origin, claimedAt: workspaces.claimedAt })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  if (!workspace || workspace.origin !== 'invite' || workspace.claimedAt) return { external: false, expired: false };
+  return { external: true, expired: false };
+}
+
+export function assertExternalCredential(caller: AgentPrincipal): void {
+  if (!caller.externalGrantExpired) return;
+  throw new HttpError(401, 'invite_expired', 'This invite has expired. Ask the owner for a new one.');
+}
+
+async function principalForInvite(db: Db, inviteId: string): Promise<AgentPrincipal | null> {
+  const [share] = await db.select().from(agentShares).where(eq(agentShares.inviteId, inviteId)).limit(1);
+  if (!share) return null;
+  const [agent] = await db
+    .select()
+    .from(agents)
+    .where(and(eq(agents.workspaceId, share.guestWorkspaceId), isNull(agents.revokedAt)))
+    .limit(1);
+  if (!agent) return null;
+  const [key] = await db
+    .select()
+    .from(agentKeys)
+    .where(and(eq(agentKeys.agentId, agent.id), isNull(agentKeys.revokedAt)))
+    .limit(1);
+  if (!key) return null;
+  await db.update(agentKeys).set({ lastUsedAt: new Date() }).where(eq(agentKeys.id, key.id));
+  return {
+    workspaceId: agent.workspaceId,
+    agentId: agent.id,
+    agentName: agent.name,
+    keyId: key.id,
+    externalGuest: true,
+    externalGrantExpired: false,
+  };
+}
+
+/**
+ * Single-use invite token as a scoped bearer. The first call binds one invisible guest.
+ * A repeat call is that same guest. Multi-use tokens are not bearers: callers would share one identity.
+ * A revoked link stops working on the next call. Expiry is reported by assertExternalCredential.
+ */
+export async function authenticateInviteBearer(token: string, ip: string): Promise<AgentPrincipal | null> {
+  if (!agentGuestsEnabled() || !token.startsWith('rsi_')) return null;
+  const db = getDb();
+  const invite = await findInviteByToken(db, token);
+  if (!invite || invite.maxUses !== 1) return null;
+  const status = inviteStatus(invite);
+  if (status === 'revoked') return null;
+  const existing = await principalForInvite(db, invite.id);
+  if (existing) return existing;
+  if (status !== 'active') return null;
+  try {
+    await redeemInvite({
+      token,
+      target: { kind: 'new', name: EXTERNAL_GUEST_AGENT_NAME, bearerBind: true },
+      rateKey: { ip },
+    });
+  } catch (err) {
+    if (err instanceof HttpError && (err.status === 429 || err.code === 'plan_limit')) throw err;
+    // The racing caller won the single use. Fall through and load their guest.
+  }
+  return principalForInvite(db, invite.id);
 }
 
 async function offersForInvites(db: Db, inviteIds: string[]) {
@@ -353,7 +462,22 @@ export async function previewInvite(token: string, key: RateKey) {
   await consumeInviteRate('invitePreview', key);
   const db = getDb();
   const invite = await findInviteByToken(db, token);
-  if (!invite || inviteStatus(invite) !== 'active') throw new HttpError(404, 'invite_not_found', INVITE_NOT_FOUND);
+  if (!invite) throw new HttpError(404, 'invite_not_found', INVITE_NOT_FOUND);
+  const status = inviteStatus(invite);
+  // A single-use link stays the caller's credential after it connects, so the page still describes it.
+  // Revoked, expired, and multi-use links that are used up stay indistinguishable from an unknown token.
+  let connected = false;
+  if (status !== 'active') {
+    if (status === 'exhausted' && invite.maxUses === 1) {
+      const [share] = await db
+        .select({ status: agentShares.status })
+        .from(agentShares)
+        .where(eq(agentShares.inviteId, invite.id))
+        .limit(1);
+      connected = share != null && share.status !== 'revoked';
+    }
+    if (!connected) throw new HttpError(404, 'invite_not_found', INVITE_NOT_FOUND);
+  }
   const [agent] = await db.select().from(agents).where(eq(agents.id, invite.agentId)).limit(1);
   if (!agent || agent.revokedAt || !agent.shared) throw new HttpError(404, 'invite_not_found', INVITE_NOT_FOUND);
   const [owner] = await db
@@ -371,6 +495,9 @@ export async function previewInvite(token: string, key: RateKey) {
     offers,
     expires_at: invite.expiresAt.toISOString(),
     uses_left: invite.maxUses - invite.uses,
+    /** bearer: the invite token is the credential. redeem: each caller gets its own guest key. */
+    connection: invite.maxUses === 1 ? ('bearer' as const) : ('redeem' as const),
+    connected,
   };
 }
 
@@ -380,7 +507,7 @@ function inviteHandle(): string {
 }
 
 export type RedeemTarget =
-  | { kind: 'new'; name: string; description?: string; delivery?: DeliveryInput }
+  | { kind: 'new'; name: string; description?: string; delivery?: DeliveryInput; bearerBind?: boolean }
   | { kind: 'existing'; caller: AgentPrincipal };
 
 type ShareCard = {
@@ -392,7 +519,16 @@ type ShareCard = {
 
 export type RedeemResult =
   | { kind: 'existing'; share: ShareCard; created: boolean }
-  | { kind: 'new'; share: ShareCard; agent: AgentRow; apiKey: string; workspace: { id: string; handle: string }; claimToken: string };
+  | { kind: 'bound'; share: ShareCard; created: false }
+  | {
+      kind: 'new';
+      share: ShareCard;
+      agent: AgentRow;
+      apiKey: string;
+      workspace: { id: string; handle: string };
+      claimToken: string;
+      credential: 'invite' | 'guest_key';
+    };
 
 async function shareCard(db: Db, share: AgentShareRow, address: string): Promise<ShareCard> {
   const rows = await db
@@ -455,6 +591,21 @@ async function redeemInTx(
   const [invite] = await tx.select().from(agentInvites).where(eq(agentInvites.id, found.id)).limit(1);
   if (!invite) throw new HttpError(404, 'invite_not_found', INVITE_NOT_FOUND);
   const status = inviteStatus(invite);
+  const bearerBind = input.target.kind === 'new' && input.target.bearerBind === true;
+  // A single-use link binds one guest. A second bind, including two racing first calls, returns that guest.
+  if (bearerBind && invite.maxUses === 1 && status !== 'revoked' && status !== 'expired') {
+    const [bound] = await tx.select().from(agentShares).where(eq(agentShares.inviteId, invite.id)).limit(1);
+    if (bound) {
+      if (bound.status === 'revoked') throw new HttpError(403, 'share_revoked', SHARE_REVOKED_MESSAGE);
+      await tx.execute(sql`select id from agents where id = ${invite.agentId} for update`);
+      const [boundOwner] = await tx.select().from(agents).where(eq(agents.id, invite.agentId)).limit(1);
+      if (!boundOwner || boundOwner.revokedAt || !boundOwner.shared) {
+        throw new HttpError(409, 'agent_not_shared', 'The owner stopped sharing this agent.');
+      }
+      const boundHandle = await workspaceHandle(tx, invite.workspaceId);
+      return { kind: 'bound', share: await shareCard(tx, bound, `@${boundHandle}/${boundOwner.name}`), created: false };
+    }
+  }
   if (status !== 'active') throw redeemError(status);
 
   await tx.execute(sql`select id from agents where id = ${invite.agentId} for update`);
@@ -569,6 +720,7 @@ async function redeemInTx(
     apiKey,
     workspace: { id: workspace.id, handle: workspace.handle },
     claimToken,
+    credential: input.target.kind === 'new' && input.target.bearerBind && invite.maxUses === 1 ? 'invite' : 'guest_key',
   };
 }
 

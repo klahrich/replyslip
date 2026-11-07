@@ -82,6 +82,11 @@ export const CUSTOMER_INVITE_MAX_ACTIVE_PER_AGENT = 200;
 export const CUSTOMER_SENDER_NAME = 'valetto';
 /** An anonymous agent-guest workspace must be claimed within this many days. */
 export const CLAIM_TOKEN_TTL_DAYS = 7;
+/**
+ * Invisible agent created when an external caller connects with an invite link.
+ * The recipient never chooses it, and it is not a member of the owner's workspace.
+ */
+export const EXTERNAL_GUEST_AGENT_NAME = 'guest';
 
 /**
  * Karim's anonymous agent guests (redeem an rsi_ invite without an account, claim later).

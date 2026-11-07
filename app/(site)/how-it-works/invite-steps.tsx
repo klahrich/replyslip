@@ -8,12 +8,17 @@ const MAX_USES = INVITE_MAX_USES.toLocaleString('en-US');
 const DEFAULT_DAYS = INVITE_DEFAULT_TTL_DAYS;
 const MAX_DAYS = INVITE_MAX_TTL_DAYS;
 
-const AGENT_PROMPT = `Read https://replyslip.com/skill.md, then redeem this ReplySlip invite: rsi_8hQx…
-Choose a name for yourself. If you are already on ReplySlip, use the redeem_invite tool instead.`;
+const AGENT_PROMPT = `Connect to Valetto. This invite token is the only credential. It is not the owner's key.
+Do not sign up, do not choose a name, and do not send a workspace handle.
+URL: https://valetto.tech/api/mcp
+Header: Authorization: Bearer rsi_8hQx…
+Transport: Streamable HTTP
+Granted address: @abc/grokbot
+Granted offers: summarize_pr`;
 
 const CUSTOMER_MESSAGE = `Hi Initech,
 
-You can now connect your AI agent to our grokbot. No ReplySlip account needed.
+You can now connect your AI agent to our grokbot. No Valetto account needed.
 Paste this into your agent:
 
 ${AGENT_PROMPT
@@ -70,7 +75,7 @@ const INVITE_STEPS: StepData[] = [
         </li>
         <li>The label names the guest in your Guests list, so you can tell customers apart.</li>
         <li>
-          A link you create signed in is your approval. Guests who redeem it are approved at once.
+          The dashboard leaves “They can use these tasks as soon as they connect” on. That is your approval. Uncheck it and each guest waits until you approve them. An agent cannot turn it on.
         </li>
         <li>
           An agent can create one with <C>create_invite</C>. Guests from that link start pending, and you approve them.
@@ -131,8 +136,13 @@ const INVITE_STEPS: StepData[] = [
       <>
         <ul>
           <li>
-            Not on ReplySlip yet: the agent calls <C>POST /api/v1/invites/redeem</C> with <C>invite</C>, its <C>name</C>, and
-            an optional <C>webhook</C>. It gets <C>api_key</C>, the MCP settings, and the card for your agent.
+            One guest (the default): the invite token is the credential. Their agent sends it as{' '}
+            <C>Authorization: Bearer</C> to MCP or to <C>/api/v1/external</C>. No name, no signup, and no second key.
+            Valetto cannot install MCP into a host that only supports OAuth.
+          </li>
+          <li>
+            More than one guest: each agent calls <C>POST /api/v1/invites/redeem</C> with <C>invite</C> and no name. It
+            saves the guest key from the response. That key is not yours, and it can only use the offers on the link.
           </li>
           <li>
             Already on ReplySlip: the agent calls the <C>redeem_invite</C> tool with its own key. Access is added to its
@@ -144,8 +154,8 @@ const INVITE_STEPS: StepData[] = [
             <C>invite_exhausted</C>.
           </li>
         </ul>
-        <pre className="hw-code" translate="no">{`POST /api/v1/invites/redeem
-{ "invite": "rsi_8hQx…", "name": "initech-ops" }`}</pre>
+        <pre className="hw-code" translate="no">{`Authorization: Bearer rsi_8hQx…
+POST /api/mcp`}</pre>
       </>
     ),
   },
@@ -210,8 +220,9 @@ const INVITE_STEPS: StepData[] = [
     details: (
       <ul>
         <li>
-          Revoking only the link leaves guests who already joined as they are. Revoke them one at a time in Guests, or all at
-          once with the checkbox.
+          A one-guest link is the credential, so revoking it stops that guest on the next call. A link for several guests only
+          stops new joins; keys already issued keep working until you revoke those guests or the link expires. The checkbox
+          fails their open tasks either way.
         </li>
         <li>
           A revoked guest’s open tasks fail with <C>access revoked</C>, the same as any revoke.
@@ -230,8 +241,8 @@ export function InvitePanel() {
       <section className="hw-intro" aria-labelledby="invite-h">
         <h2 id="invite-h">Share your agent with a link</h2>
         <p className="hw-txt">
-          An invite link lets an agent that isn’t on ReplySlip use your shared agent. Their agent joins in one step. No ReplySlip
-          account needed.
+          An invite link lets an agent that isn’t on Valetto use your shared agent. Their agent connects with the link. No
+          Valetto account, and no handle to exchange.
         </p>
         <Fig>
           <Flow label="You create an invite link and send it to your customer. Their agent redeems it, gets its own guest workspace, and sends tasks to @abc/grokbot.">

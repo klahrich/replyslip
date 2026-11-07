@@ -13,6 +13,7 @@ import {
   deleteOfferByName,
   getAgentCard,
   inviteGuest,
+  listExternalGrants,
   listShares,
   revokeGuestByHandle,
   setAgentShared,
@@ -20,7 +21,9 @@ import {
   upsertOfferByName,
 } from './sharing';
 import { agentGuestsEnabled } from './constants';
-import { redeemInvite } from './invites';
+import { EXTERNAL_GUEST_DENIED, externalToolAllowed } from './external-guest';
+import { authenticateInviteBearer, redeemInvite } from './invites';
+import { clientIp } from './origin';
 import {
   answerTask,
   askTask,
@@ -60,6 +63,8 @@ function principalFrom(ctx: ToolCtx): AgentPrincipal {
     workspaceId: extra.workspaceId,
     agentName: extra.agentName,
     keyId: extra.keyId,
+    externalGuest: extra.externalGuest === true,
+    externalGrantExpired: extra.externalGrantExpired === true,
   };
 }
 
@@ -68,6 +73,9 @@ function principalFrom(ctx: ToolCtx): AgentPrincipal {
  * tools/list already hides these tools from such tokens (filterListedTools); this stays as defense in depth.
  */
 function requireToolScope(ctx: ToolCtx, tool: ToolName): void {
+  if (ctx.http?.authInfo?.extra?.externalGuest === true && !externalToolAllowed(tool, true)) {
+    throw new HttpError(403, 'insufficient_scope', EXTERNAL_GUEST_DENIED);
+  }
   if (!toolAllowed(tool, ctx.http?.authInfo?.scopes)) {
     throw new HttpError(403, 'insufficient_scope', INSUFFICIENT_SCOPE_MESSAGE);
   }
@@ -100,7 +108,11 @@ export function filterListedTools(server: McpServerInstance): void {
     const filtered: ListToolsHandler = async (request, ctx) => {
       const result = (await listTools(request, ctx)) as { tools: { name: string }[] };
       const scopes = ctx.http?.authInfo?.scopes;
-      return { ...result, tools: result.tools.filter((tool) => toolAllowed(tool.name, scopes)) };
+      const external = ctx.http?.authInfo?.extra?.externalGuest === true;
+      return {
+        ...result,
+        tools: result.tools.filter((tool) => toolAllowed(tool.name, scopes) && externalToolAllowed(tool.name, external)),
+      };
     };
     return original(...args.slice(0, -1), filtered);
   };
@@ -299,6 +311,17 @@ export const mcpHandler = createMcpHandler(
         try {
           requireToolScope(ctx as ToolCtx, 'whoami');
           const principal = principalFrom(ctx as ToolCtx);
+          if (principal.externalGuest) {
+            if (principal.externalGrantExpired) {
+              throw new HttpError(401, 'invite_expired', 'This invite has expired. Ask the owner for a new one.');
+            }
+            return ok({
+              external: true,
+              grants: await listExternalGrants(principal.workspaceId),
+              delivery: { mode: 'none' },
+              note: 'Poll list_tasks or get_task for results. Valetto does not run your agent and cannot push to your host.',
+            });
+          }
           const agent = await getAgent(principal.workspaceId, principal.agentId);
           const [workspace] = await getDb()
             .select({ name: workspaces.name, handle: workspaces.handle })
@@ -358,7 +381,9 @@ export const mcpHandler = createMcpHandler(
       async (_args, ctx) => {
         try {
           requireToolScope(ctx as ToolCtx, 'list_agents');
-          return ok({ agents: await listTeammates(principalFrom(ctx as ToolCtx)) });
+          const principal = principalFrom(ctx as ToolCtx);
+          if (principal.externalGuest) return ok({ agents: [] });
+          return ok({ agents: await listTeammates(principal) });
         } catch (err) {
           return fail(err);
         }
@@ -598,17 +623,21 @@ export async function verifyMcpToken(_req: Request, bearerToken?: string): Promi
       },
     };
   }
-  const principal = await authenticateAgentKey(bearerToken);
+  const invite = bearerToken.startsWith('rsi_') ? await authenticateInviteBearer(bearerToken, clientIp(_req)) : null;
+  const principal = invite ?? (await authenticateAgentKey(bearerToken));
   if (!principal) return undefined;
+  const external = principal.externalGuest === true;
   return {
     token: bearerToken,
     clientId: principal.agentId,
-    scopes: [...RSK_SCOPES],
+    scopes: external ? [OAUTH_SCOPE] : [...RSK_SCOPES],
     extra: {
       agentId: principal.agentId,
       workspaceId: principal.workspaceId,
       agentName: principal.agentName,
       keyId: principal.keyId,
+      externalGuest: external,
+      externalGrantExpired: principal.externalGrantExpired === true,
     },
   };
 }

@@ -5,5 +5,8 @@
 .si .inv-offers li{padding:14px 16px;border:1px solid var(--muted);border-radius:6px}
 .si .inv-offers p{margin-top:6px}
 .si .inv-offers summary{margin-top:8px;cursor:pointer;font-size:var(--s-small);color:var(--muted)}
+.si .inv-title{margin-left:8px;color:var(--muted);font-size:var(--s-small)}
+.si .inv-note{margin-top:12px;color:var(--muted)}
+.si .inv-prompt + .btn{margin-bottom:8px}
 .si .inv-offers pre,.si .inv-prompt{margin:10px 0 0;padding:12px 14px;overflow-x:auto;font:var(--s-small)/1.55 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid var(--muted);border-radius:4px}
 .si .inv-prompt{margin-bottom:16px}
