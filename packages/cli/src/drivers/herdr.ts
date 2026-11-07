@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PANE_NAME_PATTERN } from '../../../../lib/constants.ts';
-import { capture, runCommand } from './command.ts';
+import { COMMAND_TIMED_OUT, capture, runCommandWithTimeout } from './command.ts';
 import type { CommandRunner, NudgeDriver } from './types.ts';
+import { HERDR_COMMAND_TIMEOUT_MS } from '../supervise-constants.ts';
 
 /** First Apache-2.0 herdr release. Earlier releases were AGPL. */
 export const MIN_HERDR_VERSION = '0.8.0';
@@ -42,7 +43,7 @@ export function herdrMissingPane(output: string): boolean {
 }
 
 export function createHerdrDriver(options?: { run?: CommandRunner }): NudgeDriver {
-  const run = options?.run ?? runCommand;
+  const run = options?.run ?? runCommandWithTimeout(HERDR_COMMAND_TIMEOUT_MS);
   return {
     id: 'herdr',
     async check() {
@@ -73,6 +74,7 @@ export function createHerdrDriver(options?: { run?: CommandRunner }): NudgeDrive
       const result = await capture(run, 'herdr', args);
       if (result.code === 0) return { ok: true };
       const output = `${result.stdout}\n${result.stderr}`;
+      if (output.includes(COMMAND_TIMED_OUT)) return { ok: false, error: `herdr timed out after ${HERDR_COMMAND_TIMEOUT_MS / 1000}s` };
       if (herdrMissingPane(output)) return { ok: false, error: `no pane named ${target}` };
       if (result.stderr === 'ENOENT' || result.code === 127) {
         return { ok: false, error: herdrInstallMessage('herdr is not installed or not on PATH.') };

@@ -3,6 +3,7 @@
 import { GUEST_WAKE_NOTICE, REVIEW_NEEDED_NOTICE, WAKE_NOTICE } from '../../../lib/wake-notice.ts';
 import { defaultRegistry, type DriverRegistry } from './drivers/registry.ts';
 import type { CommandRunner, DriverCheck, NudgeDriver } from './drivers/types.ts';
+import { NUDGE_BUDGET_MS } from './supervise-constants.ts';
 import {
   acquireAgentWatcherLock,
   acquireWatcherLock,
@@ -72,6 +73,8 @@ export async function nudgeWakes(options: {
   checks: Map<string, DriverCheck>;
   warned: Set<string>;
   log?: (message: string) => void;
+  /** Called before each nudge so a supervisor deadline covers one wake, not a hung command. */
+  onNudge?: () => void;
 }): Promise<string[]> {
   const log = options.log ?? console.error;
   const acked: string[] = [];
@@ -104,6 +107,7 @@ export async function nudgeWakes(options: {
       );
       continue;
     }
+    options.onNudge?.();
     const result = await driver.nudge(resolved.target, nudgeText(wake));
     if (result.ok) {
       acked.push(wake.id);
@@ -249,7 +253,7 @@ export async function watch(options: {
   runCommand?: CommandRunner;
   log?: (message: string) => void;
   /** When set, the first poll's workspace_id scopes the lock before any nudge. */
-  lock?: { home?: string; force?: boolean };
+  lock?: { home?: string; force?: boolean; reclaim?: { pid: number; token: string; startedAt: string } };
   /**
    * Per-agent mode: `key` is this agent's own key (rsk_). The server returns only this agent's wakes. Before the
    * first leasing poll the watcher identifies itself with `{"lease": false}`, refuses to start beside a legacy
@@ -260,6 +264,14 @@ export async function watch(options: {
   sleep?: (ms: number) => Promise<void>;
   /** Stops the loop after the current poll. */
   signal?: AbortSignal;
+  /**
+   * Phase deadlines for the OS supervisor. `attach` runs once the lock is held.
+   * A network backoff calls `note('sleep', delay)` so the deadline stays in the future while the loop waits.
+   */
+  progress?: {
+    attach: (identity: { pid: number; token: string; startedAt: string }) => void;
+    note: (phase: 'poll' | 'nudge' | 'ack' | 'sleep', budgetMs: number) => void;
+  };
 }): Promise<WatchResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const log = options.log ?? console.error;
@@ -300,7 +312,8 @@ export async function watch(options: {
           const name = typeof who.agent_name === 'string' && who.agent_name ? who.agent_name : options.agent.name;
           const acquired = acquireAgentWatcherLock({
             home: options.lock.home,
-            force: options.lock.force,
+            force: options.lock.reclaim ? false : options.lock.force,
+            reclaim: options.lock.reclaim,
             origin: base,
             workspaceId,
             agentId,
@@ -313,6 +326,7 @@ export async function watch(options: {
           hold = acquired.hold;
           agentWorkspace = workspaceId;
           unbind = bindWatcherLockLifecycle(hold.release);
+          options.progress?.attach({ pid: hold.pid, token: hold.token, startedAt: hold.startedAt });
           log(`[replyslip] watching ${base} for agent ${name} (workspace ${workspaceId}); only this agent's wakes`);
         } else if (options.agent && hold) {
           const check = hold.stillHeld();
@@ -324,6 +338,7 @@ export async function watch(options: {
           const legacy = agentWorkspace ? findLegacyWatcherLock({ home: options.lock?.home, origin: base, workspaceId: agentWorkspace }) : null;
           if (legacy) return { legacyBlocked: legacyWatcherRunningMessage(legacy.info.pid, legacy.info.origin, legacy.path) };
         }
+        options.progress?.note('poll', REQUEST_TIMEOUT_MS);
         const response = await relayRequest(
           fetchImpl,
           'poll',
@@ -358,8 +373,16 @@ export async function watch(options: {
             return { lockLost: true };
           }
         }
-        const acked = await nudgeWakes({ wakes: Array.isArray(payload.wakes) ? (payload.wakes as DueWake[]) : [], registry, checks, warned, log });
+        const acked = await nudgeWakes({
+          wakes: Array.isArray(payload.wakes) ? (payload.wakes as DueWake[]) : [],
+          registry,
+          checks,
+          warned,
+          log,
+          onNudge: () => options.progress?.note('nudge', NUDGE_BUDGET_MS),
+        });
         if (acked.length > 0) {
+          options.progress?.note('ack', REQUEST_TIMEOUT_MS);
           await relayRequest(
             fetchImpl,
             'ack',
@@ -379,6 +402,7 @@ export async function watch(options: {
         log(`[replyslip] ${err.step} failed (${err.reason}), retrying in ${formatDelay(delay)}`);
       }
       if (options.once) return {};
+      options.progress?.note('sleep', delay);
       await sleep(delay);
     }
     return {};

@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs';
 import { hostname, homedir, uptime } from 'node:os';
 import path from 'node:path';
+import { acquireFileLockSync, FILE_LOCK_WAIT_MS, FileLockError, lockHeld, releaseFileLock, type HeldFileLock } from './file-lock.ts';
 import { replyslipHome } from './register.ts';
 
 export type WatcherLockInfo = {
@@ -27,6 +28,8 @@ export type WatcherLockHold = {
   path: string;
   pid: number;
   startedAt: string;
+  /** Random per-acquire value. A supervisor may signal this pid only while the lock still carries it. */
+  token: string;
   release: () => void;
   /** Re-reads the main lock. `held` is false once another process rewrote or removed it. */
   stillHeld: () => { held: boolean; current: WatcherLockInfo | null };
@@ -54,7 +57,14 @@ export type AcquireWatcherLockOptions = {
   onBeforeTakeover?: () => void;
   /** Test hook: runs after this process publishes the lock and before it re-reads it. */
   onAfterCreate?: () => void;
+  /**
+   * Replace the main lock only when it still has this exact pid, token, and start time
+   * at the moment of the rename. A newer lock is left in place.
+   */
+  reclaim?: ReclaimLock;
 };
+
+export type ReclaimLock = { pid: number; token: string; startedAt: string };
 
 const LOCK_NAME = /^watcher-[0-9a-f]{16}\.lock$/;
 const TEMP_NAME = /^\.lock-(\d+)-[0-9a-f]{16}\.tmp$/;
@@ -312,7 +322,8 @@ export function acquireWatcherLock(options: AcquireWatcherLockOptions): AcquireW
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   removeStaleTemps(path.dirname(file), isAlive);
 
-  if (!options.force) {
+  return withAcquireMutex(home, () => {
+  if (!options.force && !options.reclaim) {
     const other = sameWorkspaceLock(home, file, options.workspaceId, options.watcherKey, self, isAlive);
     if (other) return running(other.info, other.path);
   }
@@ -325,6 +336,7 @@ export function acquireWatcherLock(options: AcquireWatcherLockOptions): AcquireW
     release();
   };
   return acquired;
+  });
 }
 
 function running(info: WatcherLockInfo, file: string): AcquireWatcherLockResult {
@@ -433,6 +445,7 @@ function writeAliases(
     }
     const temp = writeTemp(path.dirname(target), alias);
     try {
+      assertMutex();
       renameSync(temp, target);
       written.push(target);
     } catch {
@@ -469,6 +482,10 @@ export type AcquireAgentWatcherLockOptions = {
   hostname?: string;
   bootId?: string;
   isAlive?: (pid: number) => boolean;
+  /** Replace this agent's lock only when it still has this exact identity at rename time. */
+  reclaim?: ReclaimLock;
+  /** Test hook. Runs after the first identity check and before the check that guards the rename. */
+  onBeforeTakeover?: () => void;
 };
 
 function selfOf(options: { hostname?: string; bootId?: string; pid?: number }): Self {
@@ -529,6 +546,7 @@ export function acquireAgentWatcherLock(options: AcquireAgentWatcherLockOptions)
   const isAlive = options.isAlive ?? pidIsAlive;
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   removeStaleTemps(path.dirname(file), isAlive);
+  return withAcquireMutex(home, () => {
   const legacy = findLegacyWatcherLock({ ...options, home, origin });
   if (legacy) return { ok: false, reason: 'legacy', pid: legacy.info.pid, origin: legacy.info.origin, path: legacy.path };
   const identity: WatcherLockInfo = {
@@ -542,7 +560,14 @@ export function acquireAgentWatcherLock(options: AcquireAgentWatcherLockOptions)
     agentId: options.agentId,
     agentName: options.agentName,
   };
-  return acquireMain(file, identity, self, isAlive, { origin, watcherKey: '', force: options.force });
+  return acquireMain(file, identity, self, isAlive, {
+    origin,
+    watcherKey: '',
+    force: options.reclaim ? false : options.force,
+    reclaim: options.reclaim,
+    onBeforeTakeover: options.onBeforeTakeover,
+  });
+  });
 }
 
 /** Release on SIGINT, SIGTERM, and process exit. Returns a function that removes those listeners. */
@@ -571,15 +596,20 @@ function attempt(
   hooks: boolean,
   options: AcquireWatcherLockOptions,
 ): AcquireWatcherLockResult | 'lost' {
+  const reclaim = options.reclaim;
   const existing = readWatcherLock(file);
-  if (existing && lockIsCurrent(existing, self, isAlive) && !force) return running(existing, file);
+  if (reclaim) {
+    if (!matchesReclaim(existing, reclaim)) return refuseReclaim(existing, self, isAlive, file);
+  } else if (existing && lockIsCurrent(existing, self, isAlive) && !force) return running(existing, file);
   if (hooks) options.onBeforeTakeover?.();
   const after = readWatcherLock(file);
-  if (after && lockIsCurrent(after, self, isAlive) && !force) return running(after, file);
+  if (reclaim) {
+    if (!matchesReclaim(after, reclaim)) return refuseReclaim(after, self, isAlive, file);
+  } else if (after && lockIsCurrent(after, self, isAlive) && !force) return running(after, file);
 
   const temp = writeTemp(path.dirname(file), identity);
   try {
-    const placed = publish(temp, file, self, isAlive, force);
+    const placed = publish(temp, file, self, isAlive, force, reclaim);
     if (placed !== 'placed') {
       if (placed === 'lost') return 'lost';
       return { ok: false, reason: 'running', pid: placed.pid, origin: placed.origin, path: file };
@@ -595,13 +625,29 @@ function attempt(
   }
 }
 
+function matchesReclaim(info: WatcherLockInfo | null, reclaim: ReclaimLock): boolean {
+  return !!info && info.pid === reclaim.pid && (info.token ?? '') === reclaim.token && info.startedAt === reclaim.startedAt;
+}
+
+function refuseReclaim(
+  info: WatcherLockInfo | null,
+  self: Self,
+  isAlive: (pid: number) => boolean,
+  file: string,
+): AcquireWatcherLockResult | 'lost' {
+  if (info && lockIsCurrent(info, self, isAlive)) return running(info, file);
+  return 'lost';
+}
+
 function publish(
   temp: string,
   file: string,
   self: Self,
   isAlive: (pid: number) => boolean,
   force: boolean,
+  reclaim?: ReclaimLock,
 ): 'placed' | 'lost' | { pid: number; origin: string } {
+  assertMutex();
   try {
     renameSync(temp, file);
     return 'placed';
@@ -609,8 +655,15 @@ function publish(
     if (!isRenameConflict(err)) throw err;
   }
   const held = readWatcherLock(file);
-  if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid, origin: held.origin };
+  if (reclaim) {
+    if (!matchesReclaim(held, reclaim)) {
+      if (held && lockIsCurrent(held, self, isAlive)) return { pid: held.pid, origin: held.origin };
+      return 'lost';
+    }
+  } else if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid, origin: held.origin };
+  assertMutex();
   removeLock(file);
+  assertMutex();
   try {
     renameSync(temp, file);
     return 'placed';
@@ -641,6 +694,48 @@ function isRenameConflict(err: unknown): boolean {
   return code === 'EEXIST' || code === 'EPERM' || code === 'ENOTEMPTY';
 }
 
+const acquireDepth = new Map<string, number>();
+let mutexHold: HeldFileLock | null = null;
+
+function assertMutex(): void {
+  if (!mutexHold) return;
+  if (!lockHeld(mutexHold)) {
+    throw new FileLockError(`The lock helper for ${mutexHold.file} exited while the lock was held. The kernel lock is no longer held.`);
+  }
+}
+
+function withAcquireMutex<T>(home: string, fn: () => T): T {
+  const file = path.join(replyslipHome(home), 'acquire.mutex');
+  const depth = acquireDepth.get(file) ?? 0;
+  if (depth > 0) {
+    acquireDepth.set(file, depth + 1);
+    try {
+      return fn();
+    } finally {
+      const next = (acquireDepth.get(file) ?? 1) - 1;
+      if (next <= 0) acquireDepth.delete(file);
+      else acquireDepth.set(file, next);
+    }
+  }
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  acquireDepth.set(file, 1);
+  let held: HeldFileLock;
+  try {
+    held = acquireFileLockSync(file, { waitMs: FILE_LOCK_WAIT_MS });
+  } catch (err) {
+    acquireDepth.delete(file);
+    throw err;
+  }
+  mutexHold = held;
+  try {
+    return fn();
+  } finally {
+    acquireDepth.delete(file);
+    mutexHold = null;
+    releaseFileLock(held);
+  }
+}
+
 function removeLock(file: string): void {
   try {
     unlinkSync(file);
@@ -664,5 +759,5 @@ function createHold(file: string, identity: WatcherLockInfo): WatcherLockHold {
     const current = readWatcherLock(file);
     return { held: !released && sameHolder(current, identity), current };
   };
-  return { path: file, pid: identity.pid, startedAt: identity.startedAt, release, stillHeld };
+  return { path: file, pid: identity.pid, startedAt: identity.startedAt, token: identity.token ?? '', release, stillHeld };
 }

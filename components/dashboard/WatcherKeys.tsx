@@ -13,7 +13,7 @@ async function fetchWatcherKeys(): Promise<WatcherKey[]> {
 
 /**
  * Legacy keys for the machine-wide `replyslip watch --key-file`. A key belongs to the workspace, not to one agent.
- * New setups don't need one: each local agent runs `watch --name <name>` with its own key. Existing keys stay listed
+ * New setups don't need one: each local agent runs `supervise --install --name <name>` with its own key. Existing keys stay listed
  * and revocable; creating one is tucked behind a closed "legacy" disclosure.
  */
 export function WatcherKeys() {
@@ -107,8 +107,8 @@ export function WatcherKeys() {
           <ol>
             <li>Stop the old watcher first.</li>
             <li>
-              Start one watcher per local agent, each in its own pane:{' '}
-              <code translate="no">node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;</code>
+              Install one detached watcher per local agent. The same command installs the 120 second OS timer:{' '}
+              <code translate="no">node &quot;$HOME/.replyslip/replyslip.mjs&quot; supervise --install --name &lt;name&gt;</code>
             </li>
             <li>Revoke the old watcher key below.</li>
           </ol>

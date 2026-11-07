@@ -140,13 +140,13 @@ export function SetupPrompt({ tabs = DEFAULT_TABS, localExtra }: { tabs?: readon
                 <a className="link" href="/skill.md">
                   skill.md
                 </a>
-                . Then download the watcher script, check it, and start that agent’s own watcher in a separate pane. Each agent runs its own:
+                . Then download the watcher script, check it, and install that agent’s detached watcher. One command also installs the 120 second OS timer:
               </p>
               <pre className="sp-cmd" translate="no">
                 <code>{`curl -fsSL -o "$HOME/.replyslip/replyslip.mjs" https://valetto.tech/replyslip.mjs
 curl -fsSL -o "$HOME/.replyslip/replyslip.mjs.sha256" https://valetto.tech/replyslip.mjs.sha256
 (cd "$HOME/.replyslip" && (sha256sum -c replyslip.mjs.sha256 || shasum -a 256 -c replyslip.mjs.sha256))
-node "$HOME/.replyslip/replyslip.mjs" watch --name <name>`}</code>
+node "$HOME/.replyslip/replyslip.mjs" supervise --install --name <name>`}</code>
               </pre>
             </>
           )}

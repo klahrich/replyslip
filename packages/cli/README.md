@@ -20,7 +20,17 @@ npx replyslip key-path <name>   # prints the key file path, for an MCP config
 
 ## Run the watcher
 
-Each local agent runs its own watcher, with its own key from `~/.replyslip/agents/<name>.json`, and it wakes only that agent's pane:
+Each local agent runs its own watcher, with its own key from `~/.replyslip/agents/<name>.json`, and it wakes only that agent's pane. Onboarding is one command on this same checksummed file. It starts the watcher detached and installs a 120 second OS timer (macOS LaunchAgent, Linux systemd --user, Windows Task Scheduler). The timer does not type into a pane.
+
+```sh
+node "$HOME/.replyslip/replyslip.mjs" supervise --install --name <name>
+node "$HOME/.replyslip/replyslip.mjs" supervise --status
+node "$HOME/.replyslip/replyslip.mjs" supervise --stop --name <name>
+```
+
+`supervise --stop` is a deliberate stop and survives reboot. Closing the laptop, logging out, and shutting down are not. Install again to clear the stop. macOS and Linux need a logged-in user session. Windows Task Scheduler uses `/IT` (logged on only) and a `tick.cmd` so paths with spaces stay quoted. Other operating systems get an error and no timer.
+
+The watcher the timer starts is:
 
 ```sh
 node "$HOME/.replyslip/replyslip.mjs" watch --status
@@ -35,7 +45,7 @@ Legacy, machine-wide (one workspace watcher key for every local agent):
 npx replyslip watch --key-file ~/.replyslip/<machine>.watcher-key [--url https://valetto.tech]
 ```
 
-To move off it: stop the legacy watcher, start one per-agent `watch --name` per agent, and revoke the watcher key under **Watchers**. Run `watch --status` first: one legacy watcher runs per workspace whatever server address it polls, and a second `watch` for the same workspace exits and prints the pid, address, and lock file of the one already running. Pass `--force` only when that pid is not a ReplySlip watcher; it never touches a live lock from an older CLI. `--url` with no value is an error. Like `register`, `--url` defaults to `REPLYSLIP_URL`, then `https://valetto.tech`. Pass the watcher key with `--key-file` (preferred, mode 600), `--key`, or `REPLYSLIP_WATCHER_KEY`. The default poll interval is 3 seconds (`--interval <ms>`, minimum 500). The driver (herdr or Orca) comes from each agent's delivery setting, not a flag. herdr 0.8.0 or newer must be on `PATH` for herdr agents; for Orca, `orca` must be on `PATH` or `REPLYSLIP_ORCA_BIN` must name the binary.
+To move off it: stop the legacy watcher, run `supervise --install --name <name>` for each agent, and revoke the watcher key under **Watchers**. Run `watch --status` first: one legacy watcher runs per workspace whatever server address it polls, and a second `watch` for the same workspace exits and prints the pid, address, and lock file of the one already running. Pass `--force` only when that pid is not a ReplySlip watcher; it never touches a live lock from an older CLI. `--url` with no value is an error. Like `register`, `--url` defaults to `REPLYSLIP_URL`, then `https://valetto.tech`. Pass the watcher key with `--key-file` (preferred, mode 600), `--key`, or `REPLYSLIP_WATCHER_KEY`. The default poll interval is 3 seconds (`--interval <ms>`, minimum 500). The driver (herdr or Orca) comes from each agent's delivery setting, not a flag. herdr 0.8.0 or newer must be on `PATH` for herdr agents; for Orca, `orca` must be on `PATH` or `REPLYSLIP_ORCA_BIN` must name the binary.
 
 The watcher keeps running through network errors, timeouts, `429`, and `5xx` responses. It logs one line per failure (`poll failed (502), retrying in 6s`), waits the poll interval, doubles up to 60 seconds, and resets after a good poll. It exits only when the relay rejects the key (`401`/`403`), or when the first poll gets a `404` or a non-JSON page (`No ReplySlip server at <origin>. Check --url.`). A `404` after a good poll is retried like any other failure. Each delivered wake logs one line, for example `woke codex via herdr (task 1a2b3c4d)`. A driver is checked the first time a wake needs it, so herdr-only machines never see an Orca warning. With `--once`, a failed poll exits 1.
 
