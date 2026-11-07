@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs';
 import { hostname, homedir, uptime } from 'node:os';
 import path from 'node:path';
+import { acquireFileLockSync, FILE_LOCK_WAIT_MS, releaseFileLock, type HeldFileLock } from './file-lock.ts';
 import { replyslipHome } from './register.ts';
 
 export type WatcherLockInfo = {
@@ -706,49 +707,18 @@ function withAcquireMutex<T>(home: string, fn: () => T): T {
   }
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   acquireDepth.set(file, 1);
-  const fd = lockAcquireMutex(file);
+  let held: HeldFileLock;
+  try {
+    held = acquireFileLockSync(file, { waitMs: FILE_LOCK_WAIT_MS });
+  } catch (err) {
+    acquireDepth.delete(file);
+    throw err;
+  }
   try {
     return fn();
   } finally {
     acquireDepth.delete(file);
-    try {
-      closeSync(fd);
-    } catch {
-      // Already closed.
-    }
-    try {
-      unlinkSync(file);
-    } catch {
-      // The next acquire retries.
-    }
-  }
-}
-
-function lockAcquireMutex(file: string): number {
-  for (;;) {
-    try {
-      const fd = openSync(file, 'wx', 0o600);
-      writeSync(fd, `${process.pid}\n`);
-      return fd;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      let holder = 0;
-      try {
-        holder = Number(readFileSync(file, 'utf8'));
-      } catch {
-        holder = 0;
-      }
-      if (holder > 0 && holder !== process.pid && !pidIsAlive(holder)) {
-        try {
-          unlinkSync(file);
-        } catch {
-          // Another acquire removed it.
-        }
-        continue;
-      }
-      const gate = new Int32Array(new SharedArrayBuffer(4));
-      Atomics.wait(gate, 0, 0, 5);
-    }
+    releaseFileLock(held);
   }
 }
 

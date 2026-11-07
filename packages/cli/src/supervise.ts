@@ -9,6 +9,7 @@ import { agentKeyPath } from './register.ts';
 import { redactSecrets } from './redact.ts';
 import { identifyProcess, killLockAllowed, killSpawnAllowed, watchCommandForAgent, type ProcessIdentity } from './process-identity.ts';
 import { decideSupervision, type SuperviseDecision } from './supervise-decide.ts';
+import { FileLockError } from './file-lock.ts';
 import { withAgentOp } from './supervise-lock.ts';
 import { buildInstallPlan, type InstallPlan, type InstallPlanInput, type PlannedCommand } from './supervise-os.ts';
 import { listLiveWatcherLocks, pidIsAlive, type WatcherLockInfo } from './watcher-lock.ts';
@@ -175,7 +176,9 @@ export async function installSupervision(name: string, io: SuperviseIo = {}): Pr
       message: `${preflightMessage(plan.platform, applied.message)} Unit files were written, but the timer is not confirmed. The watcher was not started.`,
     };
   }
-  const started = await withAgentOp(home, name, async () => {
+  let started: SuperviseResult;
+  try {
+    started = await withAgentOp(home, name, async () => {
     if (readSuperviseState(home, name).epoch !== epochAtInvoke) {
       return {
         ok: false as const,
@@ -190,6 +193,11 @@ export async function installSupervision(name: string, io: SuperviseIo = {}): Pr
     enrollAgent(home, name);
     return ensureWatcher(name, io, scriptPath, nodePath, true);
   });
+  } catch (err) {
+    const message = lockWaitMessage(err);
+    if (message) return { ok: false, message };
+    throw err;
+  }
   if (!started.ok) return started;
   const lines = [...plan.notes, `Enrolled ${name}. The timer runs this same script: ${scriptPath}`, ...started.lines];
   return { ok: true, lines };
@@ -198,7 +206,13 @@ export async function installSupervision(name: string, io: SuperviseIo = {}): Pr
 export async function stopSupervision(name: string, io: SuperviseIo = {}): Promise<SuperviseResult> {
   const checked = checkName(name);
   if (checked) return { ok: false, message: checked };
-  return withAgentOp(io.home, name, () => stopLocked(name, io));
+  try {
+    return await withAgentOp(io.home, name, () => stopLocked(name, io));
+  } catch (err) {
+    const message = lockWaitMessage(err);
+    if (message) return { ok: false, message };
+    throw err;
+  }
 }
 
 export async function uninstallSupervision(options: { name?: string; all?: boolean }, io: SuperviseIo = {}): Promise<SuperviseResult> {
@@ -210,11 +224,19 @@ export async function uninstallSupervision(options: { name?: string; all?: boole
   }
   const lines: string[] = [];
   for (const name of names) {
-    const stopped = await withAgentOp(io.home, name, async () => {
-      const result = await stopLocked(name, io);
-      unenrollAgent(io.home, name);
-      return result;
-    });
+    let stopped: SuperviseResult;
+    try {
+      stopped = await withAgentOp(io.home, name, async () => {
+        const result = await stopLocked(name, io);
+        unenrollAgent(io.home, name);
+        return result;
+      });
+    } catch (err) {
+      const message = lockWaitMessage(err);
+      if (!message) throw err;
+      lines.push(message);
+      continue;
+    }
     if (!stopped.ok) lines.push(stopped.message);
     else lines.push(...stopped.lines);
   }
@@ -277,7 +299,17 @@ async function stopLocked(name: string, io: SuperviseIo): Promise<SuperviseResul
 }
 
 async function tickAgent(name: string, io: SuperviseIo): Promise<string> {
-  return withAgentOp(io.home, name, () => tickLocked(name, io));
+  try {
+    return await withAgentOp(io.home, name, () => tickLocked(name, io));
+  } catch (err) {
+    const message = lockWaitMessage(err);
+    if (message) return message;
+    throw err;
+  }
+}
+
+function lockWaitMessage(err: unknown): string | null {
+  return err instanceof FileLockError ? err.message : null;
 }
 
 async function tickLocked(name: string, io: SuperviseIo): Promise<string> {

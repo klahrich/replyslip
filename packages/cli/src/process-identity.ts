@@ -171,6 +171,30 @@ function cimCreationMs(text: string): number | null {
   return localAsUtc - offsetMin * 60_000;
 }
 
+let ownStart: number | null | undefined;
+
+/** OS start time of this process. Null when this host cannot report it. */
+export function ownProcessStartedAtMs(): number | null {
+  if (ownStart === undefined) ownStart = processStartedAtMs(process.pid);
+  return ownStart;
+}
+
+/** OS start time of `pid`. Null when it cannot be read. The same pid is not cached: reuse must be visible. */
+export function processStartedAtMs(pid: number): number | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    if (process.platform === 'linux') {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const procStat = readFileSync('/proc/stat', 'utf8');
+      const btime = Number(procStat.match(/^btime\s+(\d+)/m)?.[1]);
+      return linuxStartMs(stat, btime);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export async function identifyProcess(pid: number, platform: NodeJS.Platform = process.platform): Promise<ProcessIdentity | null> {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   try {
