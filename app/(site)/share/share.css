@@ -468,6 +468,7 @@
 
 .sg-more {
   margin-top: 14px;
+  scroll-margin-top: 108px;
   padding: 0 18px;
   border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
   border-radius: 14px;
