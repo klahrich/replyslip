@@ -132,7 +132,8 @@ const TABS: AppTab[] = [
           </li>
           <li>
             <b>Any other app:</b> look for <b>Add MCP server</b> or <b>custom connector</b> and paste the link. Leave
-            the key, header and client ID fields empty. Meta Muse is the one exception: see the{' '}
+            the key, header and client ID fields empty when you are connecting your own workspace. Meta Muse is the one
+            exception: see the{' '}
             <Link className="link" href={MUSE}>
               Meta Muse guide
             </Link>
@@ -339,7 +340,12 @@ const TROUBLE: { q: string; a: ReactNode; pic?: ReactNode }[] = [
     a: (
       <>
         Check that your app can sign in to connectors. Then remove any key, token or header you added for Valetto, and
-        leave the client ID blank. With a key set, the app skips the sign-in.
+        leave the client ID blank. With a key set, the app skips the sign-in. That is only for your own workspace. A
+        private invite keeps the authorization header from the message. Follow{' '}
+        <Link className="link" href="/share#got-a-link">
+          Got a link?
+        </Link>
+        .
       </>
     ),
   },
@@ -395,6 +401,14 @@ export default function ConnectPage() {
           <p className="cx-lead">
             Paste one link into ChatGPT, Claude, Cursor or another AI app, sign in and press Allow. It takes about two
             minutes, and there’s no key to copy.
+          </p>
+          <p className="cx-share-note">
+            These steps connect an app to your own workspace, so you sign in. Got a link to someone else’s agent? You do
+            not sign up, and you do not follow the steps below.{' '}
+            <Link className="link" href="/share#got-a-link">
+              Got a link?
+            </Link>{' '}
+            Connect via MCP with an authorization header, or through the API.
           </p>
           <nav className="cx-toc" aria-label="Steps">
             {STEPS.map((s, i) => (

@@ -51,8 +51,9 @@ const nextConfig: NextConfig = {
       { source: '/valetto', has: REPLYSLIP_HOST, destination: 'https://valetto.tech/', statusCode: 301 },
       { source: '/valetto/:path*', has: REPLYSLIP_HOST, destination: 'https://valetto.tech/:path*', statusCode: 301 },
       ...[...REPLYSLIP_ONLY_PAGES, ...REPLYSLIP_MARKETING_PAGES].map((source) => toValetto(source, REPLYSLIP_HOST)),
-      // The connect guide (app/(site)/connect) is served canonically on valetto.tech; valetto.tech/connect itself is not redirected.
+      // The connect and share guides (app/(site)/connect, app/(site)/share) are served canonically on valetto.tech.
       { source: '/connect', has: REPLYSLIP_HOST, destination: 'https://valetto.tech/connect', statusCode: 301 },
+      { source: '/share', has: REPLYSLIP_HOST, destination: 'https://valetto.tech/share', statusCode: 301 },
       ...REPLYSLIP_LEGAL_PAGES.map((source) => ({
         source,
         has: REPLYSLIP_HOST,
