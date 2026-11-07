@@ -27,6 +27,8 @@ export type WatcherLockHold = {
   path: string;
   pid: number;
   startedAt: string;
+  /** Random per-acquire value. A supervisor may signal this pid only while the lock still carries it. */
+  token: string;
   release: () => void;
   /** Re-reads the main lock. `held` is false once another process rewrote or removed it. */
   stillHeld: () => { held: boolean; current: WatcherLockInfo | null };
@@ -664,5 +666,5 @@ function createHold(file: string, identity: WatcherLockInfo): WatcherLockHold {
     const current = readWatcherLock(file);
     return { held: !released && sameHolder(current, identity), current };
   };
-  return { path: file, pid: identity.pid, startedAt: identity.startedAt, release, stillHeld };
+  return { path: file, pid: identity.pid, startedAt: identity.startedAt, token: identity.token ?? '', release, stillHeld };
 }

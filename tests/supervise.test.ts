@@ -1,0 +1,444 @@
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { once } from 'node:events';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
+import { hostname, tmpdir } from 'node:os';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { runReplyslip } from '../packages/cli/src/cli';
+import { killLockAllowed, killSpawnAllowed, linuxStartMs, parseWindowsIdentity } from '../packages/cli/src/process-identity';
+import { redactSecrets } from '../packages/cli/src/redact';
+import { decideSupervision } from '../packages/cli/src/supervise-decide';
+import { buildInstallPlan } from '../packages/cli/src/supervise-os';
+import { appendSuperviseLog, installSupervision, stopSupervision, supervisedEnv, verifyDistributedScript } from '../packages/cli/src/supervise';
+import { watch } from '../packages/cli/src/watch';
+import { machineBootId, watcherLockPath } from '../packages/cli/src/watcher-lock';
+import { emptySuperviseState, isStopped, readHold, readProgress, writeProgress } from '../packages/cli/src/watcher-progress';
+
+const KEY = 'rsk_CANARY_agent_key_do_not_print';
+const ORIGIN = 'https://relay.example';
+
+function capture() {
+  const out: string[] = [];
+  const err: string[] = [];
+  return { out, err, stdout: (line: string) => out.push(line), stderr: (line: string) => err.push(line) };
+}
+
+function liveChild() {
+  return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], { stdio: 'ignore' });
+}
+
+async function tempHome(): Promise<string> {
+  return mkdtemp(path.join(tmpdir(), 'replyslip-supervise-'));
+}
+
+function writeKey(home: string, name: string, apiKey = KEY) {
+  const dir = path.join(home, '.replyslip', 'agents');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, `${name}.json`), `${JSON.stringify({ name, api_key: apiKey, relay_url: ORIGIN })}\n`, { mode: 0o600 });
+}
+
+function writeScript(dir: string, body = '#!/usr/bin/env node\nprocess.exit(0)\n') {
+  const script = path.join(dir, 'replyslip.mjs');
+  writeFileSync(script, body);
+  const digest = createHash('sha256').update(body).digest('hex');
+  writeFileSync(`${script}.sha256`, `${digest}  replyslip.mjs\n`);
+  return script;
+}
+
+function writeAgentLock(home: string, name: string, pid: number, token: string, startedAt: string) {
+  const file = watcherLockPath(home, 'abcdef0123456789');
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(
+    file,
+    `${JSON.stringify({
+      pid,
+      startedAt,
+      hostname: hostname(),
+      bootId: machineBootId(),
+      origin: ORIGIN,
+      workspaceId: 'ws-1',
+      token,
+      agentId: 'agent-1',
+      agentName: name,
+    })}\n`,
+  );
+  return file;
+}
+
+const lock = { pid: 4242, token: 'tokentokentoken', startedAt: '2026-11-07T12:00:00.000Z' };
+
+function progress(deadlineAt: string, phase: 'poll' | 'nudge' | 'ack' | 'sleep' = 'poll') {
+  return { ...lock, phase, at: '2026-11-07T12:00:00.000Z', deadlineAt };
+}
+
+describe('supervision decisions', () => {
+  const now = Date.parse('2026-11-07T12:10:00.000Z');
+
+  it('starts a dead watcher and does not treat a modest timer delay as sleep', () => {
+    const dead = decideSupervision({
+      now,
+      stopped: false,
+      hold: null,
+      lockLive: false,
+      lock: null,
+      progress: null,
+      spawnAlive: false,
+      state: { ...emptySuperviseState(), lastCheckAt: new Date(now - 150_000).toISOString() },
+    });
+    expect(dead.decision).toEqual({ action: 'start', reason: 'missing' });
+
+    const lateWedge = decideSupervision({
+      now,
+      stopped: false,
+      hold: null,
+      lockLive: true,
+      lock,
+      progress: progress(new Date(now - 120_000).toISOString(), 'nudge'),
+      spawnAlive: true,
+      state: { ...emptySuperviseState(), lastCheckAt: new Date(now - 150_000).toISOString() },
+    });
+    expect(lateWedge.decision.action).toBe('kill-lock');
+    if (lateWedge.decision.action === 'kill-lock') expect(lateWedge.decision.reason).toBe('wedge');
+  });
+
+  it('keeps a network backoff that still has deadline, and defers a kill only across a long gap', () => {
+    const backoff = decideSupervision({
+      now,
+      stopped: false,
+      hold: null,
+      lockLive: true,
+      lock,
+      progress: progress(new Date(now + 10_000).toISOString(), 'sleep'),
+      spawnAlive: true,
+      state: { ...emptySuperviseState(), lastCheckAt: new Date(now - 120_000).toISOString() },
+    });
+    expect(backoff.decision).toMatchObject({ action: 'skip', reason: 'healthy' });
+
+    const slept = decideSupervision({
+      now,
+      stopped: false,
+      hold: null,
+      lockLive: true,
+      lock,
+      progress: progress(new Date(now - 120_000).toISOString(), 'nudge'),
+      spawnAlive: true,
+      state: { ...emptySuperviseState(), lastCheckAt: new Date(now - 11 * 60_000).toISOString() },
+    });
+    expect(slept.decision).toMatchObject({ action: 'skip', reason: 'defer-wedge' });
+  });
+
+  it('caps restarts, then allows one after the window, and keeps a deliberate stop', () => {
+    const restarts = Array.from({ length: 5 }, (_, index) => new Date(now - index * 60_000).toISOString());
+    const capped = decideSupervision({
+      now,
+      stopped: false,
+      hold: null,
+      lockLive: false,
+      lock: null,
+      progress: null,
+      spawnAlive: false,
+      state: { ...emptySuperviseState(), restarts },
+    });
+    expect(capped.decision).toMatchObject({ action: 'skip', reason: 'restart-cap' });
+
+    const later = decideSupervision({
+      now: now + 2 * 60 * 60 * 1000,
+      stopped: false,
+      hold: null,
+      lockLive: false,
+      lock: null,
+      progress: null,
+      spawnAlive: false,
+      state: { ...emptySuperviseState(), restarts },
+    });
+    expect(later.decision).toMatchObject({ action: 'start', reason: 'missing' });
+
+    const stopped = decideSupervision({
+      now,
+      stopped: true,
+      hold: null,
+      lockLive: false,
+      lock: null,
+      progress: null,
+      spawnAlive: false,
+      state: emptySuperviseState(),
+    });
+    expect(stopped.decision).toMatchObject({ action: 'skip', reason: 'stopped' });
+  });
+
+  it('does not kill a reused pid or an unrelated command', () => {
+    const identity = { cmdline: 'node /tmp/replyslip.mjs watch --name Bot', startedAtMs: Date.parse(lock.startedAt) + 120_000 };
+    expect(killLockAllowed({ lock, expected: lock, identity })).toMatchObject({ ok: false, reason: 'pid-reused' });
+    expect(
+      killLockAllowed({
+        lock,
+        expected: lock,
+        identity: { cmdline: 'node -e setInterval', startedAtMs: Date.parse(lock.startedAt) - 1000 },
+      }),
+    ).toMatchObject({ ok: false, reason: 'not-watcher' });
+    expect(
+      killLockAllowed({
+        lock: { ...lock, token: 'other' },
+        expected: lock,
+        identity: { cmdline: identity.cmdline, startedAtMs: Date.parse(lock.startedAt) - 1000 },
+      }),
+    ).toMatchObject({ ok: false, reason: 'lock-changed' });
+    expect(killSpawnAllowed({ identity: { cmdline: identity.cmdline, startedAtMs: null }, spawnedAt: lock.startedAt })).toMatchObject({
+      ok: false,
+      reason: 'unverified-process',
+    });
+    expect(killLockAllowed({ lock, expected: lock, identity: { cmdline: identity.cmdline, startedAtMs: Date.parse(lock.startedAt) - 1000 } })).toEqual({ ok: true });
+  });
+
+  it('parses a linux start time and a windows creation date', () => {
+    const stat = '4242 (node) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0';
+    expect(linuxStartMs(stat, 1_700_000_000)).toBe(1_700_000_000 * 1000 + 10_000);
+    const created = parseWindowsIdentity('{"CommandLine":"node C:\\\\replyslip.mjs watch --name Bot","CreationDate":"/Date(1700000000000)/"}');
+    expect(created?.startedAtMs).toBe(1_700_000_000_000);
+    expect(created?.cmdline).toContain('watch');
+  });
+});
+
+describe('supervision install and tick', () => {
+  function fakeRun(code = 0) {
+    const calls: string[][] = [];
+    return {
+      calls,
+      run: async (command: string, args: string[]) => {
+        calls.push([command, ...args]);
+        return { code, stdout: '', stderr: code === 0 ? '' : 'systemctl: Failed to connect to bus' };
+      },
+    };
+  }
+
+  it('refuses an unsupported OS, a bad checksum, and a systemd session that is not there', async () => {
+    const home = await tempHome();
+    const script = writeScript(home);
+    const unsupported = buildInstallPlan({
+      platform: 'freebsd',
+      home,
+      nodePath: process.execPath,
+      scriptPath: script,
+      pathEnv: '/usr/bin',
+    });
+    expect(unsupported).toMatchObject({ error: expect.stringContaining('no timer') });
+
+    writeFileSync(`${script}.sha256`, `${'ab'.repeat(32)}  replyslip.mjs\n`);
+    expect(verifyDistributedScript(script).ok).toBe(false);
+
+    writeScript(home);
+    writeKey(home, 'Bot');
+    const runner = fakeRun(1);
+    const failed = await installSupervision('Bot', {
+      home,
+      platform: 'linux',
+      scriptPath: script,
+      nodePath: process.execPath,
+      env: { PATH: '/usr/bin', REPLYSLIP_WATCHER_KEY: KEY },
+      run: runner.run,
+      spawnWatcher: () => {
+        throw new Error('should not start');
+      },
+    });
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.message).toMatch(/systemd user session|not installed/i);
+      expect(failed.message).not.toContain(KEY);
+    }
+    expect(runner.calls.some((call) => call[0] === 'systemctl')).toBe(true);
+  });
+
+  it('installs one linux timer for two agents, restarts neither when stopped, and reinstall clears the stop', async () => {
+    const home = await tempHome();
+    const script = writeScript(home);
+    writeKey(home, 'Alpha');
+    writeKey(home, 'Beta');
+    const calls: string[][] = [];
+    const spawned: string[] = [];
+    let pid = 50;
+    const sup = {
+      home,
+      platform: 'linux' as const,
+      scriptPath: script,
+      nodePath: '/usr/bin/node',
+      env: { PATH: '/usr/bin:/bin', REPLYSLIP_ORCA_BIN: '/opt/orca', REPLYSLIP_WATCHER_KEY: KEY },
+      run: async (command: string, args: string[]) => {
+        calls.push([command, ...args]);
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      spawnWatcher: (request: { name: string; scriptPath: string }) => {
+        spawned.push(`${request.name} ${request.scriptPath}`);
+        pid += 1;
+        return { pid };
+      },
+      alive: () => true,
+      identify: async () => ({ cmdline: 'node /usr/bin/replyslip.mjs watch --name Bot', startedAtMs: Date.now() - 1000 }),
+      kill: () => {
+        throw new Error('kill');
+      },
+    };
+    const io = capture();
+    expect(await runReplyslip(['supervise', '--install', '--name', 'Alpha'], { ...io, home, env: sup.env, supervise: sup })).toBe(0);
+    expect(await runReplyslip(['supervise', '--install', '--name', 'Beta'], { ...io, home, env: sup.env, supervise: sup })).toBe(0);
+    expect(spawned).toEqual([`Alpha ${script}`, `Beta ${script}`]);
+    const unitDir = path.join(home, '.config', 'systemd', 'user');
+    const unit = readFileSync(path.join(unitDir, 'replyslip-supervise.service'), 'utf8');
+    const timer = readFileSync(path.join(unitDir, 'replyslip-supervise.timer'), 'utf8');
+    expect(unit).toContain('supervise --once');
+    expect(timer).toContain('OnUnitActiveSec=120s');
+    expect(unit).toContain('/usr/bin/node');
+    expect(unit).toContain('REPLYSLIP_ORCA_BIN="/opt/orca"');
+    expect(unit).not.toContain(KEY);
+    expect(unit).not.toContain('Linger');
+    expect(calls.filter((call) => call[0] === 'systemctl' && call.includes('enable')).length).toBe(2);
+
+    const tick = capture();
+    expect(await runReplyslip(['supervise', '--once'], { ...tick, home, env: sup.env, supervise: { ...sup, now: () => Date.now() } })).toBe(0);
+    expect(tick.out.join('\n')).toMatch(/Alpha: starting/);
+    expect(tick.out.join('\n')).toMatch(/Beta: starting/);
+
+    const stopped = capture();
+    expect(await runReplyslip(['supervise', '--stop', '--name', 'Alpha'], { ...stopped, home, env: sup.env, supervise: sup })).toBe(0);
+    expect(isStopped(home, 'Alpha')).toBe(true);
+    expect(isStopped(home, 'Beta')).toBe(false);
+    const after = capture();
+    expect(await runReplyslip(['supervise', '--once'], { ...after, home, env: sup.env, supervise: sup })).toBe(0);
+    expect(after.out.join('\n')).toMatch(/Alpha: stopped/);
+    expect(after.out.join('\n')).toMatch(/Beta: starting/);
+
+    const again = capture();
+    expect(await runReplyslip(['supervise', '--install', '--name', 'Alpha'], { ...again, home, env: sup.env, supervise: sup })).toBe(0);
+    expect(isStopped(home, 'Alpha')).toBe(false);
+    expect(again.out.join('\n')).toMatch(/Watcher started for Alpha/);
+  });
+
+  it('does not signal an unrelated pid when stopping', async () => {
+    const home = await tempHome();
+    const child = liveChild();
+    const kills: number[] = [];
+    try {
+      writeAgentLock(home, 'Bot', child.pid ?? 0, 'abcabcabcabcabca', new Date().toISOString());
+      const result = await stopSupervision('Bot', {
+        home,
+        identify: async () => ({ cmdline: `${process.execPath} -e setInterval`, startedAtMs: Date.now() - 1000 }),
+        kill: (pid) => {
+          kills.push(pid);
+        },
+        alive: () => true,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message).toMatch(/not-watcher/);
+      expect(kills).toEqual([]);
+      expect(isStopped(home, 'Bot')).toBe(true);
+    } finally {
+      child.kill();
+      await once(child, 'exit');
+    }
+  });
+
+  it('records an auth hold without a deliberate stop, and a failed poll extends the sleep deadline', async () => {
+    const home = await tempHome();
+    writeKey(home, 'Bot');
+    const io = capture();
+    const fetchImpl: typeof fetch = async () => new Response('no', { status: 401 });
+    expect(await runReplyslip(['watch', '--once', '--name', 'Bot'], { ...io, home, env: {}, fetchImpl })).toBe(1);
+    expect(readHold(home, 'Bot')).toBe('auth');
+    expect(isStopped(home, 'Bot')).toBe(false);
+    expect(io.err.join('\n')).not.toContain(KEY);
+
+    const notes: Array<[string, number]> = [];
+    let fetches = 0;
+    const controller = new AbortController();
+    await watch({
+      url: ORIGIN,
+      key: KEY,
+      intervalMs: 3000,
+      agent: { name: 'Bot' },
+      lock: { home },
+      log: () => undefined,
+      signal: controller.signal,
+      sleep: async () => controller.abort(),
+      fetchImpl: async () => {
+        fetches += 1;
+        if (fetches === 1) {
+          return Response.json({ wakes: [], workspace_id: 'ws-1', agent_id: 'agent-1', agent_name: 'Bot' });
+        }
+        throw new Error('ECONNRESET');
+      },
+      progress: {
+        attach(identity) {
+          writeProgress(home, 'Bot', {
+            ...identity,
+            phase: 'poll',
+            at: new Date().toISOString(),
+            deadlineAt: new Date(Date.now() + 30_000).toISOString(),
+          });
+        },
+        note(phase, budgetMs) {
+          notes.push([phase, budgetMs]);
+          const current = readProgress(home, 'Bot');
+          if (!current) return;
+          writeProgress(home, 'Bot', {
+            ...current,
+            phase,
+            at: new Date().toISOString(),
+            deadlineAt: new Date(Date.now() + budgetMs).toISOString(),
+          });
+        },
+      },
+    });
+    expect(notes).toContainEqual(['sleep', 3000]);
+    const filed = readProgress(home, 'Bot');
+    expect(filed?.phase).toBe('sleep');
+    expect(Date.parse(filed?.deadlineAt ?? '')).toBeGreaterThan(Date.now() - 1000);
+  });
+
+  it('redacts keys from the supervisor log and keeps them out of scheduler text', async () => {
+    expect(redactSecrets(`authorization: Bearer ${KEY} {"api_key":"${KEY}"}`)).not.toContain(KEY);
+    const home = '/tmp/replyslip-home';
+    const plan = buildInstallPlan({
+      platform: 'win32',
+      home,
+      nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+      scriptPath: 'C:\\Users\\Ada\\.replyslip\\replyslip.mjs',
+      pathEnv: 'C:\\Program Files\\nodejs;C:\\Windows\\System32',
+      uid: undefined,
+    });
+    expect('files' in plan).toBe(true);
+    if (!('files' in plan)) return;
+    const cmd = plan.files[0]?.contents ?? '';
+    expect(cmd).toContain('"C:\\Program Files\\nodejs\\node.exe"');
+    expect(cmd).toContain('supervise --once');
+    expect(plan.commands[0]?.args).toEqual(expect.arrayContaining(['/IT', '/RL', 'LIMITED', '/MO', '2']));
+    expect(plan.commands[0]?.args.join(' ')).not.toContain('Program Files\\nodejs\\node.exe" "');
+    expect(JSON.stringify(plan)).not.toContain(KEY);
+
+    const darwin = buildInstallPlan({
+      platform: 'darwin',
+      home,
+      uid: 501,
+      nodePath: '/opt/homebrew/bin/node',
+      scriptPath: '/Users/ada/.replyslip/replyslip.mjs',
+      pathEnv: '/opt/homebrew/bin:/usr/bin',
+    });
+    if (!('files' in darwin)) throw new Error('darwin plan');
+    expect(darwin.files[0]?.contents).toContain('<key>StartInterval</key>');
+    expect(darwin.files[0]?.contents).not.toContain('KeepAlive');
+    expect(darwin.files[0]?.contents).toContain('<integer>120</integer>');
+
+    const logHome = await tempHome();
+    appendSuperviseLog(logHome, `bearer ${KEY}`);
+    expect(readFileSync(path.join(logHome, '.replyslip', 'supervise', 'supervise.log'), 'utf8')).not.toContain(KEY);
+
+    const env = supervisedEnv(
+      { nodePath: '/usr/bin/node', scriptPath: '/s', name: 'Bot', home: '/home/ada', pathEnv: '/usr/bin', orcaBin: '/opt/orca' },
+      { REPLYSLIP_WATCHER_KEY: KEY, PATH: '/evil', LANG: 'C' },
+    );
+    expect(env.REPLYSLIP_WATCHER_KEY).toBeUndefined();
+    expect(env.PATH).toBe('/usr/bin');
+    expect(env.REPLYSLIP_ORCA_BIN).toBe('/opt/orca');
+    expect(JSON.stringify(env)).not.toContain(KEY);
+  });
+});

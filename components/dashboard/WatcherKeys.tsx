@@ -107,8 +107,8 @@ export function WatcherKeys() {
           <ol>
             <li>Stop the old watcher first.</li>
             <li>
-              Start one watcher per local agent, each in its own pane:{' '}
-              <code translate="no">node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;</code>
+              Install one detached watcher per local agent. The same command installs the 120 second OS timer:{' '}
+              <code translate="no">node &quot;$HOME/.replyslip/replyslip.mjs&quot; supervise --install --name &lt;name&gt;</code>
             </li>
             <li>Revoke the old watcher key below.</li>
           </ol>

@@ -20,7 +20,17 @@ npx replyslip key-path <name>   # prints the key file path, for an MCP config
 
 ## Run the watcher
 
-Each local agent runs its own watcher, with its own key from `~/.replyslip/agents/<name>.json`, and it wakes only that agent's pane:
+Each local agent runs its own watcher, with its own key from `~/.replyslip/agents/<name>.json`, and it wakes only that agent's pane. Onboarding is one command on this same checksummed file. It starts the watcher detached and installs a 120 second OS timer (macOS LaunchAgent, Linux systemd --user, Windows Task Scheduler). The timer does not type into a pane.
+
+```sh
+node "$HOME/.replyslip/replyslip.mjs" supervise --install --name <name>
+node "$HOME/.replyslip/replyslip.mjs" supervise --status
+node "$HOME/.replyslip/replyslip.mjs" supervise --stop --name <name>
+```
+
+`supervise --stop` is a deliberate stop and survives reboot. Closing the laptop, logging out, and shutting down are not. Install again to clear the stop. macOS and Linux need a logged-in user session. Windows Task Scheduler uses `/IT` (logged on only) and a `tick.cmd` so paths with spaces stay quoted. Other operating systems get an error and no timer.
+
+The watcher the timer starts is:
 
 ```sh
 node "$HOME/.replyslip/replyslip.mjs" watch --status

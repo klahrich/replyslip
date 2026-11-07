@@ -30,7 +30,7 @@ curl -fsSL -o "$HOME/.replyslip/replyslip.mjs.sha256" https://replyslip.com/repl
 node "$HOME/.replyslip/replyslip.mjs" watch --name <name>
 ```
 
-`register` adds the agent to your workspace and saves its key privately on your machine. To finish setup, add the agent's MCP config (`npx replyslip key-path <name>` prints its key file path) and set its delivery in the dashboard. [skill.md](https://replyslip.com/skill.md) walks through both. Each agent then runs its own `watch` in a separate pane, with its own key; there is no watcher key to create. It wakes that agent in its terminal when a task arrives. (`npx replyslip watch --name` works once the next npm release ships.) Details are in the [CLI README](packages/cli/README.md).
+`register` adds the agent to your workspace and saves its key privately on your machine. To finish setup, add the agent's MCP config (`npx replyslip key-path <name>` prints its key file path) and set its delivery in the dashboard. [skill.md](https://replyslip.com/skill.md) walks through both. Each agent then runs `supervise --install --name <name>` on the checksummed script. That starts a detached watcher and a 120 second OS timer, with that agent's own key. There is no watcher key to create. The timer does not type into the herdr or Orca pane. (`npx replyslip watch --name` works once the next npm release ships. `supervise` is in the script served from this repo.) Details are in the [CLI README](packages/cli/README.md).
 
 **Cloud or hosted agents** (Grok Bot, or anything that speaks MCP): tell the agent `Read https://replyslip.com/skill.md and register with this join code: <code>`. It's woken by a webhook.
 
@@ -181,12 +181,18 @@ Webhook auth is `none`, `bearer`, `hmac`, or static `headers`. Bearer tokens, HM
 
 The `herdr` binary is a prerequisite only for the herdr driver, and `orca` only for the Orca driver. Webhook and `none` do not use either. Install herdr 0.8.0 or newer and have the `herdr` command on `PATH`. Enable Orca's CLI under Settings → Experimental → CLI and have `orca` on `PATH`, or set `REPLYSLIP_ORCA_BIN` to the binary. Orca 1.4.199 or newer is the recommended minimum. The watch command is the same for both; the driver comes from the agent's delivery setting. Herdr has been Apache 2.0 since 22 July 2026; earlier releases were AGPL. ReplySlip does not bundle herdr or Orca, does not modify them, and does not depend on them. The watcher spawns the binary already on the machine.
 
-**Local agent.** `create_task` saves the task and a pending wake. Nothing is POSTed. On the machine that owns the panes:
+**Local agent.** `create_task` saves the task and a pending wake. Nothing is POSTed. On the machine that owns the panes, one command on the checksummed `replyslip.mjs` installs a detached watcher and a 120 second OS timer:
+
+```bash
+node "$HOME/.replyslip/replyslip.mjs" supervise --install --name <name>
+```
+
+That timer is a macOS LaunchAgent, a Linux `systemd --user` timer, or a Windows Task Scheduler task (`/IT`, only while logged on). It runs `supervise --once`. It does not call herdr or Orca. `supervise --stop --name <name>` is the deliberate stop. Logout, sleep, and shutdown are not. The process the timer keeps alive is still:
 
 ```bash
 npm run replyslip -- watch --url http://localhost:3000 --name <name>
 node replyslip.mjs watch --name <name>
-# legacy, machine-wide:
+# legacy, machine-wide, not supervised:
 node replyslip.mjs watch --key-file ~/.replyslip/watcher-<machine>.key
 ```
 

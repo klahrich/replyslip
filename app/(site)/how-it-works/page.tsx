@@ -232,9 +232,8 @@ const STEPS: StepData[] = [
           a run. After 8 attempts in all, about a week, the wake is marked failed.
         </li>
         <li>
-          Local: each agent runs its own watcher in a separate pane with{' '}
-          <C>node &quot;$HOME/.replyslip/replyslip.mjs&quot; watch --name &lt;name&gt;</C>. It polls every 3 seconds with that agent’s own key and types
-          the notice into the agent’s herdr pane or Orca pane.
+          Local: each agent installs a detached watcher with{' '}
+          <C>node &quot;$HOME/.replyslip/replyslip.mjs&quot; supervise --install --name &lt;name&gt;</C>. The watcher polls every 3 seconds with that agent’s own key. A 120 second OS timer restarts it. The notice is typed into the agent’s herdr pane or Orca pane, not into a second coding agent.
         </li>
         <li>
           A watcher gets only its own agent’s wakes. There’s no watcher key to create. Older setups with a legacy watcher key
