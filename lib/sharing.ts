@@ -1137,37 +1137,36 @@ const INVITE_EXPIRED_MESSAGE = 'This invite has expired. Ask the owner for a new
 
 /**
  * A share created from an invite dies when that invite's expires_at passes.
- * Revoking the link is separate: a guest key keeps working until the guest is revoked or this expiry.
+ * Revoking the link without revoking guests does not waive this: issued keys work until
+ * expires_at, and not after, whether the link is later revoked or was already revoked.
  * A missing invite row fails closed. Shares with no invite (handle or customer) are unchanged.
  */
 export async function assertShareInviteLive(db: Db, inviteId: string | null): Promise<void> {
   if (!inviteId) return;
   const [invite] = await db
-    .select({ revokedAt: agentInvites.revokedAt, expiresAt: agentInvites.expiresAt })
+    .select({ expiresAt: agentInvites.expiresAt })
     .from(agentInvites)
     .where(eq(agentInvites.id, inviteId))
     .limit(1);
-  if (!invite || invite.revokedAt) {
-    if (!invite) throw new HttpError(401, 'invite_expired', INVITE_EXPIRED_MESSAGE);
-    return;
+  if (!invite || invite.expiresAt.getTime() <= Date.now()) {
+    throw new HttpError(401, 'invite_expired', INVITE_EXPIRED_MESSAGE);
   }
-  if (invite.expiresAt.getTime() <= Date.now()) throw new HttpError(401, 'invite_expired', INVITE_EXPIRED_MESSAGE);
 }
 
 /**
  * The sender's read or answer of a task they sent through an invite grant.
- * A revoked share stays readable so they can see the task fail with "access revoked".
- * An expired invite does not: get, list, and answer stop for that grant only.
+ * Before expires_at, a revoked share stays readable so they can see "access revoked".
+ * After expires_at the grant is dead even if the link or the share was revoked.
  */
 export async function assertSentGrantLive(db: Db, task: { toAgentId: string; fromWorkspaceId: string | null; workspaceId: string }, callerWorkspaceId: string): Promise<void> {
   if (!task.fromWorkspaceId || task.fromWorkspaceId !== callerWorkspaceId) return;
   if (task.workspaceId === callerWorkspaceId) return;
   const [share] = await db
-    .select({ inviteId: agentShares.inviteId, status: agentShares.status })
+    .select({ inviteId: agentShares.inviteId })
     .from(agentShares)
     .where(and(eq(agentShares.agentId, task.toAgentId), eq(agentShares.guestWorkspaceId, callerWorkspaceId)))
     .limit(1);
-  if (!share || share.status === 'revoked') return;
+  if (!share) return;
   await assertShareInviteLive(db, share.inviteId);
 }
 
@@ -1188,11 +1187,11 @@ export async function listExternalGrants(
     if (!owner?.handle) continue;
     if (share.inviteId) {
       const [invite] = await db
-        .select({ revokedAt: agentInvites.revokedAt, expiresAt: agentInvites.expiresAt })
+        .select({ expiresAt: agentInvites.expiresAt })
         .from(agentInvites)
         .where(eq(agentInvites.id, share.inviteId))
         .limit(1);
-      if (invite && !invite.revokedAt && invite.expiresAt.getTime() <= Date.now()) continue;
+      if (!invite || invite.expiresAt.getTime() <= Date.now()) continue;
     }
     const offers = await db
       .select({ name: agentOffers.name })

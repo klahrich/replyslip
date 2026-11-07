@@ -641,16 +641,15 @@ export async function listTasks(
   if (filter.status) conditions.push(eq(tasks.status, filter.status));
   // A request in review is invisible to its target bot until the owner approves it.
   conditions.push(sql`not (${tasks.toAgentId} = ${caller.agentId} and ${tasks.status} = 'in_review')`);
-  // An expired invite grant is omitted. Fetching that task by id returns invite_expired.
-  // A revoked share is still listed so the sender can see "access revoked".
+  // An expired invite grant is omitted, including when the link was revoked without revoking guests.
+  // Fetching that task by id returns invite_expired. A revoked share whose invite has not expired
+  // stays listed so the sender can see "access revoked".
   conditions.push(sql`not exists (
     select 1 from agent_shares s
     inner join agent_invites i on i.id = s.invite_id
     where s.agent_id = ${tasks.toAgentId}
       and s.guest_workspace_id = ${tasks.fromWorkspaceId}
       and ${tasks.fromWorkspaceId} = ${caller.workspaceId}
-      and s.status <> 'revoked'
-      and i.revoked_at is null
       and i.expires_at <= now()
   )`);
   conditions.push(...pageConditions(filter));
