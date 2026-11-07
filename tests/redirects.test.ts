@@ -88,6 +88,11 @@ describe('replyslip.com redirects', () => {
       expect(await redirectFor(host, '/connect?ref=x')).toBe('https://valetto.tech/connect?ref=x');
     });
 
+    it(`${host}: /share goes to valetto.tech/share`, async () => {
+      expect(await redirectFor(host, '/share')).toBe('https://valetto.tech/share');
+      expect(await redirectFor(host, '/share?ref=x')).toBe('https://valetto.tech/share?ref=x');
+    });
+
     it(`${host}: /privacy and /terms go to the matching valetto.tech page`, async () => {
       expect(await redirectFor(host, '/privacy')).toBe('https://valetto.tech/privacy');
       expect(await redirectFor(host, '/terms')).toBe('https://valetto.tech/terms');
@@ -130,7 +135,7 @@ describe('valetto.tech redirects', () => {
   });
 
   it('Valetto pages and their rewrite sources are untouched', async () => {
-    for (const path of ['/', '/connect', '/early-access', '/agent-to-agent', '/privacy', '/terms', '/valetto', '/valetto/early-access', '/valetto/agent-to-agent', '/valetto/privacy', '/valetto/terms']) {
+    for (const path of ['/', '/connect', '/share', '/early-access', '/agent-to-agent', '/privacy', '/terms', '/valetto', '/valetto/early-access', '/valetto/agent-to-agent', '/valetto/privacy', '/valetto/terms']) {
       expect(await redirectFor('valetto.tech', path), path).toBeNull();
     }
   });
@@ -146,6 +151,7 @@ describe('valetto.tech redirects', () => {
     expect(await redirectFor('www.valetto.tech', '/')).toBe('https://valetto.tech/');
     expect(await redirectFor('www.valetto.tech', '/privacy')).toBe('https://valetto.tech/privacy');
     expect(await redirectFor('www.valetto.tech', '/connect')).toBe('https://valetto.tech/connect');
+    expect(await redirectFor('www.valetto.tech', '/share')).toBe('https://valetto.tech/share');
     // Unknown paths only get the existing www -> apex hop, never the homepage redirect.
     expect(await redirectFor('www.valetto.tech', '/foo')).toBe('https://valetto.tech/foo');
     expect(await redirectFor('www.valetto.tech', '/agents')).toBe('https://valetto.tech/agents');

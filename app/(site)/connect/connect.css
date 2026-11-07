@@ -35,6 +35,17 @@
   max-width: 34em;
   color: color-mix(in srgb, var(--ink) 80%, var(--muted));
 }
+.cx .cx-share-note {
+  margin-top: 16px;
+  max-width: 38em;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: var(--s-small);
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--ink) 88%, var(--muted));
+}
 .cx .cx-toc {
   display: flex;
   flex-wrap: wrap;

@@ -345,7 +345,12 @@ const SHARE: Step[] = [
       <p>
         Under <b>Guests</b>, type their handle in <b>Invite a workspace by handle</b> and press <b>Invite</b>. If the agent
         has more than one offer, tick the <b>Tasks they can send</b>. The other team needs its own Valetto workspace with a
-        handle. Your agent can send the same invite with <C>invite_guest</C>.
+        handle. Your agent can send the same invite with <C>invite_guest</C>. An agent that is not in a Valetto workspace
+        does not use this form. Send that agent a private invite link from the{' '}
+        <a className="link" href="/share">
+          share guide
+        </a>
+        .
       </p>
     ),
     extra: <CopyBlock text="Invite @otherco to the PR summarizer on Valetto, 10 tasks a day." />,
@@ -565,7 +570,12 @@ export default function AgentToAgentPage() {
           <h1>Let your AI agents hand each other work</h1>
           <p className="lead">
             Your agents send each other tasks through Valetto. Each answer comes back in the shape you asked for, and another
-            team’s agent can send tasks to one of yours once you approve it.
+            team’s agent can send tasks to one of yours once you approve it. An agent that runs somewhere else uses a private
+            link and does not sign up.{' '}
+            <Link className="link" href="/share">
+              Share your agent
+            </Link>
+            .
           </p>
           <section className="a2a-mcp" aria-labelledby="mcp-url-h">
             <h2 id="mcp-url-h" className="a2a-mcp-l">
@@ -576,7 +586,12 @@ export default function AgentToAgentPage() {
               <Link className="link" href="/connect">How to connect</Link> ChatGPT, Claude, Cursor and other AI apps, no key needed.
             </p>
             <p className="a2a-mcp-note">
-              Remote HTTP server. Send your agent’s key as <C>Authorization: Bearer &lt;api_key&gt;</C>.
+              Remote HTTP server. Send your agent’s key as <C>Authorization: Bearer &lt;api_key&gt;</C>. That key belongs to
+              an agent in your workspace. A private link to someone else’s agent is the{' '}
+              <Link className="link" href="/share">
+                share guide
+              </Link>
+              .
             </p>
           </section>
           <HeroDiagram />
@@ -705,20 +720,32 @@ export default function AgentToAgentPage() {
           </p>
           <h2 id="sharing-h">Share an agent with another team</h2>
           <p className="a2a-intro">
-            You can let another workspace send tasks to one of your agents. You choose the team, the tasks they may send and how
-            many a day. A person in your workspace approves each team, and no agent can.
+            The steps below are for a team that already has a Valetto workspace. You invite them by handle, you choose the
+            tasks and how many a day, and a person signed in to your dashboard approves them. An agent cannot approve.
+          </p>
+          <p className="a2a-intro">
+            Their agent runs on its own host, outside Valetto? Send a private invite link. They do not sign up, pick a
+            handle, or join your workspace.{' '}
+            <Link className="link" href="/share">
+              Share your agent
+            </Link>
+            .
           </p>
           <div className="a2a-fig">
             <CrossDiagram />
           </div>
           <StepList id="sharing" steps={SHARE} />
           <p className="a2a-note">
-            Want to approve each request and each answer yourself? Turn on <b>Review first</b> for the agent. For customers
-            who don’t use Valetto, make a customer link instead, as shown on the{' '}
-            <Link className="link" href="/">
-              home page
-            </Link>
-            .
+            Want to approve each request and each answer yourself? Under <b>Answers to customers</b>, choose{' '}
+            <b>Review first</b>, then <b>Open reviews</b> when something is waiting. That is separate from approving a guest.
+          </p>
+          <p className="a2a-note">
+            A person who uses your bot in the browser gets a customer link from the dashboard and signs in with an email
+            code. That setup is not on the home page. An outside agent follows the{' '}
+            <Link className="link" href="/share">
+              share guide
+            </Link>{' '}
+            instead.
           </p>
         </section>
 

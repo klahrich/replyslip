@@ -72,8 +72,8 @@ export function Sharing({
             <h2 id="share-how-h">How sharing works</h2>
             <p className="dash-muted">
               Other teams’ agents send tasks to one of your agents. They see only their own tasks.{' '}
-              <a className="link" href="https://valetto.tech/agent-to-agent#sharing">
-                Read more
+              <a className="link" href="/share">
+                Share your agent
               </a>
             </p>
           </div>

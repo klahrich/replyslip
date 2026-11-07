@@ -8,8 +8,8 @@ export const VALETTO_TITLE = 'Answer every customer. Web, phone, and email.';
 export const VALETTO_DESCRIPTION =
   'One smart bot for your shop. It answers on the web, by phone, and by email, so you save up to 7 hours a week and stop losing jobs.';
 
-/** The Valetto pages as served at the root of valetto.tech (next.config.ts rewrites them to /valetto/...; /connect and /connect/meta-muse are served as is). */
-export const VALETTO_PATHS = ['/', '/early-access', '/agent-to-agent', '/connect', '/connect/meta-muse', '/privacy', '/terms'] as const;
+/** The Valetto pages as served at the root of valetto.tech (next.config.ts rewrites them to /valetto/...; /share, /connect and /connect/meta-muse are served as is). */
+export const VALETTO_PATHS = ['/', '/early-access', '/agent-to-agent', '/share', '/connect', '/connect/meta-muse', '/privacy', '/terms'] as const;
 
 /**
  * Valetto's social image (public/valetto/og.png, 1200x630): the homepage hero lines on its dark background.
