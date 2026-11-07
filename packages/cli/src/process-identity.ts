@@ -20,10 +20,24 @@ export type LockIdentity = { pid: number; token: string; startedAt: string };
  * `replyslip` must appear, and `watch` must be its own argument.
  */
 export function isReplyslipWatchCommand(cmdline: string): boolean {
-  const flat = cmdline.replace(/\0/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!/replyslip/i.test(flat)) return false;
-  const parts = splitCommand(flat);
-  return parts.some((part) => part === 'watch');
+  const parts = commandParts(cmdline);
+  return parts.some((part) => /replyslip/i.test(part)) && parts.some((part) => part === 'watch');
+}
+
+/** True only for this agent's watcher command, not another agent's and not `supervise`. */
+export function watchCommandForAgent(cmdline: string, name: string): boolean {
+  if (!isReplyslipWatchCommand(cmdline)) return false;
+  const parts = commandParts(cmdline);
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i] ?? '';
+    if (part === '--name' && parts[i + 1] === name) return true;
+    if (part === `--name=${name}`) return true;
+  }
+  return false;
+}
+
+function commandParts(cmdline: string): string[] {
+  return splitCommand(cmdline.replace(/\0/g, ' ').replace(/\s+/g, ' ').trim());
 }
 
 function splitCommand(flat: string): string[] {

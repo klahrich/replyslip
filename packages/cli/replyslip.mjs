@@ -192,8 +192,8 @@ async function readAgentCredentials(name, options = {}) {
 // packages/cli/src/supervise.ts
 import { spawn } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
-import { accessSync, appendFileSync, chmodSync as chmodSync3, closeSync as closeSync3, mkdirSync as mkdirSync3, openSync as openSync3, readFileSync as readFileSync4, unlinkSync as unlinkSync3, writeFileSync } from "node:fs";
-import path5 from "node:path";
+import { accessSync, appendFileSync, chmodSync as chmodSync3, closeSync as closeSync4, mkdirSync as mkdirSync4, openSync as openSync4, readFileSync as readFileSync5, unlinkSync as unlinkSync4, writeFileSync } from "node:fs";
+import path6 from "node:path";
 
 // packages/cli/src/redact.ts
 function redactSecrets(text) {
@@ -222,10 +222,21 @@ var SUPERVISE_TASK_NAME = "ReplySlip Supervise";
 // packages/cli/src/process-identity.ts
 var execFile = promisify(execFileCb);
 function isReplyslipWatchCommand(cmdline) {
-  const flat = cmdline.replace(/\0/g, " ").replace(/\s+/g, " ").trim();
-  if (!/replyslip/i.test(flat)) return false;
-  const parts = splitCommand(flat);
-  return parts.some((part) => part === "watch");
+  const parts = commandParts(cmdline);
+  return parts.some((part) => /replyslip/i.test(part)) && parts.some((part) => part === "watch");
+}
+function watchCommandForAgent(cmdline, name) {
+  if (!isReplyslipWatchCommand(cmdline)) return false;
+  const parts = commandParts(cmdline);
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i] ?? "";
+    if (part === "--name" && parts[i + 1] === name) return true;
+    if (part === `--name=${name}`) return true;
+  }
+  return false;
+}
+function commandParts(cmdline) {
+  return splitCommand(cmdline.replace(/\0/g, " ").replace(/\s+/g, " ").trim());
 }
 function splitCommand(flat) {
   const parts = [];
@@ -444,8 +455,732 @@ function decideSupervision(input) {
   };
 }
 
-// packages/cli/src/supervise-os.ts
+// packages/cli/src/supervise-lock.ts
+import { closeSync as closeSync3, mkdirSync as mkdirSync3, openSync as openSync3, readFileSync as readFileSync4, unlinkSync as unlinkSync3, writeSync as writeSync3 } from "node:fs";
+import path4 from "node:path";
+
+// packages/cli/src/watcher-lock.ts
+import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeSync } from "node:fs";
+import { hostname, homedir as homedir2, uptime } from "node:os";
 import path2 from "node:path";
+var LOCK_NAME = /^watcher-[0-9a-f]{16}\.lock$/;
+var TEMP_NAME = /^\.lock-(\d+)-[0-9a-f]{16}\.tmp$/;
+var STALE_TEMP_MS = 6e4;
+var heldHere = /* @__PURE__ */ new Set();
+function holdKey(info) {
+  return `${info.pid}|${info.startedAt}|${info.token ?? ""}`;
+}
+function sameHolder(info, identity) {
+  return !!info && info.pid === identity.pid && info.startedAt === identity.startedAt && (info.token ?? "") === (identity.token ?? "") && info.hostname === identity.hostname && info.bootId === identity.bootId;
+}
+function normalizeOrigin(origin) {
+  return origin.replace(/\/+$/, "");
+}
+function keyHash(watcherKey) {
+  return createHash("sha256").update(watcherKey).digest("hex");
+}
+function scopeHash(material) {
+  return createHash("sha256").update(material).digest("hex").slice(0, 16);
+}
+function watcherScopeId(workspaceId, watcherKey) {
+  return workspaceId ? scopeHash(`workspace
+${workspaceId}`) : scopeHash(`key
+${keyHash(watcherKey)}`);
+}
+function agentWatcherScopeId(agentId) {
+  return scopeHash(`agent
+${agentId}`);
+}
+function legacyWatcherScopeId(origin, workspaceId, watcherKey) {
+  const normalized = normalizeOrigin(origin);
+  return scopeHash(workspaceId ? `${normalized}
+${workspaceId}` : `${normalized}
+${keyHash(watcherKey)}`);
+}
+var HOSTED_ORIGINS = [
+  "https://valetto.tech",
+  "https://www.valetto.tech",
+  "https://replyslip.com",
+  "https://www.replyslip.com"
+];
+function watcherLockPath(home, scopeId) {
+  if (!/^[0-9a-f]{16}$/.test(scopeId)) throw new Error("Invalid watcher lock scope.");
+  return path2.join(replyslipHome(home), `watcher-${scopeId}.lock`);
+}
+function alreadyRunningMessage(pid, origin, lockPath) {
+  return `A ReplySlip watcher is already running for this workspace (pid ${pid}, origin ${origin}, lock ${lockPath}); it delivers every local agent in this workspace. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+}
+function agentAlreadyRunningMessage(agentName, pid, origin, lockPath) {
+  return `A ReplySlip watcher is already running for agent ${agentName} (pid ${pid}, origin ${origin}, lock ${lockPath}). If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+}
+function agentWatchersRunningMessage(agentName, pid, lockPath) {
+  return `A per-agent ReplySlip watcher is running for agent ${agentName} in this workspace (pid ${pid}, lock ${lockPath}). Each agent now runs its own watcher, so a machine-wide watcher beside it could deliver the same wake twice. Stop the per-agent watchers first, or keep them and do not start this one. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
+}
+function legacyWatcherRunningMessage(pid, origin, lockPath) {
+  return `A legacy machine-wide ReplySlip watcher (workspace watcher key) is running for this workspace on this machine (pid ${pid}, origin ${origin}, lock ${lockPath}). It already types into every local agent's pane, so this per-agent watcher will not start beside it on this machine, to avoid delivering a wake twice. Ask the human to stop that watcher first (Ctrl-C in its pane, or kill ${pid}), then start one \`replyslip watch\` per agent, and revoke the old watcher key in the dashboard under Watchers. If pid ${pid} is not a ReplySlip watcher, delete ${lockPath} and retry.`;
+}
+function lockLostMessage(lockPath, holder) {
+  const by = holder ? `pid ${holder.pid}, origin ${holder.origin}` : "the file was removed";
+  return `[replyslip] lock ${lockPath} is no longer held by this watcher (${by}); stopping so only one watcher delivers this workspace.`;
+}
+function agentRunningStatusMessage(pid, origin, agentName, workspaceId) {
+  const scope = workspaceId ? ` in workspace ${workspaceId}` : "";
+  return `A ReplySlip watcher is running for agent ${agentName}${scope} (pid ${pid}, origin ${origin}).`;
+}
+function statusLine(lock) {
+  if (lock.agentName) return agentRunningStatusMessage(lock.pid, lock.origin, lock.agentName, lock.workspaceId);
+  return runningStatusMessage(lock.pid, lock.origin, lock.workspaceId);
+}
+function runningStatusMessage(pid, origin, workspaceId) {
+  const scope = workspaceId ? `workspace ${workspaceId}` : "this workspace";
+  return `A ReplySlip watcher is running for ${scope} (pid ${pid}, origin ${origin}).`;
+}
+var WATCHER_NOT_RUNNING_MESSAGE = "No ReplySlip watcher is running for this workspace.";
+function roundedBootId(nowMs, uptimeSeconds) {
+  const bootMs = nowMs - uptimeSeconds * 1e3;
+  return String(Math.round(bootMs / 6e4) * 6e4);
+}
+function machineBootId(now = Date.now()) {
+  try {
+    const text = readFileSync2("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    if (text) return text;
+  } catch {
+  }
+  return roundedBootId(now, uptime());
+}
+function readWatcherLock(file) {
+  let text;
+  try {
+    text = readFileSync2(file, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed.pid !== "number" || !Number.isInteger(parsed.pid) || parsed.pid <= 0) return null;
+    if (typeof parsed.startedAt !== "string" || parsed.startedAt.trim() === "") return null;
+    return {
+      pid: parsed.pid,
+      startedAt: parsed.startedAt,
+      hostname: typeof parsed.hostname === "string" ? parsed.hostname : "",
+      bootId: typeof parsed.bootId === "string" ? parsed.bootId : "",
+      origin: typeof parsed.origin === "string" ? parsed.origin : "",
+      ...typeof parsed.workspaceId === "string" && parsed.workspaceId ? { workspaceId: parsed.workspaceId } : {},
+      ...parsed.alias === true ? { alias: true } : {},
+      ...typeof parsed.token === "string" && parsed.token ? { token: parsed.token } : {},
+      ...typeof parsed.agentId === "string" && parsed.agentId ? { agentId: parsed.agentId } : {},
+      ...typeof parsed.agentName === "string" && parsed.agentName ? { agentName: parsed.agentName } : {}
+    };
+  } catch {
+    return null;
+  }
+}
+function pidIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+function lockIsCurrent(info, self, isAlive) {
+  if (info.hostname !== self.hostname || info.bootId !== self.bootId) return false;
+  if (info.pid === self.pid) return heldHere.has(holdKey(info));
+  return isAlive(info.pid);
+}
+function listLiveWatcherLocks(home = homedir2(), self) {
+  const dir = replyslipHome(home);
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const identity = {
+    hostname: self?.hostname ?? hostname(),
+    bootId: self?.bootId ?? machineBootId(),
+    pid: self?.pid ?? process.pid
+  };
+  const isAlive = self?.isAlive ?? pidIsAlive;
+  const live = [];
+  for (const name of names) {
+    if (!LOCK_NAME.test(name)) continue;
+    const info = readWatcherLock(path2.join(dir, name));
+    if (info && !info.alias && lockIsCurrent(info, identity, isAlive)) live.push(info);
+  }
+  live.sort((a, b) => a.origin.localeCompare(b.origin) || a.pid - b.pid);
+  return live;
+}
+function acquireWatcherLock(options) {
+  const home = options.home ?? homedir2();
+  const origin = normalizeOrigin(options.origin);
+  const scopeId = watcherScopeId(options.workspaceId, options.watcherKey);
+  const file = watcherLockPath(home, scopeId);
+  const pid = options.pid ?? process.pid;
+  const startedAt = (options.now ?? /* @__PURE__ */ new Date()).toISOString();
+  const self = {
+    hostname: options.hostname ?? hostname(),
+    bootId: options.bootId ?? machineBootId(),
+    pid
+  };
+  const isAlive = options.isAlive ?? pidIsAlive;
+  const identity = {
+    pid,
+    startedAt,
+    hostname: self.hostname,
+    bootId: self.bootId,
+    origin,
+    ...options.workspaceId ? { workspaceId: options.workspaceId } : {},
+    token: randomBytes(8).toString("hex")
+  };
+  mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  removeStaleTemps(path2.dirname(file), isAlive);
+  return withAcquireMutex(home, () => {
+    if (!options.force && !options.reclaim) {
+      const other = sameWorkspaceLock(home, file, options.workspaceId, options.watcherKey, self, isAlive);
+      if (other) return running(other.info, other.path);
+    }
+    const acquired = acquireMain(file, identity, self, isAlive, options);
+    if (!acquired.ok) return acquired;
+    const aliases = writeAliases(home, file, identity, options, self, isAlive);
+    const release = acquired.hold.release;
+    acquired.hold.release = () => {
+      for (const alias of aliases) releaseAliasIfOurs(alias, identity);
+      release();
+    };
+    return acquired;
+  });
+}
+function running(info, file) {
+  return { ok: false, reason: "running", pid: info.pid, origin: info.origin, path: file, ...info.agentName ? { agentName: info.agentName } : {} };
+}
+function removeStaleTemps(dir, isAlive, nowMs = Date.now()) {
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const match = TEMP_NAME.exec(name);
+    if (!match) continue;
+    const full = path2.join(dir, name);
+    try {
+      const info = lstatSync(full);
+      if (!info.isFile()) continue;
+      const writer = Number(match[1]);
+      const old = nowMs - info.mtimeMs > STALE_TEMP_MS;
+      if (writer === process.pid || old || !isAlive(writer)) removeLock(full);
+    } catch {
+    }
+  }
+}
+function acquireMain(file, identity, self, isAlive, options) {
+  const first = attempt(file, identity, self, isAlive, Boolean(options.force), true, options);
+  if (first !== "lost") return first;
+  const seen = readWatcherLock(file);
+  if (seen && lockIsCurrent(seen, self, isAlive) && !options.force) return running(seen, file);
+  const second = attempt(file, identity, self, isAlive, Boolean(options.force), false, options);
+  if (second !== "lost") return second;
+  const last = readWatcherLock(file);
+  if (last && lockIsCurrent(last, self, isAlive)) return running(last, file);
+  throw new Error("Could not acquire the ReplySlip watcher lock.");
+}
+function sameWorkspaceLock(home, file, workspaceId, watcherKey, self, isAlive) {
+  const dir = replyslipHome(home);
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    const full = path2.join(dir, name);
+    if (!LOCK_NAME.test(name) || full === file) continue;
+    const info = readWatcherLock(full);
+    if (!info || !lockIsCurrent(info, self, isAlive)) continue;
+    const sameId = Boolean(workspaceId) && info.workspaceId === workspaceId;
+    const legacyName = `watcher-${legacyWatcherScopeId(info.origin, workspaceId, watcherKey)}.lock`;
+    if (sameId || name === legacyName) return { info, path: info.alias && sameId ? file : full };
+  }
+  return null;
+}
+function writeAliases(home, file, identity, options, self, isAlive) {
+  const origins = /* @__PURE__ */ new Set([identity.origin, ...HOSTED_ORIGINS]);
+  const written = [];
+  const alias = { ...identity, alias: true };
+  for (const origin of origins) {
+    const target = watcherLockPath(home, legacyWatcherScopeId(origin, options.workspaceId, options.watcherKey));
+    if (target === file) continue;
+    const held = readWatcherLock(target);
+    if (held && !sameHolder(held, identity) && lockIsCurrent(held, self, isAlive)) {
+      if (!held.alias || !options.force) continue;
+    }
+    const temp = writeTemp(path2.dirname(target), alias);
+    try {
+      renameSync(temp, target);
+      written.push(target);
+    } catch {
+    } finally {
+      removeLock(temp);
+    }
+  }
+  return written;
+}
+function releaseAliasIfOurs(file, identity) {
+  const current = readWatcherLock(file);
+  if (!current?.alias || !sameHolder(current, identity)) return;
+  try {
+    removeLock(file);
+  } catch {
+  }
+}
+function selfOf(options) {
+  return {
+    hostname: options.hostname ?? hostname(),
+    bootId: options.bootId ?? machineBootId(),
+    pid: options.pid ?? process.pid
+  };
+}
+function findLegacyWatcherLock(options) {
+  const home = options.home ?? homedir2();
+  const dir = replyslipHome(home);
+  const self = selfOf(options);
+  const isAlive = options.isAlive ?? pidIsAlive;
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const legacyNames = new Set(
+    [normalizeOrigin(options.origin), ...HOSTED_ORIGINS].map((origin) => `watcher-${legacyWatcherScopeId(origin, options.workspaceId, "")}.lock`)
+  );
+  legacyNames.add(`watcher-${watcherScopeId(options.workspaceId, "")}.lock`);
+  for (const name of names) {
+    if (!LOCK_NAME.test(name)) continue;
+    const full = path2.join(dir, name);
+    const info = readWatcherLock(full);
+    if (!info || info.agentId || !lockIsCurrent(info, self, isAlive)) continue;
+    if (info.workspaceId === options.workspaceId || legacyNames.has(name)) return { info, path: full };
+  }
+  return null;
+}
+function acquireAgentWatcherLock(options) {
+  const home = options.home ?? homedir2();
+  const origin = normalizeOrigin(options.origin);
+  const file = watcherLockPath(home, agentWatcherScopeId(options.agentId));
+  const self = selfOf(options);
+  const isAlive = options.isAlive ?? pidIsAlive;
+  mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  removeStaleTemps(path2.dirname(file), isAlive);
+  return withAcquireMutex(home, () => {
+    const legacy = findLegacyWatcherLock({ ...options, home, origin });
+    if (legacy) return { ok: false, reason: "legacy", pid: legacy.info.pid, origin: legacy.info.origin, path: legacy.path };
+    const identity = {
+      pid: self.pid,
+      startedAt: (options.now ?? /* @__PURE__ */ new Date()).toISOString(),
+      hostname: self.hostname,
+      bootId: self.bootId,
+      origin,
+      workspaceId: options.workspaceId,
+      token: randomBytes(8).toString("hex"),
+      agentId: options.agentId,
+      agentName: options.agentName
+    };
+    return acquireMain(file, identity, self, isAlive, {
+      origin,
+      watcherKey: "",
+      force: options.reclaim ? false : options.force,
+      reclaim: options.reclaim,
+      onBeforeTakeover: options.onBeforeTakeover
+    });
+  });
+}
+function bindWatcherLockLifecycle(release) {
+  const onSignal = () => {
+    release();
+    process.exit(0);
+  };
+  const onExit = () => release();
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  process.on("exit", onExit);
+  return () => {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    process.off("exit", onExit);
+  };
+}
+function attempt(file, identity, self, isAlive, force, hooks, options) {
+  const reclaim = options.reclaim;
+  const existing = readWatcherLock(file);
+  if (reclaim) {
+    if (!matchesReclaim(existing, reclaim)) return refuseReclaim(existing, self, isAlive, file);
+  } else if (existing && lockIsCurrent(existing, self, isAlive) && !force) return running(existing, file);
+  if (hooks) options.onBeforeTakeover?.();
+  const after = readWatcherLock(file);
+  if (reclaim) {
+    if (!matchesReclaim(after, reclaim)) return refuseReclaim(after, self, isAlive, file);
+  } else if (after && lockIsCurrent(after, self, isAlive) && !force) return running(after, file);
+  const temp = writeTemp(path2.dirname(file), identity);
+  try {
+    const placed = publish(temp, file, self, isAlive, force, reclaim);
+    if (placed !== "placed") {
+      if (placed === "lost") return "lost";
+      return { ok: false, reason: "running", pid: placed.pid, origin: placed.origin, path: file };
+    }
+    if (hooks) options.onAfterCreate?.();
+    const confirmed = readWatcherLock(file);
+    if (sameHolder(confirmed, identity)) {
+      return { ok: true, hold: createHold(file, identity) };
+    }
+    return "lost";
+  } finally {
+    removeLock(temp);
+  }
+}
+function matchesReclaim(info, reclaim) {
+  return !!info && info.pid === reclaim.pid && (info.token ?? "") === reclaim.token && info.startedAt === reclaim.startedAt;
+}
+function refuseReclaim(info, self, isAlive, file) {
+  if (info && lockIsCurrent(info, self, isAlive)) return running(info, file);
+  return "lost";
+}
+function publish(temp, file, self, isAlive, force, reclaim) {
+  try {
+    renameSync(temp, file);
+    return "placed";
+  } catch (err) {
+    if (!isRenameConflict(err)) throw err;
+  }
+  const held = readWatcherLock(file);
+  if (reclaim) {
+    if (!matchesReclaim(held, reclaim)) {
+      if (held && lockIsCurrent(held, self, isAlive)) return { pid: held.pid, origin: held.origin };
+      return "lost";
+    }
+  } else if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid, origin: held.origin };
+  removeLock(file);
+  try {
+    renameSync(temp, file);
+    return "placed";
+  } catch (err) {
+    if (!isRenameConflict(err)) throw err;
+    return "lost";
+  }
+}
+function writeTemp(dir, identity) {
+  const temp = path2.join(dir, `.lock-${identity.pid}-${randomBytes(8).toString("hex")}.tmp`);
+  const fd = openSync(temp, "wx", 384);
+  try {
+    writeSync(fd, `${JSON.stringify(identity)}
+`);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    chmodSync(temp, 384);
+  } catch {
+  }
+  return temp;
+}
+function isRenameConflict(err) {
+  const code = err.code;
+  return code === "EEXIST" || code === "EPERM" || code === "ENOTEMPTY";
+}
+var acquireDepth = /* @__PURE__ */ new Map();
+function withAcquireMutex(home, fn) {
+  const file = path2.join(replyslipHome(home), "acquire.mutex");
+  const depth = acquireDepth.get(file) ?? 0;
+  if (depth > 0) {
+    acquireDepth.set(file, depth + 1);
+    try {
+      return fn();
+    } finally {
+      const next = (acquireDepth.get(file) ?? 1) - 1;
+      if (next <= 0) acquireDepth.delete(file);
+      else acquireDepth.set(file, next);
+    }
+  }
+  mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  acquireDepth.set(file, 1);
+  const fd = lockAcquireMutex(file);
+  try {
+    return fn();
+  } finally {
+    acquireDepth.delete(file);
+    try {
+      closeSync(fd);
+    } catch {
+    }
+    try {
+      unlinkSync(file);
+    } catch {
+    }
+  }
+}
+function lockAcquireMutex(file) {
+  for (; ; ) {
+    try {
+      const fd = openSync(file, "wx", 384);
+      writeSync(fd, `${process.pid}
+`);
+      return fd;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      let holder = 0;
+      try {
+        holder = Number(readFileSync2(file, "utf8"));
+      } catch {
+        holder = 0;
+      }
+      if (holder > 0 && holder !== process.pid && !pidIsAlive(holder)) {
+        try {
+          unlinkSync(file);
+        } catch {
+        }
+        continue;
+      }
+      const gate = new Int32Array(new SharedArrayBuffer(4));
+      Atomics.wait(gate, 0, 0, 5);
+    }
+  }
+}
+function removeLock(file) {
+  try {
+    unlinkSync(file);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+}
+function createHold(file, identity) {
+  let released = false;
+  const key = holdKey(identity);
+  heldHere.add(key);
+  const release = () => {
+    if (released) return;
+    released = true;
+    heldHere.delete(key);
+    if (!sameHolder(readWatcherLock(file), identity)) return;
+    removeLock(file);
+  };
+  const stillHeld = () => {
+    const current = readWatcherLock(file);
+    return { held: !released && sameHolder(current, identity), current };
+  };
+  return { path: file, pid: identity.pid, startedAt: identity.startedAt, token: identity.token ?? "", release, stillHeld };
+}
+
+// packages/cli/src/watcher-progress.ts
+import { chmodSync as chmodSync2, closeSync as closeSync2, mkdirSync as mkdirSync2, openSync as openSync2, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync2, writeSync as writeSync2 } from "node:fs";
+import path3 from "node:path";
+import { randomBytes as randomBytes2 } from "node:crypto";
+function emptySuperviseState() {
+  return {
+    restarts: [],
+    lastCheckAt: null,
+    wedgeDeferred: false,
+    missingProgressStreak: 0,
+    lastSpawnAt: null,
+    lastSpawnPid: null,
+    epoch: 0
+  };
+}
+function superviseDir(home) {
+  return path3.join(replyslipHome(home), "supervise");
+}
+function agentFile(home, name, suffix) {
+  if (!AGENT_NAME_PATTERN.test(name)) throw new Error("Agent name is not valid.");
+  return path3.join(superviseDir(home), `${name}${suffix}`);
+}
+function ensureDir(dir) {
+  mkdirSync2(dir, { recursive: true, mode: 448 });
+  try {
+    chmodSync2(dir, 448);
+  } catch {
+  }
+}
+function writePrivate(file, body) {
+  ensureDir(path3.dirname(file));
+  const temp = path3.join(path3.dirname(file), `.${path3.basename(file)}.${randomBytes2(6).toString("hex")}.tmp`);
+  const fd = openSync2(temp, "wx", 384);
+  try {
+    writeSync2(fd, body.endsWith("\n") ? body : `${body}
+`);
+  } finally {
+    closeSync2(fd);
+  }
+  try {
+    chmodSync2(temp, 384);
+  } catch {
+  }
+  renameSync2(temp, file);
+}
+function readJson(file) {
+  try {
+    return JSON.parse(readFileSync3(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function writeProgress(home, name, progress) {
+  writePrivate(agentFile(home, name, ".progress.json"), JSON.stringify(progress));
+}
+function readProgress(home, name) {
+  const parsed = readJson(agentFile(home, name, ".progress.json"));
+  if (!parsed || typeof parsed !== "object") return null;
+  const row = parsed;
+  if (typeof row.pid !== "number" || !Number.isInteger(row.pid) || row.pid <= 0) return null;
+  if (typeof row.token !== "string" || !row.token) return null;
+  if (typeof row.startedAt !== "string" || !row.startedAt) return null;
+  if (row.phase !== "poll" && row.phase !== "nudge" && row.phase !== "ack" && row.phase !== "sleep") return null;
+  if (typeof row.at !== "string" || typeof row.deadlineAt !== "string") return null;
+  return {
+    pid: row.pid,
+    token: row.token,
+    startedAt: row.startedAt,
+    phase: row.phase,
+    at: row.at,
+    deadlineAt: row.deadlineAt
+  };
+}
+function clearProgress(home, name) {
+  removeFile(agentFile(home, name, ".progress.json"));
+}
+function writeStopped(home, name, at = /* @__PURE__ */ new Date()) {
+  writePrivate(agentFile(home, name, ".stopped"), JSON.stringify({ at: at.toISOString() }));
+}
+function isStopped(home, name) {
+  try {
+    readFileSync3(agentFile(home, name, ".stopped"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+function clearStopped(home, name) {
+  removeFile(agentFile(home, name, ".stopped"));
+}
+function writeHold(home, name, reason, at = /* @__PURE__ */ new Date()) {
+  writePrivate(agentFile(home, name, ".hold.json"), JSON.stringify({ reason, at: at.toISOString() }));
+}
+function readHold(home, name) {
+  const parsed = readJson(agentFile(home, name, ".hold.json"));
+  if (!parsed || typeof parsed !== "object") return null;
+  const reason = parsed.reason;
+  if (reason === "auth" || reason === "legacy" || reason === "config") return reason;
+  return null;
+}
+function clearHold(home, name) {
+  removeFile(agentFile(home, name, ".hold.json"));
+}
+function readSuperviseState(home, name) {
+  const parsed = readJson(agentFile(home, name, ".state.json"));
+  if (!parsed || typeof parsed !== "object") return emptySuperviseState();
+  const row = parsed;
+  return {
+    restarts: Array.isArray(row.restarts) ? row.restarts.filter((item) => typeof item === "string") : [],
+    lastCheckAt: typeof row.lastCheckAt === "string" ? row.lastCheckAt : null,
+    wedgeDeferred: row.wedgeDeferred === true,
+    missingProgressStreak: typeof row.missingProgressStreak === "number" && row.missingProgressStreak > 0 ? Math.floor(row.missingProgressStreak) : 0,
+    lastSpawnAt: typeof row.lastSpawnAt === "string" ? row.lastSpawnAt : null,
+    lastSpawnPid: typeof row.lastSpawnPid === "number" && Number.isInteger(row.lastSpawnPid) && row.lastSpawnPid > 0 ? row.lastSpawnPid : null,
+    epoch: typeof row.epoch === "number" && Number.isInteger(row.epoch) && row.epoch > 0 ? row.epoch : 0
+  };
+}
+function writeSuperviseState(home, name, state) {
+  writePrivate(agentFile(home, name, ".state.json"), JSON.stringify(state));
+}
+function readEnrolled(home) {
+  const parsed = readJson(path3.join(superviseDir(home), "agents.json"));
+  if (!parsed || typeof parsed !== "object") return [];
+  const agents = parsed.agents;
+  if (!Array.isArray(agents)) return [];
+  return [...new Set(agents.filter((name) => typeof name === "string" && AGENT_NAME_PATTERN.test(name)))].sort();
+}
+function writeEnrolled(home, agents) {
+  const unique = [...new Set(agents.filter((name) => AGENT_NAME_PATTERN.test(name)))].sort();
+  writePrivate(path3.join(superviseDir(home), "agents.json"), JSON.stringify({ agents: unique }));
+}
+function enrollAgent(home, name) {
+  if (!AGENT_NAME_PATTERN.test(name)) throw new Error("Agent name is not valid.");
+  const agents = new Set(readEnrolled(home));
+  agents.add(name);
+  writeEnrolled(home, [...agents]);
+}
+function unenrollAgent(home, name) {
+  writeEnrolled(home, readEnrolled(home).filter((agent) => agent !== name));
+}
+function removeFile(file) {
+  try {
+    unlinkSync2(file);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+}
+
+// packages/cli/src/supervise-lock.ts
+var chains = /* @__PURE__ */ new Map();
+async function withAgentOp(home, name, fn) {
+  const key = `${home ?? ""}\0${name}`;
+  const previous = chains.get(key) ?? Promise.resolve();
+  let releaseChain = () => void 0;
+  const current = new Promise((resolve) => {
+    releaseChain = resolve;
+  });
+  const tail = previous.then(() => current);
+  chains.set(key, tail);
+  await previous;
+  mkdirSync3(superviseDir(home), { recursive: true, mode: 448 });
+  const file = path4.join(superviseDir(home), `${name}.op`);
+  const fd = await lockOpFile(file);
+  try {
+    return await fn();
+  } finally {
+    try {
+      closeSync3(fd);
+    } catch {
+    }
+    try {
+      unlinkSync3(file);
+    } catch {
+    }
+    releaseChain();
+    if (chains.get(key) === tail) chains.delete(key);
+  }
+}
+async function lockOpFile(file) {
+  for (; ; ) {
+    try {
+      const fd = openSync3(file, "wx", 384);
+      writeSync3(fd, `${process.pid}
+`);
+      return fd;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      let holder = 0;
+      try {
+        holder = Number(readFileSync4(file, "utf8"));
+      } catch {
+        holder = 0;
+      }
+      if (holder > 0 && holder !== process.pid && !pidIsAlive(holder)) {
+        try {
+          unlinkSync3(file);
+        } catch {
+        }
+        continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+}
+
+// packages/cli/src/supervise-os.ts
+import path5 from "node:path";
 function buildInstallPlan(input) {
   const safe = validatePlanInputs(input);
   if ("error" in safe) return safe;
@@ -484,8 +1219,8 @@ function darwinPlan(input) {
     return { error: "macOS LaunchAgent install needs a numeric user id. Supervision was not installed." };
   }
   const label = input.label ?? SUPERVISE_LABEL;
-  const plistPath = path2.join(input.home, "Library", "LaunchAgents", `${label}.plist`);
-  const logPath = path2.join(input.home, ".replyslip", "supervise", "timer.log");
+  const plistPath = path5.join(input.home, "Library", "LaunchAgents", `${label}.plist`);
+  const logPath = path5.join(input.home, ".replyslip", "supervise", "timer.log");
   const domain = `gui/${uid}`;
   const target = `${domain}/${label}`;
   return {
@@ -511,13 +1246,13 @@ function darwinPlan(input) {
 function linuxPlan(input) {
   const label = input.label ?? SUPERVISE_LABEL;
   const unit = input.unitName ?? "replyslip-supervise";
-  const dir = path2.join(input.home, ".config", "systemd", "user");
+  const dir = path5.join(input.home, ".config", "systemd", "user");
   const seconds = intervalSec(input);
   return {
     platform: "linux",
     files: [
-      { path: path2.join(dir, `${unit}.service`), mode: 384, contents: systemdService(input) },
-      { path: path2.join(dir, `${unit}.timer`), mode: 384, contents: systemdTimer(unit, seconds) }
+      { path: path5.join(dir, `${unit}.service`), mode: 384, contents: systemdService(input) },
+      { path: path5.join(dir, `${unit}.timer`), mode: 384, contents: systemdTimer(unit, seconds) }
     ],
     preflight: [{ command: "systemctl", args: ["--user", "show-environment"] }],
     commands: [
@@ -538,7 +1273,7 @@ function linuxPlan(input) {
 function windowsPlan(input) {
   const taskName = input.taskName ?? SUPERVISE_TASK_NAME;
   const minutes = Math.max(1, Math.round(intervalSec(input) / 60));
-  const cmdPath = path2.join(input.home, ".replyslip", "supervise", "tick.cmd");
+  const cmdPath = path5.join(input.home, ".replyslip", "supervise", "tick.cmd");
   return {
     platform: "win32",
     files: [{ path: cmdPath, mode: 384, contents: windowsCmd(input) }],
@@ -655,590 +1390,14 @@ function systemdEnv(value) {
   return `"${value.replace(/"/g, '\\"')}"`;
 }
 
-// packages/cli/src/watcher-lock.ts
-import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync as readFileSync2, renameSync, unlinkSync, writeSync } from "node:fs";
-import { hostname, homedir as homedir2, uptime } from "node:os";
-import path3 from "node:path";
-var LOCK_NAME = /^watcher-[0-9a-f]{16}\.lock$/;
-var TEMP_NAME = /^\.lock-(\d+)-[0-9a-f]{16}\.tmp$/;
-var STALE_TEMP_MS = 6e4;
-var heldHere = /* @__PURE__ */ new Set();
-function holdKey(info) {
-  return `${info.pid}|${info.startedAt}|${info.token ?? ""}`;
-}
-function sameHolder(info, identity) {
-  return !!info && info.pid === identity.pid && info.startedAt === identity.startedAt && (info.token ?? "") === (identity.token ?? "") && info.hostname === identity.hostname && info.bootId === identity.bootId;
-}
-function normalizeOrigin(origin) {
-  return origin.replace(/\/+$/, "");
-}
-function keyHash(watcherKey) {
-  return createHash("sha256").update(watcherKey).digest("hex");
-}
-function scopeHash(material) {
-  return createHash("sha256").update(material).digest("hex").slice(0, 16);
-}
-function watcherScopeId(workspaceId, watcherKey) {
-  return workspaceId ? scopeHash(`workspace
-${workspaceId}`) : scopeHash(`key
-${keyHash(watcherKey)}`);
-}
-function agentWatcherScopeId(agentId) {
-  return scopeHash(`agent
-${agentId}`);
-}
-function legacyWatcherScopeId(origin, workspaceId, watcherKey) {
-  const normalized = normalizeOrigin(origin);
-  return scopeHash(workspaceId ? `${normalized}
-${workspaceId}` : `${normalized}
-${keyHash(watcherKey)}`);
-}
-var HOSTED_ORIGINS = [
-  "https://valetto.tech",
-  "https://www.valetto.tech",
-  "https://replyslip.com",
-  "https://www.replyslip.com"
-];
-function watcherLockPath(home, scopeId) {
-  if (!/^[0-9a-f]{16}$/.test(scopeId)) throw new Error("Invalid watcher lock scope.");
-  return path3.join(replyslipHome(home), `watcher-${scopeId}.lock`);
-}
-function alreadyRunningMessage(pid, origin, lockPath) {
-  return `A ReplySlip watcher is already running for this workspace (pid ${pid}, origin ${origin}, lock ${lockPath}); it delivers every local agent in this workspace. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
-}
-function agentAlreadyRunningMessage(agentName, pid, origin, lockPath) {
-  return `A ReplySlip watcher is already running for agent ${agentName} (pid ${pid}, origin ${origin}, lock ${lockPath}). If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
-}
-function agentWatchersRunningMessage(agentName, pid, lockPath) {
-  return `A per-agent ReplySlip watcher is running for agent ${agentName} in this workspace (pid ${pid}, lock ${lockPath}). Each agent now runs its own watcher, so a machine-wide watcher beside it could deliver the same wake twice. Stop the per-agent watchers first, or keep them and do not start this one. If pid ${pid} is not a ReplySlip watcher, rerun with --force.`;
-}
-function legacyWatcherRunningMessage(pid, origin, lockPath) {
-  return `A legacy machine-wide ReplySlip watcher (workspace watcher key) is running for this workspace on this machine (pid ${pid}, origin ${origin}, lock ${lockPath}). It already types into every local agent's pane, so this per-agent watcher will not start beside it on this machine, to avoid delivering a wake twice. Ask the human to stop that watcher first (Ctrl-C in its pane, or kill ${pid}), then start one \`replyslip watch\` per agent, and revoke the old watcher key in the dashboard under Watchers. If pid ${pid} is not a ReplySlip watcher, delete ${lockPath} and retry.`;
-}
-function lockLostMessage(lockPath, holder) {
-  const by = holder ? `pid ${holder.pid}, origin ${holder.origin}` : "the file was removed";
-  return `[replyslip] lock ${lockPath} is no longer held by this watcher (${by}); stopping so only one watcher delivers this workspace.`;
-}
-function agentRunningStatusMessage(pid, origin, agentName, workspaceId) {
-  const scope = workspaceId ? ` in workspace ${workspaceId}` : "";
-  return `A ReplySlip watcher is running for agent ${agentName}${scope} (pid ${pid}, origin ${origin}).`;
-}
-function statusLine(lock) {
-  if (lock.agentName) return agentRunningStatusMessage(lock.pid, lock.origin, lock.agentName, lock.workspaceId);
-  return runningStatusMessage(lock.pid, lock.origin, lock.workspaceId);
-}
-function runningStatusMessage(pid, origin, workspaceId) {
-  const scope = workspaceId ? `workspace ${workspaceId}` : "this workspace";
-  return `A ReplySlip watcher is running for ${scope} (pid ${pid}, origin ${origin}).`;
-}
-var WATCHER_NOT_RUNNING_MESSAGE = "No ReplySlip watcher is running for this workspace.";
-function roundedBootId(nowMs, uptimeSeconds) {
-  const bootMs = nowMs - uptimeSeconds * 1e3;
-  return String(Math.round(bootMs / 6e4) * 6e4);
-}
-function machineBootId(now = Date.now()) {
-  try {
-    const text = readFileSync2("/proc/sys/kernel/random/boot_id", "utf8").trim();
-    if (text) return text;
-  } catch {
-  }
-  return roundedBootId(now, uptime());
-}
-function readWatcherLock(file) {
-  let text;
-  try {
-    text = readFileSync2(file, "utf8");
-  } catch {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(text);
-    if (typeof parsed.pid !== "number" || !Number.isInteger(parsed.pid) || parsed.pid <= 0) return null;
-    if (typeof parsed.startedAt !== "string" || parsed.startedAt.trim() === "") return null;
-    return {
-      pid: parsed.pid,
-      startedAt: parsed.startedAt,
-      hostname: typeof parsed.hostname === "string" ? parsed.hostname : "",
-      bootId: typeof parsed.bootId === "string" ? parsed.bootId : "",
-      origin: typeof parsed.origin === "string" ? parsed.origin : "",
-      ...typeof parsed.workspaceId === "string" && parsed.workspaceId ? { workspaceId: parsed.workspaceId } : {},
-      ...parsed.alias === true ? { alias: true } : {},
-      ...typeof parsed.token === "string" && parsed.token ? { token: parsed.token } : {},
-      ...typeof parsed.agentId === "string" && parsed.agentId ? { agentId: parsed.agentId } : {},
-      ...typeof parsed.agentName === "string" && parsed.agentName ? { agentName: parsed.agentName } : {}
-    };
-  } catch {
-    return null;
-  }
-}
-function pidIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === "EPERM";
-  }
-}
-function lockIsCurrent(info, self, isAlive) {
-  if (info.hostname !== self.hostname || info.bootId !== self.bootId) return false;
-  if (info.pid === self.pid) return heldHere.has(holdKey(info));
-  return isAlive(info.pid);
-}
-function listLiveWatcherLocks(home = homedir2(), self) {
-  const dir = replyslipHome(home);
-  let names = [];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const identity = {
-    hostname: self?.hostname ?? hostname(),
-    bootId: self?.bootId ?? machineBootId(),
-    pid: self?.pid ?? process.pid
-  };
-  const isAlive = self?.isAlive ?? pidIsAlive;
-  const live = [];
-  for (const name of names) {
-    if (!LOCK_NAME.test(name)) continue;
-    const info = readWatcherLock(path3.join(dir, name));
-    if (info && !info.alias && lockIsCurrent(info, identity, isAlive)) live.push(info);
-  }
-  live.sort((a, b) => a.origin.localeCompare(b.origin) || a.pid - b.pid);
-  return live;
-}
-function acquireWatcherLock(options) {
-  const home = options.home ?? homedir2();
-  const origin = normalizeOrigin(options.origin);
-  const scopeId = watcherScopeId(options.workspaceId, options.watcherKey);
-  const file = watcherLockPath(home, scopeId);
-  const pid = options.pid ?? process.pid;
-  const startedAt = (options.now ?? /* @__PURE__ */ new Date()).toISOString();
-  const self = {
-    hostname: options.hostname ?? hostname(),
-    bootId: options.bootId ?? machineBootId(),
-    pid
-  };
-  const isAlive = options.isAlive ?? pidIsAlive;
-  const identity = {
-    pid,
-    startedAt,
-    hostname: self.hostname,
-    bootId: self.bootId,
-    origin,
-    ...options.workspaceId ? { workspaceId: options.workspaceId } : {},
-    token: randomBytes(8).toString("hex")
-  };
-  mkdirSync(path3.dirname(file), { recursive: true, mode: 448 });
-  removeStaleTemps(path3.dirname(file), isAlive);
-  if (!options.force) {
-    const other = sameWorkspaceLock(home, file, options.workspaceId, options.watcherKey, self, isAlive);
-    if (other) return running(other.info, other.path);
-  }
-  const acquired = acquireMain(file, identity, self, isAlive, options);
-  if (!acquired.ok) return acquired;
-  const aliases = writeAliases(home, file, identity, options, self, isAlive);
-  const release = acquired.hold.release;
-  acquired.hold.release = () => {
-    for (const alias of aliases) releaseAliasIfOurs(alias, identity);
-    release();
-  };
-  return acquired;
-}
-function running(info, file) {
-  return { ok: false, reason: "running", pid: info.pid, origin: info.origin, path: file, ...info.agentName ? { agentName: info.agentName } : {} };
-}
-function removeStaleTemps(dir, isAlive, nowMs = Date.now()) {
-  let names = [];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return;
-  }
-  for (const name of names) {
-    const match = TEMP_NAME.exec(name);
-    if (!match) continue;
-    const full = path3.join(dir, name);
-    try {
-      const info = lstatSync(full);
-      if (!info.isFile()) continue;
-      const writer = Number(match[1]);
-      const old = nowMs - info.mtimeMs > STALE_TEMP_MS;
-      if (writer === process.pid || old || !isAlive(writer)) removeLock(full);
-    } catch {
-    }
-  }
-}
-function acquireMain(file, identity, self, isAlive, options) {
-  const first = attempt(file, identity, self, isAlive, Boolean(options.force), true, options);
-  if (first !== "lost") return first;
-  const seen = readWatcherLock(file);
-  if (seen && lockIsCurrent(seen, self, isAlive) && !options.force) return running(seen, file);
-  const second = attempt(file, identity, self, isAlive, Boolean(options.force), false, options);
-  if (second !== "lost") return second;
-  const last = readWatcherLock(file);
-  if (last && lockIsCurrent(last, self, isAlive)) return running(last, file);
-  throw new Error("Could not acquire the ReplySlip watcher lock.");
-}
-function sameWorkspaceLock(home, file, workspaceId, watcherKey, self, isAlive) {
-  const dir = replyslipHome(home);
-  let names = [];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return null;
-  }
-  for (const name of names) {
-    const full = path3.join(dir, name);
-    if (!LOCK_NAME.test(name) || full === file) continue;
-    const info = readWatcherLock(full);
-    if (!info || !lockIsCurrent(info, self, isAlive)) continue;
-    const sameId = Boolean(workspaceId) && info.workspaceId === workspaceId;
-    const legacyName = `watcher-${legacyWatcherScopeId(info.origin, workspaceId, watcherKey)}.lock`;
-    if (sameId || name === legacyName) return { info, path: info.alias && sameId ? file : full };
-  }
-  return null;
-}
-function writeAliases(home, file, identity, options, self, isAlive) {
-  const origins = /* @__PURE__ */ new Set([identity.origin, ...HOSTED_ORIGINS]);
-  const written = [];
-  const alias = { ...identity, alias: true };
-  for (const origin of origins) {
-    const target = watcherLockPath(home, legacyWatcherScopeId(origin, options.workspaceId, options.watcherKey));
-    if (target === file) continue;
-    const held = readWatcherLock(target);
-    if (held && !sameHolder(held, identity) && lockIsCurrent(held, self, isAlive)) {
-      if (!held.alias || !options.force) continue;
-    }
-    const temp = writeTemp(path3.dirname(target), alias);
-    try {
-      renameSync(temp, target);
-      written.push(target);
-    } catch {
-    } finally {
-      removeLock(temp);
-    }
-  }
-  return written;
-}
-function releaseAliasIfOurs(file, identity) {
-  const current = readWatcherLock(file);
-  if (!current?.alias || !sameHolder(current, identity)) return;
-  try {
-    removeLock(file);
-  } catch {
-  }
-}
-function selfOf(options) {
-  return {
-    hostname: options.hostname ?? hostname(),
-    bootId: options.bootId ?? machineBootId(),
-    pid: options.pid ?? process.pid
-  };
-}
-function findLegacyWatcherLock(options) {
-  const home = options.home ?? homedir2();
-  const dir = replyslipHome(home);
-  const self = selfOf(options);
-  const isAlive = options.isAlive ?? pidIsAlive;
-  let names = [];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return null;
-  }
-  const legacyNames = new Set(
-    [normalizeOrigin(options.origin), ...HOSTED_ORIGINS].map((origin) => `watcher-${legacyWatcherScopeId(origin, options.workspaceId, "")}.lock`)
-  );
-  legacyNames.add(`watcher-${watcherScopeId(options.workspaceId, "")}.lock`);
-  for (const name of names) {
-    if (!LOCK_NAME.test(name)) continue;
-    const full = path3.join(dir, name);
-    const info = readWatcherLock(full);
-    if (!info || info.agentId || !lockIsCurrent(info, self, isAlive)) continue;
-    if (info.workspaceId === options.workspaceId || legacyNames.has(name)) return { info, path: full };
-  }
-  return null;
-}
-function acquireAgentWatcherLock(options) {
-  const home = options.home ?? homedir2();
-  const origin = normalizeOrigin(options.origin);
-  const file = watcherLockPath(home, agentWatcherScopeId(options.agentId));
-  const self = selfOf(options);
-  const isAlive = options.isAlive ?? pidIsAlive;
-  mkdirSync(path3.dirname(file), { recursive: true, mode: 448 });
-  removeStaleTemps(path3.dirname(file), isAlive);
-  const legacy = findLegacyWatcherLock({ ...options, home, origin });
-  if (legacy) return { ok: false, reason: "legacy", pid: legacy.info.pid, origin: legacy.info.origin, path: legacy.path };
-  const identity = {
-    pid: self.pid,
-    startedAt: (options.now ?? /* @__PURE__ */ new Date()).toISOString(),
-    hostname: self.hostname,
-    bootId: self.bootId,
-    origin,
-    workspaceId: options.workspaceId,
-    token: randomBytes(8).toString("hex"),
-    agentId: options.agentId,
-    agentName: options.agentName
-  };
-  return acquireMain(file, identity, self, isAlive, { origin, watcherKey: "", force: options.force });
-}
-function bindWatcherLockLifecycle(release) {
-  const onSignal = () => {
-    release();
-    process.exit(0);
-  };
-  const onExit = () => release();
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
-  process.on("exit", onExit);
-  return () => {
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
-    process.off("exit", onExit);
-  };
-}
-function attempt(file, identity, self, isAlive, force, hooks, options) {
-  const existing = readWatcherLock(file);
-  if (existing && lockIsCurrent(existing, self, isAlive) && !force) return running(existing, file);
-  if (hooks) options.onBeforeTakeover?.();
-  const after = readWatcherLock(file);
-  if (after && lockIsCurrent(after, self, isAlive) && !force) return running(after, file);
-  const temp = writeTemp(path3.dirname(file), identity);
-  try {
-    const placed = publish(temp, file, self, isAlive, force);
-    if (placed !== "placed") {
-      if (placed === "lost") return "lost";
-      return { ok: false, reason: "running", pid: placed.pid, origin: placed.origin, path: file };
-    }
-    if (hooks) options.onAfterCreate?.();
-    const confirmed = readWatcherLock(file);
-    if (sameHolder(confirmed, identity)) {
-      return { ok: true, hold: createHold(file, identity) };
-    }
-    return "lost";
-  } finally {
-    removeLock(temp);
-  }
-}
-function publish(temp, file, self, isAlive, force) {
-  try {
-    renameSync(temp, file);
-    return "placed";
-  } catch (err) {
-    if (!isRenameConflict(err)) throw err;
-  }
-  const held = readWatcherLock(file);
-  if (held && lockIsCurrent(held, self, isAlive) && !force) return { pid: held.pid, origin: held.origin };
-  removeLock(file);
-  try {
-    renameSync(temp, file);
-    return "placed";
-  } catch (err) {
-    if (!isRenameConflict(err)) throw err;
-    return "lost";
-  }
-}
-function writeTemp(dir, identity) {
-  const temp = path3.join(dir, `.lock-${identity.pid}-${randomBytes(8).toString("hex")}.tmp`);
-  const fd = openSync(temp, "wx", 384);
-  try {
-    writeSync(fd, `${JSON.stringify(identity)}
-`);
-  } finally {
-    closeSync(fd);
-  }
-  try {
-    chmodSync(temp, 384);
-  } catch {
-  }
-  return temp;
-}
-function isRenameConflict(err) {
-  const code = err.code;
-  return code === "EEXIST" || code === "EPERM" || code === "ENOTEMPTY";
-}
-function removeLock(file) {
-  try {
-    unlinkSync(file);
-  } catch (err) {
-    if (err.code !== "ENOENT") throw err;
-  }
-}
-function createHold(file, identity) {
-  let released = false;
-  const key = holdKey(identity);
-  heldHere.add(key);
-  const release = () => {
-    if (released) return;
-    released = true;
-    heldHere.delete(key);
-    if (!sameHolder(readWatcherLock(file), identity)) return;
-    removeLock(file);
-  };
-  const stillHeld = () => {
-    const current = readWatcherLock(file);
-    return { held: !released && sameHolder(current, identity), current };
-  };
-  return { path: file, pid: identity.pid, startedAt: identity.startedAt, token: identity.token ?? "", release, stillHeld };
-}
-
-// packages/cli/src/watcher-progress.ts
-import { chmodSync as chmodSync2, closeSync as closeSync2, mkdirSync as mkdirSync2, openSync as openSync2, readFileSync as readFileSync3, renameSync as renameSync2, unlinkSync as unlinkSync2, writeSync as writeSync2 } from "node:fs";
-import path4 from "node:path";
-import { randomBytes as randomBytes2 } from "node:crypto";
-function emptySuperviseState() {
-  return {
-    restarts: [],
-    lastCheckAt: null,
-    wedgeDeferred: false,
-    missingProgressStreak: 0,
-    lastSpawnAt: null,
-    lastSpawnPid: null
-  };
-}
-function superviseDir(home) {
-  return path4.join(replyslipHome(home), "supervise");
-}
-function agentFile(home, name, suffix) {
-  if (!AGENT_NAME_PATTERN.test(name)) throw new Error("Agent name is not valid.");
-  return path4.join(superviseDir(home), `${name}${suffix}`);
-}
-function ensureDir(dir) {
-  mkdirSync2(dir, { recursive: true, mode: 448 });
-  try {
-    chmodSync2(dir, 448);
-  } catch {
-  }
-}
-function writePrivate(file, body) {
-  ensureDir(path4.dirname(file));
-  const temp = path4.join(path4.dirname(file), `.${path4.basename(file)}.${randomBytes2(6).toString("hex")}.tmp`);
-  const fd = openSync2(temp, "wx", 384);
-  try {
-    writeSync2(fd, body.endsWith("\n") ? body : `${body}
-`);
-  } finally {
-    closeSync2(fd);
-  }
-  try {
-    chmodSync2(temp, 384);
-  } catch {
-  }
-  renameSync2(temp, file);
-}
-function readJson(file) {
-  try {
-    return JSON.parse(readFileSync3(file, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function writeProgress(home, name, progress) {
-  writePrivate(agentFile(home, name, ".progress.json"), JSON.stringify(progress));
-}
-function readProgress(home, name) {
-  const parsed = readJson(agentFile(home, name, ".progress.json"));
-  if (!parsed || typeof parsed !== "object") return null;
-  const row = parsed;
-  if (typeof row.pid !== "number" || !Number.isInteger(row.pid) || row.pid <= 0) return null;
-  if (typeof row.token !== "string" || !row.token) return null;
-  if (typeof row.startedAt !== "string" || !row.startedAt) return null;
-  if (row.phase !== "poll" && row.phase !== "nudge" && row.phase !== "ack" && row.phase !== "sleep") return null;
-  if (typeof row.at !== "string" || typeof row.deadlineAt !== "string") return null;
-  return {
-    pid: row.pid,
-    token: row.token,
-    startedAt: row.startedAt,
-    phase: row.phase,
-    at: row.at,
-    deadlineAt: row.deadlineAt
-  };
-}
-function clearProgress(home, name) {
-  removeFile(agentFile(home, name, ".progress.json"));
-}
-function writeStopped(home, name, at = /* @__PURE__ */ new Date()) {
-  writePrivate(agentFile(home, name, ".stopped"), JSON.stringify({ at: at.toISOString() }));
-}
-function isStopped(home, name) {
-  try {
-    readFileSync3(agentFile(home, name, ".stopped"));
-    return true;
-  } catch {
-    return false;
-  }
-}
-function clearStopped(home, name) {
-  removeFile(agentFile(home, name, ".stopped"));
-}
-function writeHold(home, name, reason, at = /* @__PURE__ */ new Date()) {
-  writePrivate(agentFile(home, name, ".hold.json"), JSON.stringify({ reason, at: at.toISOString() }));
-}
-function readHold(home, name) {
-  const parsed = readJson(agentFile(home, name, ".hold.json"));
-  if (!parsed || typeof parsed !== "object") return null;
-  const reason = parsed.reason;
-  if (reason === "auth" || reason === "legacy" || reason === "config") return reason;
-  return null;
-}
-function clearHold(home, name) {
-  removeFile(agentFile(home, name, ".hold.json"));
-}
-function readSuperviseState(home, name) {
-  const parsed = readJson(agentFile(home, name, ".state.json"));
-  if (!parsed || typeof parsed !== "object") return emptySuperviseState();
-  const row = parsed;
-  return {
-    restarts: Array.isArray(row.restarts) ? row.restarts.filter((item) => typeof item === "string") : [],
-    lastCheckAt: typeof row.lastCheckAt === "string" ? row.lastCheckAt : null,
-    wedgeDeferred: row.wedgeDeferred === true,
-    missingProgressStreak: typeof row.missingProgressStreak === "number" && row.missingProgressStreak > 0 ? Math.floor(row.missingProgressStreak) : 0,
-    lastSpawnAt: typeof row.lastSpawnAt === "string" ? row.lastSpawnAt : null,
-    lastSpawnPid: typeof row.lastSpawnPid === "number" && Number.isInteger(row.lastSpawnPid) && row.lastSpawnPid > 0 ? row.lastSpawnPid : null
-  };
-}
-function writeSuperviseState(home, name, state) {
-  writePrivate(agentFile(home, name, ".state.json"), JSON.stringify(state));
-}
-function readEnrolled(home) {
-  const parsed = readJson(path4.join(superviseDir(home), "agents.json"));
-  if (!parsed || typeof parsed !== "object") return [];
-  const agents = parsed.agents;
-  if (!Array.isArray(agents)) return [];
-  return [...new Set(agents.filter((name) => typeof name === "string" && AGENT_NAME_PATTERN.test(name)))].sort();
-}
-function writeEnrolled(home, agents) {
-  const unique = [...new Set(agents.filter((name) => AGENT_NAME_PATTERN.test(name)))].sort();
-  writePrivate(path4.join(superviseDir(home), "agents.json"), JSON.stringify({ agents: unique }));
-}
-function enrollAgent(home, name) {
-  if (!AGENT_NAME_PATTERN.test(name)) throw new Error("Agent name is not valid.");
-  const agents = new Set(readEnrolled(home));
-  agents.add(name);
-  writeEnrolled(home, [...agents]);
-}
-function unenrollAgent(home, name) {
-  writeEnrolled(home, readEnrolled(home).filter((agent) => agent !== name));
-}
-function removeFile(file) {
-  try {
-    unlinkSync2(file);
-  } catch (err) {
-    if (err.code !== "ENOENT") throw err;
-  }
-}
-
 // packages/cli/src/supervise.ts
 var defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function verifyDistributedScript(scriptPath) {
-  if (path5.basename(scriptPath) !== "replyslip.mjs") return { ok: true };
+  if (path6.basename(scriptPath) !== "replyslip.mjs") return { ok: true };
   const checksumPath = `${scriptPath}.sha256`;
   let text;
   try {
-    text = readFileSync4(checksumPath, "utf8");
+    text = readFileSync5(checksumPath, "utf8");
   } catch {
     return {
       ok: false,
@@ -1249,7 +1408,7 @@ function verifyDistributedScript(scriptPath) {
   if (!/^[0-9a-f]{64}$/.test(expected)) {
     return { ok: false, message: `Refusing to install: ${checksumPath} is not a sha256 checksum line.` };
   }
-  const actual = createHash2("sha256").update(readFileSync4(scriptPath)).digest("hex");
+  const actual = createHash2("sha256").update(readFileSync5(scriptPath)).digest("hex");
   if (actual !== expected) {
     return { ok: false, message: `Refusing to install: ${scriptPath} does not match ${checksumPath}. Download both files again.` };
   }
@@ -1271,15 +1430,24 @@ function supervisedEnv(request, base = {}) {
 }
 function spawnDetachedWatcher(request) {
   const dir = superviseDir(request.home);
-  mkdirSync3(dir, { recursive: true, mode: 448 });
-  const logPath = path5.join(dir, `${request.name}.log`);
-  const fd = openSync3(logPath, "a", 384);
+  mkdirSync4(dir, { recursive: true, mode: 448 });
+  const logPath = path6.join(dir, `${request.name}.log`);
+  const fd = openSync4(logPath, "a", 384);
   try {
     chmodSync3(logPath, 384);
   } catch {
   }
   const args = [request.scriptPath, "watch", "--name", request.name];
-  if (request.force) args.push("--force");
+  if (request.reclaim) {
+    args.push(
+      "--reclaim-pid",
+      String(request.reclaim.pid),
+      "--reclaim-token",
+      request.reclaim.token,
+      "--reclaim-started-at",
+      request.reclaim.startedAt
+    );
+  }
   const child = spawn(request.nodePath, args, {
     detached: true,
     stdio: ["ignore", fd, fd],
@@ -1287,7 +1455,7 @@ function spawnDetachedWatcher(request) {
     env: supervisedEnv(request, process.env)
   });
   child.unref();
-  closeSync3(fd);
+  closeSync4(fd);
   if (!child.pid) throw new Error("Could not start the watcher.");
   return { pid: child.pid };
 }
@@ -1295,7 +1463,8 @@ async function installSupervision(name, io = {}) {
   const checked = checkName(name);
   if (checked) return { ok: false, message: checked };
   const home = io.home;
-  const scriptPath = path5.resolve(io.scriptPath ?? process.argv[1] ?? "");
+  const epochAtInvoke = readSuperviseState(home, name).epoch;
+  const scriptPath = path6.resolve(io.scriptPath ?? process.argv[1] ?? "");
   const nodePath = io.nodePath ?? process.execPath;
   const verified = verifyDistributedScript(scriptPath);
   if (!verified.ok) return verified;
@@ -1322,30 +1491,29 @@ async function installSupervision(name, io = {}) {
       message: `${preflightMessage(plan.platform, applied.message)} Unit files were written, but the timer is not confirmed. The watcher was not started.`
     };
   }
-  clearStopped(home, name);
-  clearHold(home, name);
-  clearProgress(home, name);
-  writeSuperviseState(home, name, emptySuperviseState());
-  enrollAgent(home, name);
-  const lines = [...plan.notes, `Enrolled ${name}. The timer runs this same script: ${scriptPath}`];
-  const started = await ensureWatcher(name, io, scriptPath, nodePath, true);
+  const started = await withAgentOp(home, name, async () => {
+    if (readSuperviseState(home, name).epoch !== epochAtInvoke) {
+      return {
+        ok: false,
+        message: `Stop for ${name} won before install finished. The watcher was not started.`
+      };
+    }
+    clearStopped(home, name);
+    clearHold(home, name);
+    clearProgress(home, name);
+    const epoch = readSuperviseState(home, name).epoch;
+    writeSuperviseState(home, name, { ...emptySuperviseState(), epoch });
+    enrollAgent(home, name);
+    return ensureWatcher(name, io, scriptPath, nodePath, true);
+  });
   if (!started.ok) return started;
-  lines.push(...started.lines);
+  const lines = [...plan.notes, `Enrolled ${name}. The timer runs this same script: ${scriptPath}`, ...started.lines];
   return { ok: true, lines };
 }
 async function stopSupervision(name, io = {}) {
   const checked = checkName(name);
   if (checked) return { ok: false, message: checked };
-  writeStopped(io.home, name);
-  const signal = await signalAgent(name, io);
-  if (!signal.ok && signal.reason !== "not-running") {
-    return {
-      ok: false,
-      message: `Stop is recorded for ${name}, so it will not be restarted. The process was not signalled (${signal.reason}).`
-    };
-  }
-  const detail = signal.ok ? "The watcher was signalled." : "No watcher process was running.";
-  return { ok: true, lines: [`Deliberate stop recorded for ${name}. ${detail}`, "Login, logout, and sleep do not set this stop. supervise --install clears it."] };
+  return withAgentOp(io.home, name, () => stopLocked(name, io));
 }
 async function uninstallSupervision(options, io = {}) {
   const names = options.all ? readEnrolled(io.home) : options.name ? [options.name] : [];
@@ -1356,10 +1524,13 @@ async function uninstallSupervision(options, io = {}) {
   }
   const lines = [];
   for (const name of names) {
-    const stopped = await stopSupervision(name, io);
+    const stopped = await withAgentOp(io.home, name, async () => {
+      const result = await stopLocked(name, io);
+      unenrollAgent(io.home, name);
+      return result;
+    });
     if (!stopped.ok) lines.push(stopped.message);
     else lines.push(...stopped.lines);
-    unenrollAgent(io.home, name);
   }
   if (options.all) writeEnrolled(io.home, []);
   const remaining = readEnrolled(io.home);
@@ -1389,7 +1560,41 @@ function supervisionStatus(io = {}) {
   lines.push(`Tick interval is 120 seconds. Supported timers: macOS LaunchAgent, Linux systemd --user, Windows Task Scheduler.`);
   return lines;
 }
+async function stopLocked(name, io) {
+  const state = readSuperviseState(io.home, name);
+  writeSuperviseState(io.home, name, { ...state, epoch: state.epoch + 1 });
+  writeStopped(io.home, name);
+  const lock = liveLock(io.home, name);
+  const spawnPid = state.lastSpawnPid;
+  let signalled = false;
+  let lockSkipped = false;
+  if (lock) {
+    const result = await reapExact(lock.pid, name, io);
+    if (result === "signalled") signalled = true;
+    if (result === "skipped") lockSkipped = true;
+  }
+  if (spawnPid && spawnPid !== lock?.pid) {
+    const result = await reapExact(spawnPid, name, io);
+    if (result === "signalled") signalled = true;
+  }
+  if (lockSkipped && !signalled) {
+    return {
+      ok: false,
+      message: `Stop is recorded for ${name}, so it will not be restarted. The process was not signalled (not-watcher).`
+    };
+  }
+  const detail = signalled ? "The watcher was signalled." : "No watcher process was running.";
+  return { ok: true, lines: [`Deliberate stop recorded for ${name}. ${detail}`, "Login, logout, and sleep do not set this stop. supervise --install clears it."] };
+}
 async function tickAgent(name, io) {
+  return withAgentOp(io.home, name, () => tickLocked(name, io));
+}
+async function tickLocked(name, io) {
+  if (isStopped(io.home, name)) {
+    await reapOurWatchers(name, io);
+    return "stopped";
+  }
+  const epoch = readSuperviseState(io.home, name).epoch;
   const now = (io.now ?? Date.now)();
   const alive = io.alive ?? pidIsAlive;
   const state = readSuperviseState(io.home, name);
@@ -1406,28 +1611,87 @@ async function tickAgent(name, io) {
   });
   writeSuperviseState(io.home, name, decision.state);
   if (decision.decision.action === "skip") return decision.decision.reason === "hold" ? `held (${decision.decision.hold})` : decision.decision.reason;
+  if (!await stopStillCurrent(io.home, name, epoch)) {
+    await reapOurWatchers(name, io);
+    return "stopped";
+  }
   if (decision.decision.action === "start") {
-    const started2 = await startWatcher(name, io, decision.state, false);
-    return started2.ok ? `started pid ${started2.pid}` : `start failed: ${started2.message}`;
+    const started2 = await startWatcher(name, io, decision.state, null);
+    if (!started2.ok) return `start failed: ${started2.message}`;
+    if (!await stopStillCurrent(io.home, name, epoch)) {
+      await reapExact(started2.pid, name, io);
+      return "stopped";
+    }
+    return `started pid ${started2.pid}`;
   }
   const killed = await killDecision(name, decision.decision, io);
+  if (!await stopStillCurrent(io.home, name, epoch)) {
+    await reapOurWatchers(name, io);
+    return "stopped";
+  }
   if (!killed.ok) {
-    const recovered = await recoverWithoutSignal(name, decision.decision, decision.state, killed.reason, io);
+    const recovered = await recoverWithoutSignal(name, decision.decision, decision.state, killed.reason, io, epoch);
     if (recovered) return recovered;
     return `left in place (${killed.reason})`;
   }
-  const started = await startWatcher(name, io, { ...decision.state, lastSpawnPid: null }, false);
-  return started.ok ? `replaced with pid ${started.pid}` : `killed, then start failed: ${started.message}`;
+  const started = await startWatcher(name, io, { ...decision.state, lastSpawnPid: null }, null);
+  if (!started.ok) return `killed, then start failed: ${started.message}`;
+  if (!await stopStillCurrent(io.home, name, epoch)) {
+    await reapExact(started.pid, name, io);
+    return "stopped";
+  }
+  return `replaced with pid ${started.pid}`;
+}
+async function stopStillCurrent(home, name, epoch) {
+  return !isStopped(home, name) && readSuperviseState(home, name).epoch === epoch;
+}
+async function reapOurWatchers(name, io) {
+  const state = readSuperviseState(io.home, name);
+  const pids = /* @__PURE__ */ new Set();
+  if (state.lastSpawnPid) pids.add(state.lastSpawnPid);
+  const lock = liveLock(io.home, name);
+  if (lock) pids.add(lock.pid);
+  if (pids.size === 0) return "none";
+  let signalled = false;
+  let skipped = false;
+  for (const pid of pids) {
+    const result = await reapExact(pid, name, io);
+    if (result === "signalled") signalled = true;
+    if (result === "skipped") skipped = true;
+  }
+  if (signalled) return "signalled";
+  if (skipped) return "skipped";
+  return "none";
+}
+async function reapExact(pid, name, io) {
+  const alive = io.alive ?? pidIsAlive;
+  if (!alive(pid)) return "not-running";
+  const identify = io.identify ?? ((target) => identifyProcess(target, io.platform ?? process.platform));
+  const identity = await identify(pid);
+  if (!identity?.cmdline || !watchCommandForAgent(identity.cmdline, name)) return "skipped";
+  const platform = io.platform ?? process.platform;
+  const kill = io.kill ?? ((target, signal) => defaultKill(target, signal, platform));
+  kill(pid, platform === "win32" ? "SIGKILL" : "SIGTERM");
+  return "signalled";
 }
 var FOREIGN_PID = /* @__PURE__ */ new Set(["pid-reused", "not-watcher"]);
-async function recoverWithoutSignal(name, decision, state, reason, io) {
+async function recoverWithoutSignal(name, decision, state, reason, io, epoch) {
   const spawnWasNotOurs = decision.action === "kill-spawn" && (FOREIGN_PID.has(reason) || reason === "unverified-process");
   const lockWasNotOurs = decision.action === "kill-lock" && FOREIGN_PID.has(reason);
   if (!spawnWasNotOurs && !lockWasNotOurs) return null;
+  if (!await stopStillCurrent(io.home, name, epoch)) {
+    await reapOurWatchers(name, io);
+    return "stopped";
+  }
   const cleared = { ...state, lastSpawnPid: null, lastSpawnAt: null };
   writeSuperviseState(io.home, name, cleared);
-  const started = await startWatcher(name, io, cleared, lockWasNotOurs);
+  const reclaim = lockWasNotOurs ? { pid: decision.pid, token: decision.token, startedAt: decision.startedAt } : null;
+  const started = await startWatcher(name, io, cleared, reclaim);
   if (!started.ok) return `start failed: ${started.message}`;
+  if (!await stopStillCurrent(io.home, name, epoch)) {
+    await reapExact(started.pid, name, io);
+    return "stopped";
+  }
   return `started pid ${started.pid} without signalling ${decision.pid} (${reason})`;
 }
 async function ensureWatcher(name, io, scriptPath, nodePath, replace) {
@@ -1448,17 +1712,22 @@ async function ensureWatcher(name, io, scriptPath, nodePath, replace) {
   } else if (lock) {
     return { ok: true, lines: [`Watcher already running for ${name} (pid ${lock.pid}).`] };
   }
-  const started = await startWatcher(name, bound, readSuperviseState(io.home, name), false);
+  const started = await startWatcher(name, bound, readSuperviseState(io.home, name), null);
   if (!started.ok) return { ok: false, message: started.message };
   return { ok: true, lines: [`Watcher started for ${name} (pid ${started.pid}), detached from this terminal.`] };
 }
-async function startWatcher(name, io, state, force) {
+async function startWatcher(name, io, state, reclaim) {
+  if (isStopped(io.home, name)) return { ok: false, message: "stopped" };
   if (!agentKeyFileExists(name, io.home)) {
     writeHold(io.home, name, "config");
     return { ok: false, message: `No key file for ${name}. Not started.` };
   }
-  const scriptPath = path5.resolve(io.scriptPath ?? process.argv[1] ?? "");
+  const scriptPath = path6.resolve(io.scriptPath ?? process.argv[1] ?? "");
   const nodePath = io.nodePath ?? process.execPath;
+  await io.beforeSpawn?.();
+  if (isStopped(io.home, name) || readSuperviseState(io.home, name).epoch !== state.epoch) {
+    return { ok: false, message: "stopped" };
+  }
   const request = {
     nodePath,
     scriptPath,
@@ -1466,7 +1735,7 @@ async function startWatcher(name, io, state, force) {
     home: io.home ?? "",
     pathEnv: io.env?.PATH ?? process.env.PATH ?? "",
     ...io.env?.REPLYSLIP_ORCA_BIN ? { orcaBin: io.env.REPLYSLIP_ORCA_BIN } : {},
-    ...force ? { force: true } : {}
+    ...reclaim ? { reclaim } : {}
   };
   try {
     const spawnWatcher = io.spawnWatcher ?? spawnDetachedWatcher;
@@ -1504,11 +1773,6 @@ async function killDecision(name, decision, io) {
     return killSpawnAllowed({ identity: again, spawnedAt: decision.spawnedAt });
   });
 }
-async function signalAgent(name, io) {
-  const lock = liveLock(io.home, name);
-  if (!lock?.token) return { ok: false, reason: "not-running" };
-  return killDecision(name, { action: "kill-lock", reason: "wedge", pid: lock.pid, token: lock.token, startedAt: lock.startedAt }, io);
-}
 async function signalPid(pid, io, mode, recheck) {
   const platform = io.platform ?? process.platform;
   const kill = io.kill ?? ((target, signal) => defaultKill(target, signal, platform));
@@ -1544,7 +1808,7 @@ function liveLock(home, name) {
   return listLiveWatcherLocks(home).find((lock) => lock.agentName === name) ?? null;
 }
 async function removeTimer(io) {
-  const scriptPath = path5.resolve(io.scriptPath ?? process.argv[1] ?? "");
+  const scriptPath = path6.resolve(io.scriptPath ?? process.argv[1] ?? "");
   const nodePath = io.nodePath ?? process.execPath;
   const plan = buildInstallPlan(planInput(io, scriptPath, nodePath));
   if ("error" in plan) return { ok: true, lines: [plan.error] };
@@ -1552,7 +1816,7 @@ async function removeTimer(io) {
   const applied = await runPlan(plan.uninstallCommands, run);
   for (const file of plan.files) {
     try {
-      unlinkSync3(file.path);
+      unlinkSync4(file.path);
     } catch (err) {
       if (err.code !== "ENOENT") {
         return { ok: false, message: `Could not remove ${file.path}.` };
@@ -1578,7 +1842,7 @@ function planInput(io, scriptPath, nodePath) {
 }
 function writePlanFiles(plan) {
   for (const file of plan.files) {
-    mkdirSync3(path5.dirname(file.path), { recursive: true, mode: 448 });
+    mkdirSync4(path6.dirname(file.path), { recursive: true, mode: 448 });
     writeFileSync(file.path, file.contents, { mode: file.mode });
     try {
       chmodSync3(file.path, file.mode);
@@ -1655,8 +1919,8 @@ var defaultRun = (command, args) => new Promise((resolve, reject) => {
 function appendSuperviseLog(home, line) {
   try {
     const dir = superviseDir(home);
-    mkdirSync3(dir, { recursive: true, mode: 448 });
-    const file = path5.join(dir, "supervise.log");
+    mkdirSync4(dir, { recursive: true, mode: 448 });
+    const file = path6.join(dir, "supervise.log");
     appendFileSync(file, `${redactSecrets(line)}
 `, { mode: 384 });
   } catch {
@@ -2373,7 +2637,8 @@ async function watch(options) {
           const name = typeof who.agent_name === "string" && who.agent_name ? who.agent_name : options.agent.name;
           const acquired = acquireAgentWatcherLock({
             home: options.lock.home,
-            force: options.lock.force,
+            force: options.lock.reclaim ? false : options.lock.force,
+            reclaim: options.lock.reclaim,
             origin: base,
             workspaceId: workspaceId2,
             agentId,
@@ -2649,6 +2914,11 @@ async function runReplyslip(argv, io = {}) {
     return 1;
   }
   const url = flag(argv, "--url")?.trim() || env.REPLYSLIP_URL?.trim() || credentials.relayUrl || DEFAULT_RELAY_URL;
+  const reclaimArgs = readReclaim(argv);
+  if (reclaimArgs === "invalid") {
+    stderr("Reclaim needs --reclaim-pid, --reclaim-token, and --reclaim-started-at for the exact lock being replaced.");
+    return 1;
+  }
   const progress = createProgressRecorder(io.home, name);
   const unhang = ignoreHangup(env);
   let result;
@@ -2660,7 +2930,7 @@ async function runReplyslip(argv, io = {}) {
       once: argv.includes("--once"),
       fetchImpl: io.fetchImpl,
       log: supervisedLog(io.home, name, env, stderr),
-      lock: { home: io.home, force: argv.includes("--force") },
+      lock: { home: io.home, force: argv.includes("--force"), reclaim: reclaimArgs ?? void 0 },
       agent: { name },
       progress
     });
@@ -2718,6 +2988,15 @@ async function watchLegacy(argv, env, io, stdout, stderr, intervalMs, keyFile, l
   }
   return 0;
 }
+function readReclaim(argv) {
+  const pidText = flag(argv, "--reclaim-pid");
+  const token = flag(argv, "--reclaim-token");
+  const startedAt = flag(argv, "--reclaim-started-at");
+  if (pidText === void 0 && token === void 0 && startedAt === void 0) return void 0;
+  const pid = Number(pidText);
+  if (!Number.isInteger(pid) || pid <= 0 || !token || !/^[0-9a-f]{16}$/.test(token) || !startedAt || /[\r\n\0]/.test(startedAt)) return "invalid";
+  return { pid, token, startedAt };
+}
 function superviseIo(io) {
   return {
     home: io.home ?? homedir3(),
@@ -2732,6 +3011,7 @@ function superviseIo(io) {
     alive: io.supervise?.alive,
     kill: io.supervise?.kill,
     sleep: io.supervise?.sleep,
+    beforeSpawn: io.supervise?.beforeSpawn,
     now: io.supervise?.now,
     label: io.supervise?.label,
     taskName: io.supervise?.taskName,

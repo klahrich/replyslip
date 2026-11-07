@@ -7,8 +7,9 @@ import path from 'node:path';
 import { AGENT_NAME_PATTERN } from '../../../lib/constants.ts';
 import { agentKeyPath } from './register.ts';
 import { redactSecrets } from './redact.ts';
-import { identifyProcess, killLockAllowed, killSpawnAllowed, type ProcessIdentity } from './process-identity.ts';
+import { identifyProcess, killLockAllowed, killSpawnAllowed, watchCommandForAgent, type ProcessIdentity } from './process-identity.ts';
 import { decideSupervision, type SuperviseDecision } from './supervise-decide.ts';
+import { withAgentOp } from './supervise-lock.ts';
 import { buildInstallPlan, type InstallPlan, type InstallPlanInput, type PlannedCommand } from './supervise-os.ts';
 import { listLiveWatcherLocks, pidIsAlive, type WatcherLockInfo } from './watcher-lock.ts';
 import {
@@ -41,11 +42,8 @@ export type SpawnRequest = {
   home: string;
   pathEnv: string;
   orcaBin?: string;
-  /**
-   * Take over a lock whose pid is alive but is not this watcher (the pid was reused).
-   * Never set for a process we could not identify.
-   */
-  force?: boolean;
+  /** Exact lock identity proved foreign. The child replaces that lock only if it is still the same at rename. */
+  reclaim?: { pid: number; token: string; startedAt: string };
 };
 
 export type SuperviseIo = {
@@ -60,6 +58,8 @@ export type SuperviseIo = {
   alive?: (pid: number) => boolean;
   kill?: (pid: number, signal: 'SIGTERM' | 'SIGKILL') => void;
   sleep?: (ms: number) => Promise<void>;
+  /** Test hook. Runs inside the agent operation lock, immediately before the child is spawned. */
+  beforeSpawn?: () => Promise<void> | void;
   scriptPath?: string;
   nodePath?: string;
   log?: (line: string) => void;
@@ -121,7 +121,16 @@ export function spawnDetachedWatcher(request: SpawnRequest): { pid: number } {
     // Windows ignores the Unix mode.
   }
   const args = [request.scriptPath, 'watch', '--name', request.name];
-  if (request.force) args.push('--force');
+  if (request.reclaim) {
+    args.push(
+      '--reclaim-pid',
+      String(request.reclaim.pid),
+      '--reclaim-token',
+      request.reclaim.token,
+      '--reclaim-started-at',
+      request.reclaim.startedAt,
+    );
+  }
   const child = spawn(request.nodePath, args, {
     detached: true,
     stdio: ['ignore', fd, fd],
@@ -138,6 +147,7 @@ export async function installSupervision(name: string, io: SuperviseIo = {}): Pr
   const checked = checkName(name);
   if (checked) return { ok: false, message: checked };
   const home = io.home;
+  const epochAtInvoke = readSuperviseState(home, name).epoch;
   const scriptPath = path.resolve(io.scriptPath ?? process.argv[1] ?? '');
   const nodePath = io.nodePath ?? process.execPath;
   const verified = verifyDistributedScript(scriptPath);
@@ -165,31 +175,30 @@ export async function installSupervision(name: string, io: SuperviseIo = {}): Pr
       message: `${preflightMessage(plan.platform, applied.message)} Unit files were written, but the timer is not confirmed. The watcher was not started.`,
     };
   }
-  clearStopped(home, name);
-  clearHold(home, name);
-  clearProgress(home, name);
-  writeSuperviseState(home, name, emptySuperviseState());
-  enrollAgent(home, name);
-  const lines = [...plan.notes, `Enrolled ${name}. The timer runs this same script: ${scriptPath}`];
-  const started = await ensureWatcher(name, io, scriptPath, nodePath, true);
+  const started = await withAgentOp(home, name, async () => {
+    if (readSuperviseState(home, name).epoch !== epochAtInvoke) {
+      return {
+        ok: false as const,
+        message: `Stop for ${name} won before install finished. The watcher was not started.`,
+      };
+    }
+    clearStopped(home, name);
+    clearHold(home, name);
+    clearProgress(home, name);
+    const epoch = readSuperviseState(home, name).epoch;
+    writeSuperviseState(home, name, { ...emptySuperviseState(), epoch });
+    enrollAgent(home, name);
+    return ensureWatcher(name, io, scriptPath, nodePath, true);
+  });
   if (!started.ok) return started;
-  lines.push(...started.lines);
+  const lines = [...plan.notes, `Enrolled ${name}. The timer runs this same script: ${scriptPath}`, ...started.lines];
   return { ok: true, lines };
 }
 
 export async function stopSupervision(name: string, io: SuperviseIo = {}): Promise<SuperviseResult> {
   const checked = checkName(name);
   if (checked) return { ok: false, message: checked };
-  writeStopped(io.home, name);
-  const signal = await signalAgent(name, io);
-  if (!signal.ok && signal.reason !== 'not-running') {
-    return {
-      ok: false,
-      message: `Stop is recorded for ${name}, so it will not be restarted. The process was not signalled (${signal.reason}).`,
-    };
-  }
-  const detail = signal.ok ? 'The watcher was signalled.' : 'No watcher process was running.';
-  return { ok: true, lines: [`Deliberate stop recorded for ${name}. ${detail}`, 'Login, logout, and sleep do not set this stop. supervise --install clears it.'] };
+  return withAgentOp(io.home, name, () => stopLocked(name, io));
 }
 
 export async function uninstallSupervision(options: { name?: string; all?: boolean }, io: SuperviseIo = {}): Promise<SuperviseResult> {
@@ -201,10 +210,13 @@ export async function uninstallSupervision(options: { name?: string; all?: boole
   }
   const lines: string[] = [];
   for (const name of names) {
-    const stopped = await stopSupervision(name, io);
+    const stopped = await withAgentOp(io.home, name, async () => {
+      const result = await stopLocked(name, io);
+      unenrollAgent(io.home, name);
+      return result;
+    });
     if (!stopped.ok) lines.push(stopped.message);
     else lines.push(...stopped.lines);
-    unenrollAgent(io.home, name);
   }
   if (options.all) writeEnrolled(io.home, []);
   const remaining = readEnrolled(io.home);
@@ -237,7 +249,43 @@ export function supervisionStatus(io: SuperviseIo = {}): string[] {
   return lines;
 }
 
+async function stopLocked(name: string, io: SuperviseIo): Promise<SuperviseResult> {
+  const state = readSuperviseState(io.home, name);
+  writeSuperviseState(io.home, name, { ...state, epoch: state.epoch + 1 });
+  writeStopped(io.home, name);
+  const lock = liveLock(io.home, name);
+  const spawnPid = state.lastSpawnPid;
+  let signalled = false;
+  let lockSkipped = false;
+  if (lock) {
+    const result = await reapExact(lock.pid, name, io);
+    if (result === 'signalled') signalled = true;
+    if (result === 'skipped') lockSkipped = true;
+  }
+  if (spawnPid && spawnPid !== lock?.pid) {
+    const result = await reapExact(spawnPid, name, io);
+    if (result === 'signalled') signalled = true;
+  }
+  if (lockSkipped && !signalled) {
+    return {
+      ok: false,
+      message: `Stop is recorded for ${name}, so it will not be restarted. The process was not signalled (not-watcher).`,
+    };
+  }
+  const detail = signalled ? 'The watcher was signalled.' : 'No watcher process was running.';
+  return { ok: true, lines: [`Deliberate stop recorded for ${name}. ${detail}`, 'Login, logout, and sleep do not set this stop. supervise --install clears it.'] };
+}
+
 async function tickAgent(name: string, io: SuperviseIo): Promise<string> {
+  return withAgentOp(io.home, name, () => tickLocked(name, io));
+}
+
+async function tickLocked(name: string, io: SuperviseIo): Promise<string> {
+  if (isStopped(io.home, name)) {
+    await reapOurWatchers(name, io);
+    return 'stopped';
+  }
+  const epoch = readSuperviseState(io.home, name).epoch;
   const now = (io.now ?? Date.now)();
   const alive = io.alive ?? pidIsAlive;
   const state = readSuperviseState(io.home, name);
@@ -254,26 +302,79 @@ async function tickAgent(name: string, io: SuperviseIo): Promise<string> {
   });
   writeSuperviseState(io.home, name, decision.state);
   if (decision.decision.action === 'skip') return decision.decision.reason === 'hold' ? `held (${decision.decision.hold})` : decision.decision.reason;
+  if (!(await stopStillCurrent(io.home, name, epoch))) {
+    await reapOurWatchers(name, io);
+    return 'stopped';
+  }
   if (decision.decision.action === 'start') {
-    const started = await startWatcher(name, io, decision.state, false);
-    return started.ok ? `started pid ${started.pid}` : `start failed: ${started.message}`;
+    const started = await startWatcher(name, io, decision.state, null);
+    if (!started.ok) return `start failed: ${started.message}`;
+    if (!(await stopStillCurrent(io.home, name, epoch))) {
+      await reapExact(started.pid, name, io);
+      return 'stopped';
+    }
+    return `started pid ${started.pid}`;
   }
   const killed = await killDecision(name, decision.decision, io);
+  if (!(await stopStillCurrent(io.home, name, epoch))) {
+    await reapOurWatchers(name, io);
+    return 'stopped';
+  }
   if (!killed.ok) {
-    const recovered = await recoverWithoutSignal(name, decision.decision, decision.state, killed.reason, io);
+    const recovered = await recoverWithoutSignal(name, decision.decision, decision.state, killed.reason, io, epoch);
     if (recovered) return recovered;
     return `left in place (${killed.reason})`;
   }
-  const started = await startWatcher(name, io, { ...decision.state, lastSpawnPid: null }, false);
-  return started.ok ? `replaced with pid ${started.pid}` : `killed, then start failed: ${started.message}`;
+  const started = await startWatcher(name, io, { ...decision.state, lastSpawnPid: null }, null);
+  if (!started.ok) return `killed, then start failed: ${started.message}`;
+  if (!(await stopStillCurrent(io.home, name, epoch))) {
+    await reapExact(started.pid, name, io);
+    return 'stopped';
+  }
+  return `replaced with pid ${started.pid}`;
+}
+
+async function stopStillCurrent(home: string | undefined, name: string, epoch: number): Promise<boolean> {
+  return !isStopped(home, name) && readSuperviseState(home, name).epoch === epoch;
+}
+
+/** Signal only this agent's watcher pids. Never deletes a lock file and never signals an unrelated pid. */
+async function reapOurWatchers(name: string, io: SuperviseIo): Promise<'signalled' | 'skipped' | 'none'> {
+  const state = readSuperviseState(io.home, name);
+  const pids = new Set<number>();
+  if (state.lastSpawnPid) pids.add(state.lastSpawnPid);
+  const lock = liveLock(io.home, name);
+  if (lock) pids.add(lock.pid);
+  if (pids.size === 0) return 'none';
+  let signalled = false;
+  let skipped = false;
+  for (const pid of pids) {
+    const result = await reapExact(pid, name, io);
+    if (result === 'signalled') signalled = true;
+    if (result === 'skipped') skipped = true;
+  }
+  if (signalled) return 'signalled';
+  if (skipped) return 'skipped';
+  return 'none';
+}
+
+async function reapExact(pid: number, name: string, io: SuperviseIo): Promise<'signalled' | 'skipped' | 'not-running'> {
+  const alive = io.alive ?? pidIsAlive;
+  if (!alive(pid)) return 'not-running';
+  const identify = io.identify ?? ((target: number) => identifyProcess(target, io.platform ?? process.platform));
+  const identity = await identify(pid);
+  if (!identity?.cmdline || !watchCommandForAgent(identity.cmdline, name)) return 'skipped';
+  const platform = io.platform ?? process.platform;
+  const kill = io.kill ?? ((target: number, signal: 'SIGTERM' | 'SIGKILL') => defaultKill(target, signal, platform));
+  kill(pid, platform === 'win32' ? 'SIGKILL' : 'SIGTERM');
+  return 'signalled';
 }
 
 const FOREIGN_PID = new Set(['pid-reused', 'not-watcher']);
 
 /**
- * The pid we remembered is not our watcher. Do not signal it. Drop the stale spawn
- * record and start one watcher. A lock whose pid was reused is reclaimed with --force,
- * which only rewrites the lock file. An unidentified pid is not signalled and is not reclaimed.
+ * The pid we remembered is not our watcher. Do not signal it. A foreign lock is reclaimed
+ * only by passing its exact pid, token, and start time. The child refuses if that lock changed.
  */
 async function recoverWithoutSignal(
   name: string,
@@ -281,14 +382,24 @@ async function recoverWithoutSignal(
   state: AgentSuperviseState,
   reason: string,
   io: SuperviseIo,
+  epoch: number,
 ): Promise<string | null> {
   const spawnWasNotOurs = decision.action === 'kill-spawn' && (FOREIGN_PID.has(reason) || reason === 'unverified-process');
   const lockWasNotOurs = decision.action === 'kill-lock' && FOREIGN_PID.has(reason);
   if (!spawnWasNotOurs && !lockWasNotOurs) return null;
+  if (!(await stopStillCurrent(io.home, name, epoch))) {
+    await reapOurWatchers(name, io);
+    return 'stopped';
+  }
   const cleared: AgentSuperviseState = { ...state, lastSpawnPid: null, lastSpawnAt: null };
   writeSuperviseState(io.home, name, cleared);
-  const started = await startWatcher(name, io, cleared, lockWasNotOurs);
+  const reclaim = lockWasNotOurs ? { pid: decision.pid, token: decision.token, startedAt: decision.startedAt } : null;
+  const started = await startWatcher(name, io, cleared, reclaim);
   if (!started.ok) return `start failed: ${started.message}`;
+  if (!(await stopStillCurrent(io.home, name, epoch))) {
+    await reapExact(started.pid, name, io);
+    return 'stopped';
+  }
   return `started pid ${started.pid} without signalling ${decision.pid} (${reason})`;
 }
 
@@ -316,7 +427,7 @@ async function ensureWatcher(
   } else if (lock) {
     return { ok: true, lines: [`Watcher already running for ${name} (pid ${lock.pid}).`] };
   }
-  const started = await startWatcher(name, bound, readSuperviseState(io.home, name), false);
+  const started = await startWatcher(name, bound, readSuperviseState(io.home, name), null);
   if (!started.ok) return { ok: false, message: started.message };
   return { ok: true, lines: [`Watcher started for ${name} (pid ${started.pid}), detached from this terminal.`] };
 }
@@ -325,14 +436,19 @@ async function startWatcher(
   name: string,
   io: SuperviseIo,
   state: AgentSuperviseState,
-  force: boolean,
+  reclaim: { pid: number; token: string; startedAt: string } | null,
 ): Promise<{ ok: true; pid: number } | { ok: false; message: string }> {
+  if (isStopped(io.home, name)) return { ok: false, message: 'stopped' };
   if (!agentKeyFileExists(name, io.home)) {
     writeHold(io.home, name, 'config');
     return { ok: false, message: `No key file for ${name}. Not started.` };
   }
   const scriptPath = path.resolve(io.scriptPath ?? process.argv[1] ?? '');
   const nodePath = io.nodePath ?? process.execPath;
+  await io.beforeSpawn?.();
+  if (isStopped(io.home, name) || readSuperviseState(io.home, name).epoch !== state.epoch) {
+    return { ok: false, message: 'stopped' };
+  }
   const request: SpawnRequest = {
     nodePath,
     scriptPath,
@@ -340,7 +456,7 @@ async function startWatcher(
     home: io.home ?? '',
     pathEnv: io.env?.PATH ?? process.env.PATH ?? '',
     ...(io.env?.REPLYSLIP_ORCA_BIN ? { orcaBin: io.env.REPLYSLIP_ORCA_BIN } : {}),
-    ...(force ? { force: true } : {}),
+    ...(reclaim ? { reclaim } : {}),
   };
   try {
     const spawnWatcher = io.spawnWatcher ?? spawnDetachedWatcher;
@@ -385,13 +501,6 @@ async function killDecision(
     }
     return killSpawnAllowed({ identity: again, spawnedAt: decision.spawnedAt });
   });
-}
-
-async function signalAgent(name: string, io: SuperviseIo): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const lock = liveLock(io.home, name);
-  if (!lock?.token) return { ok: false, reason: 'not-running' };
-  // The stop file is already written. A failed identity check must not signal some other pid.
-  return killDecision(name, { action: 'kill-lock', reason: 'wedge', pid: lock.pid, token: lock.token, startedAt: lock.startedAt }, io);
 }
 
 async function signalPid(

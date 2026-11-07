@@ -234,6 +234,11 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
     return 1;
   }
   const url = flag(argv, '--url')?.trim() || env.REPLYSLIP_URL?.trim() || credentials.relayUrl || DEFAULT_RELAY_URL;
+  const reclaimArgs = readReclaim(argv);
+  if (reclaimArgs === 'invalid') {
+    stderr('Reclaim needs --reclaim-pid, --reclaim-token, and --reclaim-started-at for the exact lock being replaced.');
+    return 1;
+  }
   const progress = createProgressRecorder(io.home, name);
   const unhang = ignoreHangup(env);
   let result: WatchResult;
@@ -245,7 +250,7 @@ export async function runReplyslip(argv: string[], io: CliIo = {}): Promise<numb
       once: argv.includes('--once'),
       fetchImpl: io.fetchImpl,
       log: supervisedLog(io.home, name, env, stderr),
-      lock: { home: io.home, force: argv.includes('--force') },
+      lock: { home: io.home, force: argv.includes('--force'), reclaim: reclaimArgs ?? undefined },
       agent: { name },
       progress,
     });
@@ -315,6 +320,16 @@ async function watchLegacy(
   return 0;
 }
 
+function readReclaim(argv: string[]): { pid: number; token: string; startedAt: string } | undefined | 'invalid' {
+  const pidText = flag(argv, '--reclaim-pid');
+  const token = flag(argv, '--reclaim-token');
+  const startedAt = flag(argv, '--reclaim-started-at');
+  if (pidText === undefined && token === undefined && startedAt === undefined) return undefined;
+  const pid = Number(pidText);
+  if (!Number.isInteger(pid) || pid <= 0 || !token || !/^[0-9a-f]{16}$/.test(token) || !startedAt || /[\r\n\0]/.test(startedAt)) return 'invalid';
+  return { pid, token, startedAt };
+}
+
 function superviseIo(io: CliIo): SuperviseIo {
   return {
     home: io.home ?? homedir(),
@@ -329,6 +344,7 @@ function superviseIo(io: CliIo): SuperviseIo {
     alive: io.supervise?.alive,
     kill: io.supervise?.kill,
     sleep: io.supervise?.sleep,
+    beforeSpawn: io.supervise?.beforeSpawn,
     now: io.supervise?.now,
     label: io.supervise?.label,
     taskName: io.supervise?.taskName,

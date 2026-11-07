@@ -23,6 +23,8 @@ export type AgentSuperviseState = {
   missingProgressStreak: number;
   lastSpawnAt: string | null;
   lastSpawnPid: number | null;
+  /** Bumped when a deliberate stop or uninstall wins. In-flight starts abort when it changes. */
+  epoch: number;
 };
 
 export function emptySuperviseState(): AgentSuperviseState {
@@ -33,6 +35,7 @@ export function emptySuperviseState(): AgentSuperviseState {
     missingProgressStreak: 0,
     lastSpawnAt: null,
     lastSpawnPid: null,
+    epoch: 0,
   };
 }
 
@@ -150,6 +153,7 @@ export function readSuperviseState(home: string | undefined, name: string): Agen
     missingProgressStreak: typeof row.missingProgressStreak === 'number' && row.missingProgressStreak > 0 ? Math.floor(row.missingProgressStreak) : 0,
     lastSpawnAt: typeof row.lastSpawnAt === 'string' ? row.lastSpawnAt : null,
     lastSpawnPid: typeof row.lastSpawnPid === 'number' && Number.isInteger(row.lastSpawnPid) && row.lastSpawnPid > 0 ? row.lastSpawnPid : null,
+    epoch: typeof row.epoch === 'number' && Number.isInteger(row.epoch) && row.epoch > 0 ? row.epoch : 0,
   };
 }
 

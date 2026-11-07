@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
@@ -11,13 +11,21 @@ import { killLockAllowed, killSpawnAllowed, linuxStartMs, parseWindowsIdentity }
 import { redactSecrets } from '../packages/cli/src/redact';
 import { decideSupervision } from '../packages/cli/src/supervise-decide';
 import { buildInstallPlan, windowsCmd } from '../packages/cli/src/supervise-os';
-import { appendSuperviseLog, installSupervision, runSupervisionTick, stopSupervision, supervisedEnv, verifyDistributedScript } from '../packages/cli/src/supervise';
+import { appendSuperviseLog, installSupervision, runSupervisionTick, stopSupervision, supervisedEnv, uninstallSupervision, verifyDistributedScript } from '../packages/cli/src/supervise';
 import { watch } from '../packages/cli/src/watch';
-import { machineBootId, watcherLockPath } from '../packages/cli/src/watcher-lock';
-import { emptySuperviseState, enrollAgent, isStopped, readHold, readProgress, readSuperviseState, writeProgress, writeSuperviseState } from '../packages/cli/src/watcher-progress';
+import { acquireAgentWatcherLock, agentWatcherScopeId, machineBootId, watcherLockPath } from '../packages/cli/src/watcher-lock';
+import { emptySuperviseState, enrollAgent, isStopped, readEnrolled, readHold, readProgress, readSuperviseState, writeProgress, writeSuperviseState } from '../packages/cli/src/watcher-progress';
 
 const KEY = 'rsk_CANARY_agent_key_do_not_print';
 const ORIGIN = 'https://relay.example';
+
+function defer() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 function capture() {
   const out: string[] = [];
@@ -392,6 +400,218 @@ describe('supervision install and tick', () => {
     expect(noDuplicate.lines.join('\n')).toMatch(/starting/);
     expect(spawned).toEqual([9001, 9002]);
     expect(kills).toEqual([9001]);
+  });
+
+  it('stop during recovery reaps the replacement and does not leave it running', async () => {
+    const home = await tempHome();
+    writeKey(home, 'Bot');
+    enrollAgent(home, 'Bot');
+    const origin = Date.parse('2026-11-07T12:00:00.000Z');
+    writeSuperviseState(home, 'Bot', {
+      ...emptySuperviseState(),
+      lastSpawnPid: 4242,
+      lastSpawnAt: new Date(origin - 130_000).toISOString(),
+      lastCheckAt: new Date(origin - 130_000).toISOString(),
+    });
+    const kills: number[] = [];
+    const dead = new Set<number>();
+    const spawned: number[] = [];
+    const identifyEntered = defer();
+    const identifyUnblocked = defer();
+    const identityFor = async (pid: number, gate: boolean) => {
+      if (gate && pid === 4242) {
+        identifyEntered.resolve();
+        await identifyUnblocked.promise;
+      }
+      if (pid === 4242) return { cmdline: 'node /tmp/replyslip.mjs watch --name Other', startedAtMs: origin };
+      return { cmdline: 'node /tmp/replyslip.mjs watch --name Bot', startedAtMs: origin - 500 };
+    };
+    const sup = {
+      home,
+      platform: 'linux' as const,
+      scriptPath: '/tmp/replyslip-tick.js',
+      nodePath: '/usr/bin/node',
+      env: { PATH: '/usr/bin' },
+      now: () => origin,
+      alive: (pid: number) => (pid === 4242 || spawned.includes(pid)) && !dead.has(pid),
+      identify: (pid: number) => identityFor(pid, false),
+      kill: (pid: number) => {
+        kills.push(pid);
+        dead.add(pid);
+      },
+      spawnWatcher: () => {
+        const pid = 9001;
+        spawned.push(pid);
+        return { pid };
+      },
+    };
+    const tick = runSupervisionTick({ ...sup, identify: (pid: number) => identityFor(pid, true) });
+    await identifyEntered.promise;
+    const stop = stopSupervision('Bot', sup);
+    identifyUnblocked.resolve();
+    const tickResult = await tick;
+    const stopResult = await stop;
+    expect(tickResult.ok).toBe(true);
+    expect(stopResult.ok).toBe(true);
+    expect(kills).toEqual([9001]);
+    expect(kills).not.toContain(4242);
+    const again = await runSupervisionTick(sup);
+    expect(again.ok).toBe(true);
+    if (again.ok) expect(again.lines.join('\n')).toMatch(/stopped/);
+    expect(spawned).toEqual([9001]);
+    expect(isStopped(home, 'Bot')).toBe(true);
+  });
+
+  it('install loses to an in-flight uninstall, and a foreign lock is not replaced or deleted', async () => {
+    const home = await tempHome();
+    const script = writeScript(home);
+    writeKey(home, 'Bot');
+    const preflightEntered = defer();
+    const preflightUnblocked = defer();
+    let sawPreflight = false;
+    const spawned: string[] = [];
+    const installing = installSupervision('Bot', {
+      home,
+      platform: 'linux',
+      scriptPath: script,
+      nodePath: '/usr/bin/node',
+      env: { PATH: '/usr/bin' },
+      run: async () => {
+        if (!sawPreflight) {
+          sawPreflight = true;
+          preflightEntered.resolve();
+          await preflightUnblocked.promise;
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      spawnWatcher: () => {
+        spawned.push('spawned');
+        return { pid: 50 };
+      },
+    });
+    await preflightEntered.promise;
+    const removed = await uninstallSupervision({ name: 'Bot' }, { home, platform: 'linux', env: { PATH: '/usr/bin' }, run: async () => ({ code: 0, stdout: '', stderr: '' }) });
+    preflightUnblocked.resolve();
+    const installed = await installing;
+    expect(removed.ok).toBe(true);
+    expect(installed.ok).toBe(false);
+    if (!installed.ok) expect(installed.message).toMatch(/Stop for Bot won/);
+    expect(spawned).toEqual([]);
+    expect(isStopped(home, 'Bot')).toBe(true);
+
+    const child = liveChild();
+    const kills: number[] = [];
+    try {
+      writeKey(home, 'Held');
+      const startedAt = new Date().toISOString();
+      const token = 'abcabcabcabcabca';
+      const lockFile = writeAgentLock(home, 'Held', child.pid ?? 0, token, startedAt);
+      const blocked = await installSupervision('Held', {
+        home,
+        platform: 'linux',
+        scriptPath: script,
+        nodePath: '/usr/bin/node',
+        env: { PATH: '/usr/bin' },
+        run: async () => ({ code: 0, stdout: '', stderr: '' }),
+        identify: async () => ({ cmdline: `${process.execPath} -e setInterval`, startedAtMs: Date.now() - 1000 }),
+        alive: () => true,
+        kill: (pid: number) => {
+          kills.push(pid);
+        },
+        spawnWatcher: () => {
+          throw new Error('must not spawn');
+        },
+      });
+      expect(blocked.ok).toBe(false);
+      if (!blocked.ok) expect(blocked.message).toMatch(/not replaced/);
+      expect(kills).toEqual([]);
+      expect(readFileSync(lockFile, 'utf8')).toContain(token);
+      expect(child.exitCode).toBeNull();
+    } finally {
+      child.kill();
+      await once(child, 'exit');
+    }
+  });
+
+  it('uninstall reaps the watcher an in-flight install just spawned', async () => {
+    const home = await tempHome();
+    const script = writeScript(home);
+    writeKey(home, 'Bot');
+    const entered = defer();
+    const unblock = defer();
+    const kills: number[] = [];
+    const dead = new Set<number>();
+    const shared = {
+      home,
+      platform: 'linux' as const,
+      scriptPath: script,
+      nodePath: '/usr/bin/node',
+      env: { PATH: '/usr/bin' },
+      run: async () => ({ code: 0, stdout: '', stderr: '' }),
+      alive: (pid: number) => pid === 777 && !dead.has(pid),
+      identify: async () => ({ cmdline: 'node /tmp/replyslip.mjs watch --name Bot', startedAtMs: Date.now() - 100 }),
+      kill: (pid: number) => {
+        kills.push(pid);
+        dead.add(pid);
+      },
+      spawnWatcher: () => ({ pid: 777 }),
+      beforeSpawn: async () => {
+        entered.resolve();
+        await unblock.promise;
+      },
+    };
+    const installing = installSupervision('Bot', shared);
+    await entered.promise;
+    const removing = uninstallSupervision({ name: 'Bot' }, shared);
+    unblock.resolve();
+    const installed = await installing;
+    const removed = await removing;
+    expect(installed.ok).toBe(true);
+    expect(removed.ok).toBe(true);
+    expect(kills).toEqual([777]);
+    expect(isStopped(home, 'Bot')).toBe(true);
+    expect(readEnrolled(home)).not.toContain('Bot');
+    const again = await runSupervisionTick(shared);
+    expect(again.ok).toBe(true);
+    if (again.ok) expect(again.lines.join('\n')).toMatch(/No enrolled/);
+  });
+
+  it('reclaim fails closed when the lock changes at acquisition', () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'replyslip-reclaim-'));
+    const startedAt = '2026-11-07T12:00:00.000Z';
+    const token = 'aaaaaaaaaaaaaaaa';
+    const file = watcherLockPath(home, agentWatcherScopeId('agent-1'));
+    mkdirSync(path.dirname(file), { recursive: true });
+    const body = (nextPid: number, nextToken: string) =>
+      `${JSON.stringify({
+        pid: nextPid,
+        startedAt,
+        hostname: hostname(),
+        bootId: machineBootId(),
+        origin: ORIGIN,
+        workspaceId: 'ws-1',
+        token: nextToken,
+        agentId: 'agent-1',
+        agentName: 'Bot',
+      })}\n`;
+    writeFileSync(file, body(10, token));
+    const result = acquireAgentWatcherLock({
+      home,
+      origin: ORIGIN,
+      workspaceId: 'ws-1',
+      agentId: 'agent-1',
+      agentName: 'Bot',
+      isAlive: () => true,
+      reclaim: { pid: 10, token, startedAt },
+      onBeforeTakeover: () => {
+        writeFileSync(file, body(11, 'bbbbbbbbbbbbbbbb'));
+      },
+    });
+    expect(result.ok).toBe(false);
+    const kept = readFileSync(file, 'utf8');
+    expect(kept).toContain('"pid":11');
+    expect(kept).toContain('bbbbbbbbbbbbbbbb');
+    expect(kept).not.toContain(`"pid":${process.pid}`);
   });
 
   it('does not signal an unrelated pid when stopping', async () => {

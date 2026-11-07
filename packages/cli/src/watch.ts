@@ -253,7 +253,7 @@ export async function watch(options: {
   runCommand?: CommandRunner;
   log?: (message: string) => void;
   /** When set, the first poll's workspace_id scopes the lock before any nudge. */
-  lock?: { home?: string; force?: boolean };
+  lock?: { home?: string; force?: boolean; reclaim?: { pid: number; token: string; startedAt: string } };
   /**
    * Per-agent mode: `key` is this agent's own key (rsk_). The server returns only this agent's wakes. Before the
    * first leasing poll the watcher identifies itself with `{"lease": false}`, refuses to start beside a legacy
@@ -312,7 +312,8 @@ export async function watch(options: {
           const name = typeof who.agent_name === 'string' && who.agent_name ? who.agent_name : options.agent.name;
           const acquired = acquireAgentWatcherLock({
             home: options.lock.home,
-            force: options.lock.force,
+            force: options.lock.reclaim ? false : options.lock.force,
+            reclaim: options.lock.reclaim,
             origin: base,
             workspaceId,
             agentId,
